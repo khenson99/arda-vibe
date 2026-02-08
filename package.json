@@ -11,6 +11,7 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "sync:github": "bash ./scripts/sync-github.sh",
     "db:generate": "turbo run db:generate --filter=@arda/db",
     "db:migrate": "turbo run db:migrate --filter=@arda/db",
     "db:studio": "turbo run db:studio --filter=@arda/db",
