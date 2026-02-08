@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db, schema } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
-import { AppError } from '../middleware/error-handler.js';
 
 export const preferencesRouter = Router();
 
