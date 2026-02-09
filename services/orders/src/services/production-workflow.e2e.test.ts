@@ -48,13 +48,17 @@ const schemaMock = vi.hoisted(() => {
     t.updatedAt = { column: 'updated_at' };
     t.completedAt = { column: 'completed_at' };
     t.startedAt = { column: 'started_at' };
+    t.actualStartDate = { column: 'actual_start_date' };
+    t.actualEndDate = { column: 'actual_end_date' };
     t.quantityToProduce = { column: 'quantity_to_produce' };
     t.quantityProduced = { column: 'quantity_produced' };
+    t.quantityRejected = { column: 'quantity_rejected' };
     t.quantityScrapped = { column: 'quantity_scrapped' };
     t.isExpedited = { column: 'is_expedited' };
     t.isRework = { column: 'is_rework' };
     t.woNumber = { column: 'wo_number' };
     t.cardId = { column: 'card_id' };
+    t.kanbanCardId = { column: 'kanban_card_id' };
     t.loopId = { column: 'loop_id' };
     t.partId = { column: 'part_id' };
     t.parentWorkOrderId = { column: 'parent_work_order_id' };
@@ -66,6 +70,7 @@ const schemaMock = vi.hoisted(() => {
     t.enteredQueueAt = { column: 'entered_queue_at' };
     t.exitedQueueAt = { column: 'exited_queue_at' };
     t.operationType = { column: 'operation_type' };
+    t.operatorUserId = { column: 'operator_user_id' };
     t.notes = { column: 'notes' };
     t.quantity = { column: 'quantity' };
     t.scrapQuantity = { column: 'scrap_quantity' };
