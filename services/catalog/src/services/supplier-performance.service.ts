@@ -68,6 +68,11 @@ export function calculateLeadTimeDays(
   // Normalize to midnight UTC to get calendar day difference
   const sentDay = Date.UTC(sentAt.getUTCFullYear(), sentAt.getUTCMonth(), sentAt.getUTCDate());
   const deliveredDay = Date.UTC(deliveredAt.getUTCFullYear(), deliveredAt.getUTCMonth(), deliveredAt.getUTCDate());
+  const deliveredDay = Date.UTC(
+    deliveredAt.getUTCFullYear(),
+    deliveredAt.getUTCMonth(),
+    deliveredAt.getUTCDate(),
+  );
 
   return Math.round((deliveredDay - sentDay) / msPerDay);
 }
@@ -84,6 +89,16 @@ export function isOnTimeDelivery(
 
   const actualDay = Date.UTC(actualDeliveryDate.getUTCFullYear(), actualDeliveryDate.getUTCMonth(), actualDeliveryDate.getUTCDate());
   const expectedDay = Date.UTC(expectedDeliveryDate.getUTCFullYear(), expectedDeliveryDate.getUTCMonth(), expectedDeliveryDate.getUTCDate());
+  const actualDay = Date.UTC(
+    actualDeliveryDate.getUTCFullYear(),
+    actualDeliveryDate.getUTCMonth(),
+    actualDeliveryDate.getUTCDate(),
+  );
+  const expectedDay = Date.UTC(
+    expectedDeliveryDate.getUTCFullYear(),
+    expectedDeliveryDate.getUTCMonth(),
+    expectedDeliveryDate.getUTCDate(),
+  );
 
   return actualDay <= expectedDay;
 }
@@ -101,6 +116,16 @@ export function calculateLeadTimeVariance(
   const msPerDay = 1000 * 60 * 60 * 24;
   const actualDay = Date.UTC(actualDeliveryDate.getUTCFullYear(), actualDeliveryDate.getUTCMonth(), actualDeliveryDate.getUTCDate());
   const expectedDay = Date.UTC(expectedDeliveryDate.getUTCFullYear(), expectedDeliveryDate.getUTCMonth(), expectedDeliveryDate.getUTCDate());
+  const actualDay = Date.UTC(
+    actualDeliveryDate.getUTCFullYear(),
+    actualDeliveryDate.getUTCMonth(),
+    actualDeliveryDate.getUTCDate(),
+  );
+  const expectedDay = Date.UTC(
+    expectedDeliveryDate.getUTCFullYear(),
+    expectedDeliveryDate.getUTCMonth(),
+    expectedDeliveryDate.getUTCDate(),
+  );
 
   return Math.round((actualDay - expectedDay) / msPerDay);
 }

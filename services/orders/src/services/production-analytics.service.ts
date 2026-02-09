@@ -173,8 +173,8 @@ export async function getProductionMetrics(
     .select({
       avgCycleTimeHours: sql<number | null>`
         avg(
-          extract(epoch from (${workOrders.completedAt} - ${workOrders.startedAt})) / 3600
-        ) filter (where ${workOrders.completedAt} is not null and ${workOrders.startedAt} is not null)
+          extract(epoch from (${workOrders.actualEndDate} - ${workOrders.actualStartDate})) / 3600
+        ) filter (where ${workOrders.actualEndDate} is not null and ${workOrders.actualStartDate} is not null)
       `,
     })
     .from(workOrders)
@@ -184,8 +184,8 @@ export async function getProductionMetrics(
   // Average WOs completed per day
   const [dateRange] = await db
     .select({
-      minDate: sql<string | null>`min(${workOrders.completedAt})`,
-      maxDate: sql<string | null>`max(${workOrders.completedAt})`,
+      minDate: sql<string | null>`min(${workOrders.actualEndDate})`,
+      maxDate: sql<string | null>`max(${workOrders.actualEndDate})`,
     })
     .from(workOrders)
     .where(and(...completedConditions))
@@ -210,7 +210,7 @@ export async function getProductionMetrics(
       avgWaitHours: sql<number | null>`
         avg(
           extract(epoch from (
-            coalesce(${productionQueueEntries.exitedQueueAt}, now()) - ${productionQueueEntries.enteredQueueAt}
+            coalesce(${productionQueueEntries.completedAt}, now()) - ${productionQueueEntries.enteredQueueAt}
           )) / 3600
         )
       `,
@@ -311,12 +311,12 @@ export async function getProductionMetrics(
   // ── Queue Health (single aggregate on queue_entries) ──
   const [queueHealth] = await db
     .select({
-      currentBacklog: sql<number>`count(*) filter (where ${productionQueueEntries.exitedQueueAt} is null)::int`,
-      avgPriority: sql<number>`coalesce(avg(${productionQueueEntries.priorityScore}) filter (where ${productionQueueEntries.exitedQueueAt} is null), 0)`,
+      currentBacklog: sql<number>`count(*) filter (where ${productionQueueEntries.completedAt} is null)::int`,
+      avgPriority: sql<number>`coalesce(avg(${productionQueueEntries.priorityScore}) filter (where ${productionQueueEntries.completedAt} is null), 0)`,
       oldestAgeHours: sql<number | null>`
         max(
           extract(epoch from (now() - ${productionQueueEntries.enteredQueueAt})) / 3600
-        ) filter (where ${productionQueueEntries.exitedQueueAt} is null)
+        ) filter (where ${productionQueueEntries.completedAt} is null)
       `,
       expeditedInQueue: sql<number>`0::int`, // would require join to workOrders
     })

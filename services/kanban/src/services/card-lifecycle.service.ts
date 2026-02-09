@@ -432,13 +432,15 @@ export async function triggerCardByScan(input: {
   scannedByUserId?: string;
   tenantId?: string;
   location?: { lat?: number; lng?: number };
+  idempotencyKey?: string;
+  scannedAt?: string;
 }): Promise<{
   card: typeof kanbanCards.$inferSelect;
   loopType: string;
   partId: string;
   message: string;
 }> {
-  const { cardId, scannedByUserId, tenantId, location } = input;
+  const { cardId, scannedByUserId, tenantId, location, idempotencyKey, scannedAt } = input;
 
   // Fetch the card (no tenant context — this is a public scan)
   const card = await db.query.kanbanCards.findFirst({
@@ -460,8 +462,9 @@ export async function triggerCardByScan(input: {
     throw new AppError(400, 'This card has been deactivated.', 'CARD_INACTIVE');
   }
 
-  // Card must be in 'created' stage to be triggered
-  if (card.currentStage !== 'created') {
+  // Fast path for normal scans: card must still be in created stage.
+  // Idempotent replays with the same key are handled through transitionCard below.
+  if (card.currentStage !== 'created' && !idempotencyKey) {
     throw new AppError(
       400,
       `This card is already in the "${card.currentStage}" stage. It can only be scanned when in the "created" stage.`,
@@ -469,19 +472,38 @@ export async function triggerCardByScan(input: {
     );
   }
 
-  // Transition to triggered
-  const result = await transitionCard({
-    cardId,
-    tenantId: card.tenantId,
-    toStage: 'triggered',
-    userId: scannedByUserId,
-    method: 'qr_scan',
-    notes: 'Triggered via QR code scan',
-    metadata: {
-      scanLocation: location,
-      scanTimestamp: new Date().toISOString(),
-    },
-  });
+  let result: Awaited<ReturnType<typeof transitionCard>>;
+
+  try {
+    // Transition to triggered.
+    // transitionCard handles idempotent replays before transition validation.
+    result = await transitionCard({
+      cardId,
+      tenantId: card.tenantId,
+      toStage: 'triggered',
+      userId: scannedByUserId,
+      method: 'qr_scan',
+      notes: 'Triggered via QR code scan',
+      idempotencyKey,
+      metadata: {
+        scanLocation: location,
+        scanTimestamp: scannedAt ?? new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    if (
+      err instanceof AppError
+      && err.code === 'INVALID_TRANSITION'
+      && card.currentStage !== 'created'
+    ) {
+      throw new AppError(
+        400,
+        `This card is already in the "${card.currentStage}" stage. It can only be scanned when in the "created" stage.`,
+        'CARD_ALREADY_TRIGGERED'
+      );
+    }
+    throw err;
+  }
 
   // Determine which queue to add this to based on loop type
   const queueType = card.loop.loopType === 'procurement'

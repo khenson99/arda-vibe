@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
 import {
   hashPassword,
@@ -11,8 +11,10 @@ import { AppError } from '../middleware/error-handler.js';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '@arda/config';
 import crypto from 'crypto';
+import { sendPasswordResetEmail } from './email.service.js';
 
-const { users, tenants, refreshTokens, oauthAccounts } = schema;
+const { users, tenants, refreshTokens, oauthAccounts, passwordResetTokens } = schema;
+const PASSWORD_RESET_EXPIRY_MINUTES = 60;
 
 // ─── Types ────────────────────────────────────────────────────────────
 interface RegisterInput {
@@ -27,6 +29,15 @@ interface RegisterInput {
 interface LoginInput {
   email: string;
   password: string;
+}
+
+interface ForgotPasswordInput {
+  email: string;
+}
+
+interface ResetPasswordInput {
+  token: string;
+  newPassword: string;
 }
 
 interface TokenPair {
@@ -158,6 +169,121 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
       tenantName: user.tenant.name,
     },
   };
+}
+
+// ─── Forgot Password ──────────────────────────────────────────────────
+export async function forgotPassword(input: ForgotPasswordInput): Promise<void> {
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, normalizedEmail),
+  });
+
+  // Always return success to avoid account enumeration.
+  if (!user || !user.isActive) {
+    return;
+  }
+
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(resetToken);
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000);
+  const now = new Date();
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(passwordResetTokens)
+      .set({ usedAt: now })
+      .where(
+        and(
+          eq(passwordResetTokens.userId, user.id),
+          isNull(passwordResetTokens.usedAt)
+        )
+      );
+
+    await tx.insert(passwordResetTokens).values({
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    });
+  });
+
+  const appUrl = config.APP_URL.replace(/\/+$/, '');
+  const resetUrl = `${appUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
+
+  try {
+    await sendPasswordResetEmail({
+      toEmail: user.email,
+      toName: user.firstName,
+      resetUrl,
+      expiresInMinutes: PASSWORD_RESET_EXPIRY_MINUTES,
+    });
+  } catch (error) {
+    console.error('[auth-service] Failed to send password reset email', error);
+  }
+}
+
+// ─── Reset Password ───────────────────────────────────────────────────
+export async function resetPassword(input: ResetPasswordInput): Promise<void> {
+  const tokenHash = hashToken(input.token);
+  const resetRecord = await db.query.passwordResetTokens.findFirst({
+    where: and(
+      eq(passwordResetTokens.tokenHash, tokenHash),
+      isNull(passwordResetTokens.usedAt)
+    ),
+  });
+
+  if (!resetRecord) {
+    throw new AppError(400, 'Reset link is invalid or already used', 'RESET_TOKEN_INVALID');
+  }
+
+  if (resetRecord.expiresAt.getTime() < Date.now()) {
+    await db
+      .update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokens.id, resetRecord.id));
+    throw new AppError(400, 'Reset link has expired', 'RESET_TOKEN_EXPIRED');
+  }
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, resetRecord.userId),
+  });
+
+  if (!user || !user.isActive) {
+    throw new AppError(400, 'Reset link is invalid', 'RESET_TOKEN_INVALID');
+  }
+
+  const nextPasswordHash = await hashPassword(input.newPassword);
+  const now = new Date();
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({
+        passwordHash: nextPasswordHash,
+        emailVerified: true,
+        updatedAt: now,
+      })
+      .where(eq(users.id, user.id));
+
+    await tx
+      .update(passwordResetTokens)
+      .set({ usedAt: now })
+      .where(
+        and(
+          eq(passwordResetTokens.userId, user.id),
+          isNull(passwordResetTokens.usedAt)
+        )
+      );
+
+    await tx
+      .update(refreshTokens)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(refreshTokens.userId, user.id),
+          isNull(refreshTokens.revokedAt)
+        )
+      );
+  });
 }
 
 // ─── Refresh Token ────────────────────────────────────────────────────

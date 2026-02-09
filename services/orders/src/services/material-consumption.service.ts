@@ -139,10 +139,11 @@ export async function recordMaterialConsumption(
       workOrderId,
       routingStepId: stepId,
       operationType: 'report_quantity',
-      quantity: quantityConsumed,
+      quantityProduced,
+      quantityRejected: 0,
+      quantityScrapped: 0,
       notes: `Material consumption: ${bomLine.childPartNumber} x ${quantityConsumed.toFixed(4)} (${quantityProduced} produced * ${bomLine.quantityPer} per)`,
-      performedByUserId: userId || null,
-      performedAt: now,
+      operatorUserId: userId || null,
     });
 
     lines.push({

@@ -20,6 +20,10 @@ COPY packages/db/package.json packages/db/package.json
 COPY packages/events/package.json packages/events/package.json
 COPY packages/auth-utils/package.json packages/auth-utils/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
+COPY packages/jobs/package.json packages/jobs/package.json
+COPY packages/observability/package.json packages/observability/package.json
+COPY packages/search/package.json packages/search/package.json
+COPY packages/storage/package.json packages/storage/package.json
 
 COPY services/api-gateway/package.json services/api-gateway/package.json
 COPY services/auth/package.json services/auth/package.json

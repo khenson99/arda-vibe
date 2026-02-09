@@ -690,6 +690,26 @@ describe('triggerCardByScan', () => {
     ).rejects.toThrow('already in the "triggered" stage');
   });
 
+  it('returns success for idempotent replay after card already advanced', async () => {
+    const triggeredCard = makeCard({ currentStage: 'triggered' });
+    mockFindFirst
+      .mockResolvedValueOnce(triggeredCard)
+      .mockResolvedValueOnce(triggeredCard);
+    mockSelectLimit.mockResolvedValueOnce([
+      makeTransition({
+        metadata: { idempotencyKey: 'scan-card-001-session-123' },
+      }),
+    ]);
+
+    const result = await triggerCardByScan({
+      cardId: 'card-001',
+      idempotencyKey: 'scan-card-001-session-123',
+    });
+
+    expect(result.message).toContain('Order Queue');
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
   it('rejects scan with tenant mismatch', async () => {
     mockFindFirst.mockResolvedValueOnce(makeCard({ tenantId: 'other-tenant' }));
 

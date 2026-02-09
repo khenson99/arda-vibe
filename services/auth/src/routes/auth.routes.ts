@@ -26,6 +26,15 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 
+const forgotPasswordSchema = z.object({
+  email: z.string().email('Invalid email address'),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Reset token is required'),
+  newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
 // ─── POST /auth/register ──────────────────────────────────────────────
 authRouter.post('/register', async (req, res, next) => {
   try {
@@ -68,6 +77,50 @@ authRouter.post('/refresh', async (req, res, next) => {
     const input = refreshSchema.parse(req.body);
     const tokens = await authService.refreshAccessToken(input.refreshToken);
     res.json(tokens);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: 'Validation error',
+        details: err.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+      });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── POST /auth/forgot-password ──────────────────────────────────────
+authRouter.post('/forgot-password', async (req, res, next) => {
+  try {
+    const input = forgotPasswordSchema.parse(req.body);
+    await authService.forgotPassword({ email: input.email });
+
+    res.json({
+      message:
+        'If an account exists for that email, a password reset link has been sent.',
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: 'Validation error',
+        details: err.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+      });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── POST /auth/reset-password ───────────────────────────────────────
+authRouter.post('/reset-password', async (req, res, next) => {
+  try {
+    const input = resetPasswordSchema.parse(req.body);
+    await authService.resetPassword({
+      token: input.token,
+      newPassword: input.newPassword,
+    });
+
+    res.json({ message: 'Password reset successful' });
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({

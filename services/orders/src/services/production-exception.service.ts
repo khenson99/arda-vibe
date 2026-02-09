@@ -13,7 +13,7 @@
  */
 
 import { db, schema } from '@arda/db';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
@@ -115,8 +115,7 @@ export async function checkScrapThreshold(
     .values({
       tenantId,
       woNumber: reworkWoNumber,
-      cardId: wo.cardId,
-      loopId: wo.loopId,
+      kanbanCardId: wo.kanbanCardId,
       partId: wo.partId,
       facilityId: wo.facilityId,
       quantityToProduce: wo.quantityScrapped,
@@ -127,8 +126,7 @@ export async function checkScrapThreshold(
       isRework: true,
       parentWorkOrderId: workOrderId,
       routingTemplateId: wo.routingTemplateId,
-      priorityScore: Math.min(100, wo.priorityScore + 10), // bump priority for rework
-      manualPriority: wo.manualPriority,
+      priority: Math.min(100, wo.priority + 10), // bump priority for rework
       createdAt: now,
       updatedAt: now,
     })
@@ -139,8 +137,12 @@ export async function checkScrapThreshold(
   await db.insert(productionQueueEntries).values({
     tenantId,
     workOrderId: reworkWo.id,
+    cardId: wo.kanbanCardId,
+    partId: wo.partId,
     facilityId: wo.facilityId,
-    priorityScore: Math.min(100, wo.priorityScore + 10),
+    priorityScore: String(Math.min(100, wo.priority + 10)),
+    manualPriority: Math.min(100, wo.priority + 10),
+    status: 'pending',
     enteredQueueAt: now,
   });
 
@@ -149,10 +151,11 @@ export async function checkScrapThreshold(
     tenantId,
     workOrderId,
     operationType: 'rework',
-    quantity: wo.quantityScrapped,
+    quantityProduced: 0,
+    quantityRejected: 0,
+    quantityScrapped: wo.quantityScrapped,
     notes: `Auto-rework: scrap rate ${scrapRate.toFixed(1)}% exceeded ${scrapThresholdPercent}% threshold. Rework WO: ${reworkWoNumber}`,
-    performedByUserId: userId || null,
-    performedAt: now,
+    operatorUserId: userId || null,
   });
 
   // Audit
@@ -220,7 +223,7 @@ export async function handleMaterialShortageHold(
     return { requeued: false, reason: 'WO is not on hold for material shortage' };
   }
 
-  if (!wo.cardId) {
+  if (!wo.kanbanCardId) {
     return { requeued: false, reason: 'WO has no linked Kanban card' };
   }
 
@@ -232,7 +235,7 @@ export async function handleMaterialShortageHold(
       currentStage: kanbanCards.currentStage,
     })
     .from(kanbanCards)
-    .where(and(eq(kanbanCards.id, wo.cardId), eq(kanbanCards.tenantId, tenantId)))
+    .where(and(eq(kanbanCards.id, wo.kanbanCardId), eq(kanbanCards.tenantId, tenantId)))
     .execute();
 
   if (!card) {
@@ -247,8 +250,7 @@ export async function handleMaterialShortageHold(
     workOrderId,
     operationType: 'hold',
     notes: `Material shortage detected. Card ${card.id} flagged for procurement review.`,
-    performedByUserId: userId || null,
-    performedAt: now,
+    operatorUserId: userId || null,
   });
 
   // Audit the requeue intent
@@ -356,8 +358,7 @@ export async function checkShortCompletion(
     .values({
       tenantId,
       woNumber: followUpWoNumber,
-      cardId: wo.cardId,
-      loopId: wo.loopId,
+      kanbanCardId: wo.kanbanCardId,
       partId: wo.partId,
       facilityId: wo.facilityId,
       quantityToProduce: shortfall,
@@ -368,8 +369,7 @@ export async function checkShortCompletion(
       isRework: false,
       parentWorkOrderId: workOrderId,
       routingTemplateId: wo.routingTemplateId,
-      priorityScore: wo.priorityScore,
-      manualPriority: wo.manualPriority,
+      priority: wo.priority,
       createdAt: now,
       updatedAt: now,
     })
@@ -380,8 +380,12 @@ export async function checkShortCompletion(
   await db.insert(productionQueueEntries).values({
     tenantId,
     workOrderId: followUpWo.id,
+    cardId: wo.kanbanCardId,
+    partId: wo.partId,
     facilityId: wo.facilityId,
-    priorityScore: wo.priorityScore,
+    priorityScore: String(wo.priority),
+    manualPriority: wo.priority,
+    status: 'pending',
     enteredQueueAt: now,
   });
 

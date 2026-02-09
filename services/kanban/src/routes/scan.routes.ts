@@ -45,13 +45,15 @@ scanRouter.get('/:cardId', async (req, res, next) => {
 scanRouter.post('/:cardId/trigger', authMiddleware, async (req: AuthRequest, res, next) => {
   try {
     const cardId = req.params.cardId as string;
-    const { location } = req.body || {};
+    const { location, idempotencyKey, scannedAt } = req.body || {};
 
     const result = await triggerCardByScan({
       cardId,
       scannedByUserId: req.user!.sub,
       tenantId: req.user!.tenantId,
       location,
+      idempotencyKey: typeof idempotencyKey === 'string' ? idempotencyKey : undefined,
+      scannedAt: typeof scannedAt === 'string' ? scannedAt : undefined,
     });
 
     res.json({

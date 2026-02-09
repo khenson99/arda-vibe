@@ -15,7 +15,6 @@ import {
   ArrowUpRight,
   Bell,
   Boxes,
-  CheckCircle2,
   CircleAlert,
   Factory,
   Filter,
@@ -40,6 +39,9 @@ import {
   CardTitle,
   Input,
 } from "@/components/ui";
+import { ConflictResolver, ManualLookup, ScanResult, Scanner, SyncStatus } from "@/components/scan";
+import { useScanSession } from "@/hooks/use-scan-session";
+import { configureScanApi } from "@/lib/scan-api";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_RAILWAY_API_BASE = "https://api-gateway-production-83fa.up.railway.app";
@@ -107,18 +109,6 @@ interface QueueCard {
 }
 
 type QueueByLoop = Record<LoopType, QueueCard[]>;
-
-interface ScanTriggerResponse {
-  success: boolean;
-  message: string;
-  loopType: string;
-  partId: string;
-  card: {
-    id: string;
-    currentStage: string;
-    loopId: string;
-  };
-}
 
 interface PartsResponse {
   data: PartRecord[];
@@ -269,6 +259,23 @@ async function register(input: {
   companyName: string;
 }): Promise<AuthResponse> {
   return apiRequest<AuthResponse>("/api/auth/register", {
+    method: "POST",
+    body: input,
+  });
+}
+
+async function requestPasswordReset(input: { email: string }): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>("/api/auth/forgot-password", {
+    method: "POST",
+    body: input,
+  });
+}
+
+async function resetPasswordWithToken(input: {
+  token: string;
+  newPassword: string;
+}): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>("/api/auth/reset-password", {
     method: "POST",
     body: input,
   });
@@ -667,9 +674,17 @@ function App() {
 }
 
 function AuthPage({ onAuthSuccess }: { onAuthSuccess: (response: AuthResponse) => void }) {
-  const [mode, setMode] = React.useState<"login" | "register">("login");
+  type AuthMode = "login" | "register" | "forgot" | "reset";
+
+  const [mode, setMode] = React.useState<AuthMode>(() => {
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/reset-password")) {
+      return "reset";
+    }
+    return "login";
+  });
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = React.useState<string | null>(null);
 
   const [loginForm, setLoginForm] = React.useState({ email: "", password: "" });
   const [registerForm, setRegisterForm] = React.useState({
@@ -679,12 +694,36 @@ function AuthPage({ onAuthSuccess }: { onAuthSuccess: (response: AuthResponse) =
     email: "",
     password: "",
   });
+  const [forgotEmail, setForgotEmail] = React.useState("");
+  const [resetToken, setResetToken] = React.useState(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("token")?.trim() ?? "";
+  });
+  const [resetForm, setResetForm] = React.useState({
+    password: "",
+    confirmPassword: "",
+  });
+
+  const switchMode = React.useCallback((nextMode: AuthMode) => {
+    setMode(nextMode);
+    setError(null);
+    setStatusMessage(null);
+
+    if (
+      typeof window !== "undefined" &&
+      nextMode !== "reset" &&
+      window.location.pathname.startsWith("/reset-password")
+    ) {
+      window.history.replaceState({}, "", "/");
+    }
+  }, []);
 
   const submitLogin = React.useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setIsSubmitting(true);
       setError(null);
+      setStatusMessage(null);
 
       try {
         const response = await login(loginForm);
@@ -703,6 +742,7 @@ function AuthPage({ onAuthSuccess }: { onAuthSuccess: (response: AuthResponse) =
       event.preventDefault();
       setIsSubmitting(true);
       setError(null);
+      setStatusMessage(null);
 
       try {
         const response = await register(registerForm);
@@ -715,6 +755,79 @@ function AuthPage({ onAuthSuccess }: { onAuthSuccess: (response: AuthResponse) =
     },
     [onAuthSuccess, registerForm],
   );
+
+  const submitForgotPassword = React.useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+    setStatusMessage(null);
+
+    try {
+      const response = await requestPasswordReset({ email: forgotEmail });
+      setStatusMessage(
+        response.message || "If an account exists for that email, a reset link has been sent.",
+      );
+    } catch (error) {
+      setError(parseApiError(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [forgotEmail]);
+
+  const submitResetPassword = React.useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      setError(null);
+      setStatusMessage(null);
+
+      const token = resetToken.trim();
+      if (!token) {
+        setError("Reset token is missing. Please use the link from your email.");
+        return;
+      }
+
+      if (resetForm.password.length < 8) {
+        setError("Password must be at least 8 characters.");
+        return;
+      }
+
+      if (resetForm.password !== resetForm.confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+
+      setIsSubmitting(true);
+      try {
+        const response = await resetPasswordWithToken({
+          token,
+          newPassword: resetForm.password,
+        });
+
+        setStatusMessage(response.message || "Password reset successful. You can now sign in.");
+        setResetForm({ password: "", confirmPassword: "" });
+        setMode("login");
+
+        if (typeof window !== "undefined" && window.location.pathname.startsWith("/reset-password")) {
+          window.history.replaceState({}, "", "/");
+        }
+      } catch (error) {
+        setError(parseApiError(error));
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [resetForm.confirmPassword, resetForm.password, resetToken],
+  );
+
+  const cardTitle =
+    mode === "reset" ? "Reset your password" : mode === "forgot" ? "Recover your account" : "Welcome to Arda";
+
+  const cardDescription =
+    mode === "reset"
+      ? "Set a new password to regain access to your workspace."
+      : mode === "forgot"
+        ? "Enter your email and we will send a secure password reset link."
+        : "Use your workspace credentials to manage queue flow and card scanning.";
 
   return (
     <div className="min-h-screen bg-background md:grid md:grid-cols-[1fr_520px]">
@@ -752,36 +865,38 @@ function AuthPage({ onAuthSuccess }: { onAuthSuccess: (response: AuthResponse) =
       <section className="flex items-center justify-center px-5 py-10 sm:px-10 md:px-14">
         <Card className="w-full max-w-md border-border/90 shadow-arda-lg">
           <CardHeader className="space-y-1 pb-4">
-            <CardTitle className="text-2xl font-bold tracking-tight">Welcome to Arda</CardTitle>
-            <CardDescription>
-              Use your workspace credentials to manage queue flow and card scanning.
-            </CardDescription>
+            <CardTitle className="text-2xl font-bold tracking-tight">{cardTitle}</CardTitle>
+            <CardDescription>{cardDescription}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
-              <button
-                type="button"
-                className={cn(
-                  "rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  mode === "login" ? "bg-background text-foreground shadow" : "text-muted-foreground",
-                )}
-                onClick={() => setMode("login")}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  mode === "register"
-                    ? "bg-background text-foreground shadow"
-                    : "text-muted-foreground",
-                )}
-                onClick={() => setMode("register")}
-              >
-                Create Account
-              </button>
-            </div>
+            {mode !== "reset" && (
+              <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    mode === "login" || mode === "forgot"
+                      ? "bg-background text-foreground shadow"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => switchMode("login")}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    mode === "register"
+                      ? "bg-background text-foreground shadow"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => switchMode("register")}
+                >
+                  Create Account
+                </button>
+              </div>
+            )}
 
             {mode === "login" && (
               <form className="space-y-4" onSubmit={submitLogin}>
@@ -810,6 +925,16 @@ function AuthPage({ onAuthSuccess }: { onAuthSuccess: (response: AuthResponse) =
                     placeholder="••••••••"
                   />
                 </label>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-primary hover:underline"
+                    onClick={() => switchMode("forgot")}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
 
                 <Button type="submit" className="w-full" disabled={isSubmitting}>
                   {isSubmitting ? (
@@ -899,6 +1024,101 @@ function AuthPage({ onAuthSuccess }: { onAuthSuccess: (response: AuthResponse) =
                   )}
                 </Button>
               </form>
+            )}
+
+            {mode === "forgot" && (
+              <form className="space-y-4" onSubmit={submitForgotPassword}>
+                <label className="form-label-arda">
+                  Email
+                  <Input
+                    required
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(event) => setForgotEmail(event.target.value)}
+                    placeholder="you@company.com"
+                  />
+                </label>
+
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Sending reset link...
+                    </span>
+                  ) : (
+                    "Send Reset Link"
+                  )}
+                </Button>
+
+                <Button type="button" variant="link" className="w-full" onClick={() => switchMode("login")}>
+                  Back to sign in
+                </Button>
+              </form>
+            )}
+
+            {mode === "reset" && (
+              <form className="space-y-4" onSubmit={submitResetPassword}>
+                {!resetToken && (
+                  <label className="form-label-arda">
+                    Reset token
+                    <Input
+                      required
+                      value={resetToken}
+                      onChange={(event) => setResetToken(event.target.value)}
+                      placeholder="Paste reset token"
+                    />
+                  </label>
+                )}
+
+                <label className="form-label-arda">
+                  New password
+                  <Input
+                    required
+                    type="password"
+                    minLength={8}
+                    value={resetForm.password}
+                    onChange={(event) =>
+                      setResetForm((previous) => ({ ...previous, password: event.target.value }))
+                    }
+                    placeholder="At least 8 characters"
+                  />
+                </label>
+
+                <label className="form-label-arda">
+                  Confirm new password
+                  <Input
+                    required
+                    type="password"
+                    minLength={8}
+                    value={resetForm.confirmPassword}
+                    onChange={(event) =>
+                      setResetForm((previous) => ({ ...previous, confirmPassword: event.target.value }))
+                    }
+                    placeholder="Re-enter password"
+                  />
+                </label>
+
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Resetting password...
+                    </span>
+                  ) : (
+                    "Reset Password"
+                  )}
+                </Button>
+
+                <Button type="button" variant="link" className="w-full" onClick={() => switchMode("login")}>
+                  Back to sign in
+                </Button>
+              </form>
+            )}
+
+            {statusMessage && (
+              <div className="mt-4 rounded-md border border-[hsl(var(--arda-success)/0.25)] bg-[hsl(var(--arda-success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--arda-success))]">
+                {statusMessage}
+              </div>
             )}
 
             {error && (
@@ -1355,236 +1575,173 @@ function QueueRoute({
 
 function ScanRoute({
   session,
-  onUnauthorized,
+  onUnauthorized: _onUnauthorized,
 }: {
   session: AuthSession;
   onUnauthorized: () => void;
 }) {
   const { cardId } = useParams();
-  const [manualCardId, setManualCardId] = React.useState(cardId ?? "");
-  const [scanSource, setScanSource] = React.useState<"manual" | "camera" | "deep_link">(
-    cardId ? "deep_link" : "manual",
-  );
-  const [submitting, setSubmitting] = React.useState(false);
-  const [triggerResult, setTriggerResult] = React.useState<{
-    status: "idle" | "success" | "error";
-    message?: string;
-    response?: ScanTriggerResponse;
-  }>({ status: "idle" });
-  const [recentTriggers, setRecentTriggers] = React.useState<
-    Array<{ cardId: string; at: string; source: "manual" | "camera" | "deep_link"; message: string }>
-  >([]);
+  const [showQueueDetails, setShowQueueDetails] = React.useState(false);
+  const autoTriggeredCardRef = React.useRef<string | null>(null);
+  const deepLinkCardId = cardId?.trim() ?? "";
+  const deepLinkIsValid =
+    !deepLinkCardId
+    || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deepLinkCardId);
+
+  const { result, conflicts, isProcessing, queue, processScan, dismissResult, resolveConflict } =
+    useScanSession();
 
   React.useEffect(() => {
-    if (!cardId) return;
-    setManualCardId(cardId);
-    setScanSource("deep_link");
-  }, [cardId]);
+    configureScanApi({
+      baseUrl: buildApiUrl("/api/kanban"),
+      getToken: () => session.tokens.accessToken,
+      timeout: 10_000,
+    });
+  }, [session.tokens.accessToken]);
 
-  const triggerCard = React.useCallback(
-    async (targetCardId: string, source: "manual" | "camera" | "deep_link") => {
-      setSubmitting(true);
-      setTriggerResult({ status: "idle" });
+  React.useEffect(() => {
+    if (!deepLinkCardId || !deepLinkIsValid) return;
+    if (autoTriggeredCardRef.current === deepLinkCardId) return;
 
-      try {
-        const response = await apiRequest<ScanTriggerResponse>(`/api/kanban/scan/${targetCardId}/trigger`, {
-          method: "POST",
-          token: session.tokens.accessToken,
-          body: {
-            idempotencyKey: crypto.randomUUID(),
-            scannedAt: new Date().toISOString(),
-            source,
-          },
-        });
+    autoTriggeredCardRef.current = deepLinkCardId;
+    void processScan(deepLinkCardId);
+  }, [deepLinkCardId, deepLinkIsValid, processScan]);
 
-        setTriggerResult({
-          status: "success",
-          message: response.message,
-          response,
-        });
-
-        setRecentTriggers((previous) => [
-          {
-            cardId: targetCardId,
-            at: new Date().toISOString(),
-            source,
-            message: response.message,
-          },
-          ...previous,
-        ].slice(0, 6));
-      } catch (error) {
-        if (isUnauthorized(error)) {
-          onUnauthorized();
-          return;
-        }
-
-        setTriggerResult({
-          status: "error",
-          message: parseApiError(error),
-        });
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [onUnauthorized, session.tokens.accessToken],
-  );
-
-  const handleManualTrigger = React.useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-
-      const normalizedCardId = manualCardId.trim();
-      if (!normalizedCardId) {
-        setTriggerResult({ status: "error", message: "Card ID is required." });
-        return;
-      }
-
-      await triggerCard(normalizedCardId, scanSource);
-    },
-    [manualCardId, scanSource, triggerCard],
-  );
+  const retryCardId = result?.cardId;
 
   return (
     <div className="space-y-4">
-      {cardId && (
+      {deepLinkCardId && (
         <Card className="border-[hsl(var(--arda-blue)/0.25)] bg-[hsl(var(--arda-blue)/0.07)]">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Scanned Deep-Link Card</CardTitle>
+            <CardTitle className="text-base">Deep-Link Scan</CardTitle>
             <CardDescription>
-              Card {cardId}. Trigger it directly, or continue using camera/manual scan.
+              {deepLinkIsValid
+                ? `Card ${deepLinkCardId} detected from QR deep-link.`
+                : `Card ID "${deepLinkCardId}" is not a valid UUID.`}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => void triggerCard(cardId, "deep_link")} disabled={submitting}>
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Triggering...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-4 w-4" />
-                  Trigger This Card
-                </>
-              )}
+            <Button
+              onClick={() => {
+                if (!deepLinkIsValid) return;
+                void processScan(deepLinkCardId);
+              }}
+              disabled={isProcessing || !deepLinkIsValid}
+            >
+              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+              Trigger Deep-Link Card
             </Button>
           </CardContent>
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+      <SyncStatus
+        counts={queue.status}
+        isOnline={queue.isOnline}
+        isReplaying={queue.isReplaying}
+        onSync={() => void queue.replay()}
+        onClearSynced={() => void queue.clearSynced()}
+        onViewDetails={() => setShowQueueDetails((prev) => !prev)}
+      />
+
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Trigger card scan</CardTitle>
+            <CardTitle className="text-base">Scan Card</CardTitle>
             <CardDescription>
-              Enter or paste a Kanban card ID and post a scan trigger to the Railway API.
+              Use camera scan when supported, or paste a UUID for manual lookup.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={handleManualTrigger}>
-              <label className="form-label-arda">
-                Card ID
-                <Input
-                  value={manualCardId}
-                  onChange={(event) => setManualCardId(event.target.value)}
-                  placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                  className="font-mono text-sm"
-                />
-              </label>
-
-              <div>
-                <p className="mb-2 text-sm font-medium text-muted-foreground">Source</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    ["manual", "Manual"],
-                    ["camera", "Camera"],
-                    ["deep_link", "Deep Link"],
-                  ] as const).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setScanSource(value)}
-                      className={cn(
-                        "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
-                        scanSource === value
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background text-foreground",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <Button type="submit" disabled={submitting || !manualCardId.trim()}>
-                {submitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Triggering scan...
-                  </>
-                ) : (
-                  <>
-                    <QrCode className="h-4 w-4" />
-                    Trigger Scan
-                  </>
-                )}
-              </Button>
-            </form>
+          <CardContent className="space-y-4">
+            <Scanner
+              onScan={(nextCardId) => {
+                void processScan(nextCardId);
+              }}
+              isProcessing={isProcessing}
+            />
+            <ManualLookup
+              onSubmit={(nextCardId) => {
+                void processScan(nextCardId);
+              }}
+              isProcessing={isProcessing}
+            />
           </CardContent>
         </Card>
 
-        <Card className="card-arda">
+        <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Scan status</CardTitle>
-            <CardDescription>Latest API response and recent trigger events.</CardDescription>
+            <CardDescription>
+              Latest result, replay conflicts, and queue continuity status.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {triggerResult.status === "idle" && (
+            {result ? (
+              <ScanResult
+                result={result}
+                onDismiss={dismissResult}
+                onRetry={retryCardId ? () => void processScan(retryCardId) : undefined}
+              />
+            ) : (
               <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                Submit a scan to see status details here.
+                Submit a scan to see response details here.
               </p>
             )}
 
-            {triggerResult.status === "success" && (
-              <div className="rounded-lg border border-[hsl(var(--arda-success)/0.25)] bg-[hsl(var(--arda-success)/0.08)] px-3 py-3">
-                <p className="text-sm font-semibold text-[hsl(var(--arda-success))]">Scan accepted</p>
-                <p className="mt-1 text-sm text-muted-foreground">{triggerResult.message}</p>
-                {triggerResult.response?.card && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Badge variant="success">{triggerResult.response.card.currentStage}</Badge>
-                    <Badge variant="accent">{triggerResult.response.loopType}</Badge>
-                  </div>
-                )}
+            {conflicts.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Replay conflicts
+                </p>
+                {conflicts.map((conflict) => (
+                  <ConflictResolver
+                    key={conflict.queueItemId}
+                    conflict={conflict}
+                    onResolve={(queueItemId, action) => {
+                      void resolveConflict(queueItemId, action);
+                    }}
+                    isProcessing={isProcessing}
+                  />
+                ))}
               </div>
             )}
-
-            {triggerResult.status === "error" && (
-              <div className="rounded-lg border border-[hsl(var(--arda-error)/0.25)] bg-[hsl(var(--arda-error)/0.08)] px-3 py-3">
-                <p className="text-sm font-semibold text-[hsl(var(--arda-error))]">Scan failed</p>
-                <p className="mt-1 text-sm text-muted-foreground">{triggerResult.message}</p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent triggers</p>
-              {recentTriggers.length === 0 && (
-                <p className="text-sm text-muted-foreground">No recent scan submissions.</p>
-              )}
-              {recentTriggers.map((entry, index) => (
-                <div key={`${entry.cardId}-${entry.at}-${index}`} className="rounded-md border px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-mono text-xs text-foreground">{entry.cardId.slice(0, 18)}...</p>
-                    <Badge variant="secondary">{entry.source.replace("_", " ")}</Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{entry.message}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{formatRelativeTime(entry.at)}</p>
-                </div>
-              ))}
-            </div>
           </CardContent>
         </Card>
       </div>
+
+      {showQueueDetails && queue.events.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Offline Queue Details</CardTitle>
+            <CardDescription>
+              Persisted scans survive reload and replay automatically when connectivity returns.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {queue.events
+              .slice()
+              .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt))
+              .map((event) => (
+                <div key={event.id} className="rounded-md border px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-foreground">{event.cardId.slice(0, 18)}...</span>
+                    <Badge variant={event.status === "failed" ? "destructive" : "secondary"}>
+                      {event.status}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">
+                    Captured {formatRelativeTime(event.scannedAt)}
+                    {event.retryCount > 0 ? ` • retries ${event.retryCount}` : ""}
+                  </p>
+                  {event.lastError && (
+                    <p className="mt-1 text-[hsl(var(--arda-error))]">{event.lastError}</p>
+                  )}
+                </div>
+              ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

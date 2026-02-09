@@ -15,6 +15,13 @@
       "when": 1770629746412,
       "tag": "0001_brown_titanium_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770668157717,
+      "tag": "0002_gray_blue_shield",
+      "breakpoints": true
     }
   ]
 }
