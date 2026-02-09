@@ -39,9 +39,10 @@ ARG SERVICE
 COPY packages/ packages/
 COPY services/ services/
 
-# Build shared packages first, then the target service
-RUN npx turbo build --filter=@arda/${SERVICE}-service... \
-    || npx turbo build --filter=@arda/${SERVICE}...
+# Build all shared packages + the target service
+# (all packages are built so the runner stage can unconditionally COPY them)
+RUN npx turbo build --filter="./packages/*" --filter=@arda/${SERVICE}-service \
+    || npx turbo build --filter="./packages/*" --filter=@arda/${SERVICE}
 
 # ─── Stage 3: Production runtime ─────────────────────────────────────
 FROM node:${NODE_VERSION} AS runner
