@@ -1345,236 +1345,171 @@ function QueueRoute({
 
 function ScanRoute({
   session,
-  onUnauthorized,
+  onUnauthorized: _onUnauthorized,
 }: {
   session: AuthSession;
   onUnauthorized: () => void;
 }) {
   const { cardId } = useParams();
-  const [manualCardId, setManualCardId] = React.useState(cardId ?? "");
-  const [scanSource, setScanSource] = React.useState<"manual" | "camera" | "deep_link">(
-    cardId ? "deep_link" : "manual",
-  );
-  const [submitting, setSubmitting] = React.useState(false);
-  const [triggerResult, setTriggerResult] = React.useState<{
-    status: "idle" | "success" | "error";
-    message?: string;
-    response?: ScanTriggerResponse;
-  }>({ status: "idle" });
-  const [recentTriggers, setRecentTriggers] = React.useState<
-    Array<{ cardId: string; at: string; source: "manual" | "camera" | "deep_link"; message: string }>
-  >([]);
+  const [showQueueDetails, setShowQueueDetails] = React.useState(false);
+  const autoTriggeredCardRef = React.useRef<string | null>(null);
+  const deepLinkCardId = cardId?.trim() ?? "";
+  const deepLinkIsValid =
+    !deepLinkCardId
+    || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deepLinkCardId);
+
+  const { result, conflicts, isProcessing, queue, processScan, dismissResult, resolveConflict } =
+    useScanSession();
 
   React.useEffect(() => {
-    if (!cardId) return;
-    setManualCardId(cardId);
-    setScanSource("deep_link");
-  }, [cardId]);
+    configureScanApi({
+      baseUrl: buildApiUrl("/api/kanban"),
+      getToken: () => session.tokens.accessToken,
+      timeout: 10_000,
+    });
+  }, [session.tokens.accessToken]);
 
-  const triggerCard = React.useCallback(
-    async (targetCardId: string, source: "manual" | "camera" | "deep_link") => {
-      setSubmitting(true);
-      setTriggerResult({ status: "idle" });
+  React.useEffect(() => {
+    if (!deepLinkCardId || !deepLinkIsValid) return;
+    if (autoTriggeredCardRef.current === deepLinkCardId) return;
 
-      try {
-        const response = await apiRequest<ScanTriggerResponse>(`/api/kanban/scan/${targetCardId}/trigger`, {
-          method: "POST",
-          token: session.tokens.accessToken,
-          body: {
-            idempotencyKey: crypto.randomUUID(),
-            scannedAt: new Date().toISOString(),
-            source,
-          },
-        });
-
-        setTriggerResult({
-          status: "success",
-          message: response.message,
-          response,
-        });
-
-        setRecentTriggers((previous) => [
-          {
-            cardId: targetCardId,
-            at: new Date().toISOString(),
-            source,
-            message: response.message,
-          },
-          ...previous,
-        ].slice(0, 6));
-      } catch (error) {
-        if (isUnauthorized(error)) {
-          onUnauthorized();
-          return;
-        }
-
-        setTriggerResult({
-          status: "error",
-          message: parseApiError(error),
-        });
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [onUnauthorized, session.tokens.accessToken],
-  );
-
-  const handleManualTrigger = React.useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-
-      const normalizedCardId = manualCardId.trim();
-      if (!normalizedCardId) {
-        setTriggerResult({ status: "error", message: "Card ID is required." });
-        return;
-      }
-
-      await triggerCard(normalizedCardId, scanSource);
-    },
-    [manualCardId, scanSource, triggerCard],
-  );
+    autoTriggeredCardRef.current = deepLinkCardId;
+    void processScan(deepLinkCardId);
+  }, [deepLinkCardId, deepLinkIsValid, processScan]);
 
   return (
     <div className="space-y-4">
-      {cardId && (
+      {deepLinkCardId && (
         <Card className="border-[hsl(var(--arda-blue)/0.25)] bg-[hsl(var(--arda-blue)/0.07)]">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Scanned Deep-Link Card</CardTitle>
+            <CardTitle className="text-base">Deep-Link Scan</CardTitle>
             <CardDescription>
-              Card {cardId}. Trigger it directly, or continue using camera/manual scan.
+              {deepLinkIsValid
+                ? `Card ${deepLinkCardId} detected from QR deep-link.`
+                : `Card ID "${deepLinkCardId}" is not a valid UUID.`}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => void triggerCard(cardId, "deep_link")} disabled={submitting}>
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Triggering...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-4 w-4" />
-                  Trigger This Card
-                </>
-              )}
+            <Button
+              onClick={() => {
+                if (!deepLinkIsValid) return;
+                void processScan(deepLinkCardId);
+              }}
+              disabled={isProcessing || !deepLinkIsValid}
+            >
+              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+              Trigger Deep-Link Card
             </Button>
           </CardContent>
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+      <SyncStatus
+        counts={queue.status}
+        isOnline={queue.isOnline}
+        isReplaying={queue.isReplaying}
+        onSync={() => void queue.replay()}
+        onClearSynced={() => void queue.clearSynced()}
+        onViewDetails={() => setShowQueueDetails((prev) => !prev)}
+      />
+
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Trigger card scan</CardTitle>
+            <CardTitle className="text-base">Scan Card</CardTitle>
             <CardDescription>
-              Enter or paste a Kanban card ID and post a scan trigger to the Railway API.
+              Use camera scan when supported, or paste a UUID for manual lookup.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={handleManualTrigger}>
-              <label className="form-label-arda">
-                Card ID
-                <Input
-                  value={manualCardId}
-                  onChange={(event) => setManualCardId(event.target.value)}
-                  placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                  className="font-mono text-sm"
-                />
-              </label>
-
-              <div>
-                <p className="mb-2 text-sm font-medium text-muted-foreground">Source</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    ["manual", "Manual"],
-                    ["camera", "Camera"],
-                    ["deep_link", "Deep Link"],
-                  ] as const).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setScanSource(value)}
-                      className={cn(
-                        "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
-                        scanSource === value
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background text-foreground",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <Button type="submit" disabled={submitting || !manualCardId.trim()}>
-                {submitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Triggering scan...
-                  </>
-                ) : (
-                  <>
-                    <QrCode className="h-4 w-4" />
-                    Trigger Scan
-                  </>
-                )}
-              </Button>
-            </form>
+          <CardContent className="space-y-4">
+            <Scanner
+              onScan={(nextCardId) => {
+                void processScan(nextCardId);
+              }}
+              isProcessing={isProcessing}
+            />
+            <ManualLookup
+              onSubmit={(nextCardId) => {
+                void processScan(nextCardId);
+              }}
+              isProcessing={isProcessing}
+            />
           </CardContent>
         </Card>
 
-        <Card className="card-arda">
+        <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Scan status</CardTitle>
-            <CardDescription>Latest API response and recent trigger events.</CardDescription>
+            <CardDescription>
+              Latest result, replay conflicts, and queue continuity status.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {triggerResult.status === "idle" && (
+            {result ? (
+              <ScanResult
+                result={result}
+                onDismiss={dismissResult}
+                onRetry={result.cardId ? () => void processScan(result.cardId) : undefined}
+              />
+            ) : (
               <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                Submit a scan to see status details here.
+                Submit a scan to see response details here.
               </p>
             )}
 
-            {triggerResult.status === "success" && (
-              <div className="rounded-lg border border-[hsl(var(--arda-success)/0.25)] bg-[hsl(var(--arda-success)/0.08)] px-3 py-3">
-                <p className="text-sm font-semibold text-[hsl(var(--arda-success))]">Scan accepted</p>
-                <p className="mt-1 text-sm text-muted-foreground">{triggerResult.message}</p>
-                {triggerResult.response?.card && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Badge variant="success">{triggerResult.response.card.currentStage}</Badge>
-                    <Badge variant="accent">{triggerResult.response.loopType}</Badge>
-                  </div>
-                )}
+            {conflicts.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Replay conflicts
+                </p>
+                {conflicts.map((conflict) => (
+                  <ConflictResolver
+                    key={conflict.queueItemId}
+                    conflict={conflict}
+                    onResolve={(queueItemId, action) => {
+                      void resolveConflict(queueItemId, action);
+                    }}
+                    isProcessing={isProcessing}
+                  />
+                ))}
               </div>
             )}
-
-            {triggerResult.status === "error" && (
-              <div className="rounded-lg border border-[hsl(var(--arda-error)/0.25)] bg-[hsl(var(--arda-error)/0.08)] px-3 py-3">
-                <p className="text-sm font-semibold text-[hsl(var(--arda-error))]">Scan failed</p>
-                <p className="mt-1 text-sm text-muted-foreground">{triggerResult.message}</p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent triggers</p>
-              {recentTriggers.length === 0 && (
-                <p className="text-sm text-muted-foreground">No recent scan submissions.</p>
-              )}
-              {recentTriggers.map((entry, index) => (
-                <div key={`${entry.cardId}-${entry.at}-${index}`} className="rounded-md border px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-mono text-xs text-foreground">{entry.cardId.slice(0, 18)}...</p>
-                    <Badge variant="secondary">{entry.source.replace("_", " ")}</Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{entry.message}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{formatRelativeTime(entry.at)}</p>
-                </div>
-              ))}
-            </div>
           </CardContent>
         </Card>
       </div>
+
+      {showQueueDetails && queue.events.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Offline Queue Details</CardTitle>
+            <CardDescription>
+              Persisted scans survive reload and replay automatically when connectivity returns.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {queue.events
+              .slice()
+              .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt))
+              .map((event) => (
+                <div key={event.id} className="rounded-md border px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-foreground">{event.cardId.slice(0, 18)}...</span>
+                    <Badge variant={event.status === "failed" ? "destructive" : "secondary"}>
+                      {event.status}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">
+                    Captured {formatRelativeTime(event.scannedAt)}
+                    {event.retryCount > 0 ? ` • retries ${event.retryCount}` : ""}
+                  </p>
+                  {event.lastError && (
+                    <p className="mt-1 text-[hsl(var(--arda-error))]">{event.lastError}</p>
+                  )}
+                </div>
+              ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
