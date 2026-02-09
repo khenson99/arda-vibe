@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { config, serviceUrls, createLogger } from '@arda/config';
+import { config, serviceUrls, createLogger, getCorsOrigins } from '@arda/config';
 import { getEventBus } from '@arda/events';
 
 const log = createLogger('api-gateway');
@@ -21,7 +21,7 @@ app.set('trust proxy', 1);
 // ─── Global Middleware ────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: config.APP_URL,
+  origin: getCorsOrigins(),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
