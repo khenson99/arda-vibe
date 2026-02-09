@@ -14,12 +14,10 @@
  */
 
 import { db, schema } from '@arda/db';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
-import { recordMaterialConsumption } from './material-consumption.service.js';
-import { releaseCapacity } from './capacity-scheduler.service.js';
 
 const log = createLogger('completion-posting');
 
@@ -120,12 +118,12 @@ export async function reportQuantity(
     tenantId,
     workOrderId,
     operationType: 'report_quantity',
-    quantity: quantityGood,
-    scrapQuantity: quantityScrapped,
+    quantityProduced: quantityGood,
+    quantityRejected: 0,
+    quantityScrapped,
     notes: notes || `Reported: ${quantityGood} good, ${quantityScrapped} scrapped`,
-    performedByUserId: userId || null,
-    performedAt: now,
-  });
+    operatorUserId: userId || null,
+  }).execute();
 
   // Audit
   await db.insert(auditLog).values({
@@ -244,7 +242,7 @@ export async function completeWorkOrder(
         status: 'completed',
         quantityProduced,
         quantityScrapped,
-        completedAt: now,
+        actualEndDate: now,
         updatedAt: now,
       })
       .where(eq(workOrders.id, workOrderId))
@@ -253,7 +251,7 @@ export async function completeWorkOrder(
     // Update queue entry
     await tx
       .update(productionQueueEntries)
-      .set({ exitedQueueAt: now })
+      .set({ completedAt: now, status: 'completed', updatedAt: now })
       .where(
         and(
           eq(productionQueueEntries.workOrderId, workOrderId),
@@ -267,35 +265,37 @@ export async function completeWorkOrder(
       tenantId,
       workOrderId,
       operationType: 'complete_step',
-      quantity: quantityProduced,
-      scrapQuantity: quantityScrapped,
+      quantityProduced,
+      quantityRejected: 0,
+      quantityScrapped,
       notes: completionNotes || 'Work order completed',
-      performedByUserId: userId || null,
-      performedAt: now,
-    });
+      operatorUserId: userId || null,
+    }).execute();
 
     // Advance linked Kanban card: production -> completed stage
     let cardAdvanced = false;
-    if (wo.cardId) {
+    let cardEventCardId: string | undefined;
+    let cardEventLoopId: string | undefined;
+    if (wo.kanbanCardId) {
       try {
         const [card] = await tx
           .select({
             id: kanbanCards.id,
+            loopId: kanbanCards.loopId,
             currentStage: kanbanCards.currentStage,
             completedCycles: kanbanCards.completedCycles,
           })
           .from(kanbanCards)
-          .where(and(eq(kanbanCards.id, wo.cardId), eq(kanbanCards.tenantId, tenantId)))
+          .where(and(eq(kanbanCards.id, wo.kanbanCardId), eq(kanbanCards.tenantId, tenantId)))
           .execute();
 
         if (card && card.currentStage === 'ordered') {
-          // Production loop cards go: triggered -> ordered -> in_stock
-          // The 'ordered' stage maps to "in production"
+          // Production completion advances ordered -> received for kanban lifecycle.
           await tx
             .update(kanbanCards)
             .set({
-              currentStage: 'in_stock',
-              completedCycles: card.completedCycles + 1,
+              currentStage: 'received',
+              currentStageEnteredAt: now,
               updatedAt: now,
             })
             .where(eq(kanbanCards.id, card.id))
@@ -305,18 +305,23 @@ export async function completeWorkOrder(
           await tx.insert(cardStageTransitions).values({
             tenantId,
             cardId: card.id,
+            loopId: card.loopId,
+            cycleNumber: card.completedCycles + 1,
             fromStage: 'ordered',
-            toStage: 'in_stock',
-            method: 'production_complete',
-            userId: userId || null,
+            toStage: 'received',
+            transitionedAt: now,
+            transitionedByUserId: userId || null,
+            method: 'system',
             notes: `WO ${wo.woNumber} completed, qty produced: ${quantityProduced}`,
-            createdAt: now,
-          });
+            metadata: { source: 'completion_posting' },
+          }).execute();
 
           cardAdvanced = true;
+          cardEventCardId = card.id;
+          cardEventLoopId = card.loopId;
         }
       } catch (err) {
-        log.error({ err, cardId: wo.cardId, workOrderId }, 'Failed to advance Kanban card');
+        log.error({ err, cardId: wo.kanbanCardId, workOrderId }, 'Failed to advance Kanban card');
       }
     }
 
@@ -342,6 +347,8 @@ export async function completeWorkOrder(
       quantityProduced,
       quantityScrapped,
       cardAdvanced,
+      cardEventCardId,
+      cardEventLoopId,
       capacityReleased: false, // capacity release happens post-commit
     };
   }).then(async (result) => {
@@ -390,11 +397,11 @@ export async function completeWorkOrder(
         await eventBus.publish({
           type: 'card.transition',
           tenantId,
-          cardId: '', // card ID not available post-commit, downstream will resolve
-          loopId: '',
+          cardId: result.cardEventCardId || '',
+          loopId: result.cardEventLoopId || '',
           fromStage: 'ordered',
-          toStage: 'in_stock',
-          method: 'production_complete',
+          toStage: 'received',
+          method: 'system',
           userId,
           timestamp: new Date().toISOString(),
         });

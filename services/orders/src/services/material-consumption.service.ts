@@ -22,7 +22,6 @@ const log = createLogger('material-consumption');
 
 const {
   workOrders,
-  workOrderRoutings,
   productionOperationLogs,
   auditLog,
 } = schema;
@@ -139,11 +138,12 @@ export async function recordMaterialConsumption(
       workOrderId,
       routingStepId: stepId,
       operationType: 'report_quantity',
-      quantity: quantityConsumed,
+      quantityProduced: quantityConsumed,
+      quantityRejected: 0,
+      quantityScrapped: 0,
       notes: `Material consumption: ${bomLine.childPartNumber} x ${quantityConsumed.toFixed(4)} (${quantityProduced} produced * ${bomLine.quantityPer} per)`,
-      performedByUserId: userId || null,
-      performedAt: now,
-    });
+      operatorUserId: userId || null,
+    }).execute();
 
     lines.push({
       childPartId: bomLine.childPartId,
