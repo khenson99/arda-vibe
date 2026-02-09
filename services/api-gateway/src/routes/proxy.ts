@@ -18,48 +18,50 @@ interface RouteConfig {
   requiresAuth: boolean;
 }
 
+// NOTE: Express strips the prefix from req.url when using app.use(prefix, ...),
+// so pathRewrite patterns match the STRIPPED url (e.g. "/register", not "/api/auth/register").
 const routes: RouteConfig[] = [
   {
     prefix: '/api/auth',
     target: serviceUrls.auth,
-    pathRewrite: { '^/api/auth': '/auth' },
+    pathRewrite: { '^/': '/auth/' },
     requiresAuth: false,
   },
   {
     prefix: '/api/tenants',
     target: serviceUrls.auth,
-    pathRewrite: { '^/api/tenants': '/tenants' },
+    pathRewrite: { '^/': '/tenants/' },
     requiresAuth: true,
   },
   {
     prefix: '/api/catalog',
     target: serviceUrls.catalog,
-    pathRewrite: { '^/api/catalog': '' },
+    pathRewrite: {},
     requiresAuth: true,
   },
   {
     prefix: '/api/kanban',
     target: serviceUrls.kanban,
-    pathRewrite: { '^/api/kanban': '' },
+    pathRewrite: {},
     requiresAuth: true,
   },
   {
     prefix: '/api/orders',
     target: serviceUrls.orders,
-    pathRewrite: { '^/api/orders': '' },
+    pathRewrite: {},
     requiresAuth: true,
   },
   {
     prefix: '/api/notifications',
     target: serviceUrls.notifications,
-    pathRewrite: { '^/api/notifications': '' },
+    pathRewrite: {},
     requiresAuth: true,
   },
   // ── Public scan endpoint (QR code deep-link, no auth) ──
   {
     prefix: '/scan',
     target: serviceUrls.kanban,
-    pathRewrite: { '^/scan': '/scan' },
+    pathRewrite: { '^/': '/scan/' },
     requiresAuth: false,
   },
 ];
