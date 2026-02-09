@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { WOStatusBadge } from './wo-status-badge';
-import type { ProductionQueueItem as QueueItemType } from './types';
+import type { ProductionQueueItem as QueueItemType, WOStatus } from './types';
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -61,6 +61,7 @@ export function ProductionQueueItemCard({
   onQuickResume,
 }: ProductionQueueItemProps) {
   const progressPct = getProgressPercent(item.completedSteps, item.totalSteps);
+  const qtyRemaining = item.quantityToProduce - item.quantityProduced;
 
   return (
     <Card

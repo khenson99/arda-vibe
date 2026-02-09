@@ -5,7 +5,7 @@
 import { useState, useMemo } from 'react';
 import type { CardFormat } from '@arda/shared-types';
 import type { KanbanPrintData } from './types';
-import { LOOP_TYPE_LABELS } from './types';
+import { FORMAT_CONFIGS, LOOP_TYPE_LABELS } from './types';
 import { PrintPipeline } from './print-pipeline';
 import { cn } from '@/lib/utils';
 

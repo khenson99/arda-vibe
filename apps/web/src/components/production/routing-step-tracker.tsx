@@ -25,6 +25,20 @@ function formatDuration(minutes: number | null): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
+function canTransitionTo(
+  currentStatus: RoutingStepStatus,
+  target: RoutingStepStatus
+): boolean {
+  const transitions: Record<RoutingStepStatus, RoutingStepStatus[]> = {
+    pending: ['in_progress', 'skipped'],
+    in_progress: ['complete', 'on_hold', 'skipped'],
+    complete: [],
+    on_hold: ['in_progress'],
+    skipped: [],
+  };
+  return transitions[currentStatus].includes(target);
+}
+
 function isStepActionable(step: RoutingStep, allSteps: RoutingStep[]): boolean {
   // Terminal states are never actionable
   if (step.status === 'complete' || step.status === 'skipped') return false;

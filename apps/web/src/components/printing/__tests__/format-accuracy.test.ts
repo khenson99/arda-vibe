@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { CardFormat } from '@arda/shared-types';
 import { FORMAT_CONFIGS, STAGE_LABELS, LOOP_TYPE_LABELS } from '../types';
-import type { KanbanPrintData } from '../types';
+import type { FormatConfig, KanbanPrintData } from '../types';
 import {
   PROCUREMENT_CARD_FIXTURE,
   PRODUCTION_CARD_FIXTURE,

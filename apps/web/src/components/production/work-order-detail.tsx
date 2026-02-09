@@ -228,7 +228,7 @@ export interface WorkOrderDetailProps {
 
 export function WorkOrderDetailPanel({
   workOrder: wo,
-  loading: _loading,
+  loading,
   onTransitionStatus,
   onExpedite,
   onSplit,
