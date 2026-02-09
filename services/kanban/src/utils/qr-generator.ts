@@ -7,7 +7,7 @@ import { config } from '@arda/config';
 
 export function buildScanUrl(cardId: string, tenantSlug?: string): string {
   if (config.NODE_ENV === 'development') {
-    return `http://localhost:${config.API_GATEWAY_PORT}/scan/${cardId}`;
+    return `${config.APP_URL}/scan/${cardId}`;
   }
   if (tenantSlug) {
     return `https://${tenantSlug}.arda.cards/scan/${cardId}`;

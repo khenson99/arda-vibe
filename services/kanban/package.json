@@ -20,7 +20,8 @@
     "ioredis": "^5.4.0",
     "@arda/config": "*",
     "@arda/db": "*",
-    "@arda/auth-utils": "*"
+    "@arda/auth-utils": "*",
+    "@arda/events": "*"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

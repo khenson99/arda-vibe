@@ -157,6 +157,16 @@ export class EventBus {
     }
   }
 
+  /** Health check — verify Redis connectivity */
+  async ping(): Promise<boolean> {
+    try {
+      const result = await this.publisher.ping();
+      return result === 'PONG';
+    } catch {
+      return false;
+    }
+  }
+
   /** Clean shutdown */
   async shutdown(): Promise<void> {
     await this.subscriber.unsubscribe();

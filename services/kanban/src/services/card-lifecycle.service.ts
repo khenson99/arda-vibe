@@ -1,5 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
+import { getEventBus } from '@arda/events';
+import { config } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 import type { CardStage } from '@arda/shared-types';
 
@@ -115,8 +117,24 @@ export async function transitionCard(input: {
     return { card: updatedCard, transition };
   });
 
-  // TODO: Publish Redis event for real-time WebSocket updates
-  // await publishEvent('card:stage_changed', { cardId, tenantId, fromStage: currentStage, toStage });
+  // Publish event for real-time WebSocket updates
+  try {
+    const eventBus = getEventBus(config.REDIS_URL);
+    await eventBus.publish({
+      type: 'card.transition',
+      tenantId,
+      cardId,
+      loopId: card.loopId,
+      fromStage: currentStage,
+      toStage,
+      method,
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    // Non-critical: don't fail the transition if event publishing fails
+    console.error(`[card-lifecycle] Failed to publish card.transition event for card ${cardId}`);
+  }
 
   return result;
 }

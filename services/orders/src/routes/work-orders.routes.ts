@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
+import { getEventBus } from '@arda/events';
+import { config } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 import { getNextWONumber } from '../services/order-number.service.js';
 
@@ -238,6 +240,22 @@ workOrdersRouter.post('/', async (req: AuthRequest, res, next) => {
       return { createdWO, createdRoutings };
     });
 
+    // Publish order.created event for real-time updates
+    try {
+      const eventBus = getEventBus(config.REDIS_URL);
+      await eventBus.publish({
+        type: 'order.created',
+        tenantId,
+        orderType: 'work_order',
+        orderId: createdWO.id,
+        orderNumber: woNumber,
+        linkedCardIds: input.kanbanCardId ? [input.kanbanCardId] : [],
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      console.error(`[work-orders] Failed to publish order.created event for ${woNumber}`);
+    }
+
     res.status(201).json({
       ...createdWO,
       routingSteps: createdRoutings,
@@ -308,6 +326,23 @@ workOrdersRouter.patch('/:id/status', async (req: AuthRequest, res, next) => {
       .set(updateValues)
       .where(and(eq(workOrders.id, id), eq(workOrders.tenantId, tenantId)))
       .returning();
+
+    // Publish order.status_changed event
+    try {
+      const eventBus = getEventBus(config.REDIS_URL);
+      await eventBus.publish({
+        type: 'order.status_changed',
+        tenantId,
+        orderType: 'work_order',
+        orderId: id,
+        orderNumber: currentWO.woNumber,
+        fromStatus: currentWO.status,
+        toStatus: newStatus,
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      console.error(`[work-orders] Failed to publish order.status_changed event for ${currentWO.woNumber}`);
+    }
 
     // Fetch complete work order with routings
     const result = await fetchWorkOrderWithRoutings(id, tenantId);

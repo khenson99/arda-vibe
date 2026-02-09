@@ -38,6 +38,7 @@ const envSchema = z.object({
   // Application
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   APP_URL: z.string().url().default('http://localhost:5173'),
+  SERVICE_HOST: z.string().default('localhost'),
   API_GATEWAY_PORT: z.coerce.number().default(3000),
   AUTH_SERVICE_PORT: z.coerce.number().default(3001),
   CATALOG_SERVICE_PORT: z.coerce.number().default(3002),
@@ -68,10 +69,10 @@ export type Config = z.infer<typeof envSchema>;
 
 // ─── Service URLs (for inter-service communication) ───────────────────
 export const serviceUrls = {
-  gateway: `http://localhost:${config.API_GATEWAY_PORT}`,
-  auth: `http://localhost:${config.AUTH_SERVICE_PORT}`,
-  catalog: `http://localhost:${config.CATALOG_SERVICE_PORT}`,
-  kanban: `http://localhost:${config.KANBAN_SERVICE_PORT}`,
-  orders: `http://localhost:${config.ORDERS_SERVICE_PORT}`,
-  notifications: `http://localhost:${config.NOTIFICATIONS_SERVICE_PORT}`,
+  gateway: `http://${config.SERVICE_HOST}:${config.API_GATEWAY_PORT}`,
+  auth: `http://${config.SERVICE_HOST}:${config.AUTH_SERVICE_PORT}`,
+  catalog: `http://${config.SERVICE_HOST}:${config.CATALOG_SERVICE_PORT}`,
+  kanban: `http://${config.SERVICE_HOST}:${config.KANBAN_SERVICE_PORT}`,
+  orders: `http://${config.SERVICE_HOST}:${config.ORDERS_SERVICE_PORT}`,
+  notifications: `http://${config.SERVICE_HOST}:${config.NOTIFICATIONS_SERVICE_PORT}`,
 } as const;

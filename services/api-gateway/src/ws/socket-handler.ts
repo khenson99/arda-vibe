@@ -1,6 +1,7 @@
 import { Server as HttpServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import { verifyAccessToken } from '@arda/auth-utils';
+import { config } from '@arda/config';
 import { getEventBus, type ArdaEvent } from '@arda/events';
 import { db, schema } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
@@ -8,11 +9,13 @@ import { eq, and } from 'drizzle-orm';
 export function setupWebSocket(httpServer: HttpServer, redisUrl: string): SocketServer {
   const io = new SocketServer(httpServer, {
     cors: {
-      origin: process.env.APP_URL || 'http://localhost:5173',
+      origin: config.APP_URL,
       credentials: true,
     },
-    // Keep Socket.IO isolated from the native ws gateway path.
     path: '/socket.io',
+    // Socket.IO built-in heartbeat (transport-level ping/pong)
+    pingInterval: 25_000,
+    pingTimeout: 10_000,
   });
 
   const eventBus = getEventBus(redisUrl);
@@ -48,6 +51,18 @@ export function setupWebSocket(httpServer: HttpServer, redisUrl: string): Socket
 
     eventBus.subscribeTenant(tenantId, handler);
 
+    // Send welcome message
+    socket.emit('connected', {
+      tenantId,
+      userId: user.sub,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Handle client-side ping (application-level keepalive)
+    socket.on('ping', () => {
+      socket.emit('pong', { timestamp: new Date().toISOString() });
+    });
+
     // Client can request specific event subscriptions (verify tenant ownership)
     socket.on('subscribe:loop', async (loopId: string) => {
       try {
@@ -78,5 +93,6 @@ export function setupWebSocket(httpServer: HttpServer, redisUrl: string): Socket
     });
   });
 
+  console.log('[ws] Socket.IO WebSocket handler ready on /socket.io');
   return io;
 }

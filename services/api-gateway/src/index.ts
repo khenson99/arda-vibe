@@ -4,9 +4,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config, serviceUrls } from '@arda/config';
+import { db } from '@arda/db';
+import { sql } from 'drizzle-orm';
 import { setupProxies } from './routes/proxy.js';
 import { requestLogger } from './middleware/request-logger.js';
-import { setupWebSocketGateway } from './ws-gateway.js';
 import { setupWebSocket } from './ws/socket-handler.js';
 
 const app = express();
@@ -43,11 +44,23 @@ app.use('/api/auth/register', authLimiter);
 app.use(requestLogger);
 
 // ─── Health Check ─────────────────────────────────────────────────────
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'ok',
+app.get('/health', async (_req, res) => {
+  const checks: Record<string, string> = {};
+  let healthy = true;
+
+  try {
+    await db.execute(sql`SELECT 1`);
+    checks.database = 'ok';
+  } catch {
+    checks.database = 'down';
+    healthy = false;
+  }
+
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
     service: 'api-gateway',
     timestamp: new Date().toISOString(),
+    checks,
   });
 });
 
@@ -63,9 +76,8 @@ app.use((_req, res) => {
 const PORT = config.API_GATEWAY_PORT;
 const server = createServer(app);
 
-// Setup WebSocket handlers
-setupWebSocketGateway(server);
-setupWebSocket(server, config.REDIS_URL);
+// Setup WebSocket handler (Socket.IO on /socket.io)
+const io = setupWebSocket(server, config.REDIS_URL);
 
 server.listen(PORT, () => {
   console.log(`[api-gateway] Running on port ${PORT}`);
@@ -76,5 +88,29 @@ server.listen(PORT, () => {
   console.log(`  orders   → ${serviceUrls.orders}`);
   console.log(`  notify   → ${serviceUrls.notifications}`);
 });
+
+// ─── Graceful Shutdown ───────────────────────────────────────────────
+function shutdown(signal: string) {
+  console.log(`[api-gateway] ${signal} received, shutting down gracefully...`);
+
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('[api-gateway] HTTP server closed');
+  });
+
+  // Close WebSocket connections
+  io.close(() => {
+    console.log('[api-gateway] WebSocket server closed');
+  });
+
+  // Force exit after 10 seconds
+  setTimeout(() => {
+    console.error('[api-gateway] Forced shutdown after timeout');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 export default app;

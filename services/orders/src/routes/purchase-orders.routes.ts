@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { eq, and, sql, desc, asc } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
+import { getEventBus } from '@arda/events';
+import { config } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 import { getNextPONumber } from '../services/order-number.service.js';
 
@@ -280,6 +282,22 @@ purchaseOrdersRouter.post('/', async (req: AuthRequest, res, next) => {
       return { createdPO, insertedLines };
     });
 
+    // Publish order.created event
+    try {
+      const eventBus = getEventBus(config.REDIS_URL);
+      await eventBus.publish({
+        type: 'order.created',
+        tenantId,
+        orderType: 'purchase_order',
+        orderId: createdPO.id,
+        orderNumber: poNumber,
+        linkedCardIds: insertedLines.filter((l) => l.kanbanCardId).map((l) => l.kanbanCardId!),
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      console.error(`[purchase-orders] Failed to publish order.created event for ${poNumber}`);
+    }
+
     res.status(201).json({
       data: {
         ...createdPO,
@@ -496,6 +514,23 @@ purchaseOrdersRouter.patch('/:id/status', async (req: AuthRequest, res, next) =>
         ),
       )
       .limit(1);
+
+    // Publish order.status_changed event
+    try {
+      const eventBus = getEventBus(config.REDIS_URL);
+      await eventBus.publish({
+        type: 'order.status_changed',
+        tenantId: req.user!.tenantId,
+        orderType: 'purchase_order',
+        orderId: id,
+        orderNumber: po.poNumber,
+        fromStatus: po.status,
+        toStatus: newStatus,
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      console.error(`[purchase-orders] Failed to publish order.status_changed event for ${po.poNumber}`);
+    }
 
     res.json({
       data: updated[0],

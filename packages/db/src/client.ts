@@ -46,5 +46,20 @@ export function createMigrationClient() {
   return drizzle(migrationClient, { schema });
 }
 
+// ─── Pool Factory ────────────────────────────────────────────────────
+// Creates a new Drizzle instance with a custom connection pool.
+// Useful when a service needs a different pool size than the default (20).
+export function createDbPool(options?: { max?: number; idleTimeout?: number }) {
+  if (!connectionString) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
+  const poolClient = postgres(connectionString, {
+    max: options?.max ?? 20,
+    idle_timeout: options?.idleTimeout ?? 20,
+    connect_timeout: 10,
+  });
+  return drizzle(poolClient, { schema });
+}
+
 export type Database = typeof db;
 export { schema };

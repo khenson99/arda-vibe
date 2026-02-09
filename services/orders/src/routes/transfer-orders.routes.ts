@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
+import { getEventBus } from '@arda/events';
+import { config } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 import { getNextTONumber } from '../services/order-number.service.js';
 
@@ -196,6 +198,22 @@ transferOrdersRouter.post('/', async (req: AuthRequest, res, next) => {
       return { createdOrder, lines };
     });
 
+    // Publish order.created event for real-time updates
+    try {
+      const eventBus = getEventBus(config.REDIS_URL);
+      await eventBus.publish({
+        type: 'order.created',
+        tenantId,
+        orderType: 'transfer_order',
+        orderId: createdOrder.id,
+        orderNumber: toNumber,
+        linkedCardIds: [],
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      console.error(`[transfer-orders] Failed to publish order.created event for ${toNumber}`);
+    }
+
     res.status(201).json({
       ...createdOrder,
       lines,
@@ -269,6 +287,23 @@ transferOrdersRouter.patch('/:id/status', async (req: AuthRequest, res, next) =>
         )
       )
       .returning();
+
+    // Publish order.status_changed event
+    try {
+      const eventBus = getEventBus(config.REDIS_URL);
+      await eventBus.publish({
+        type: 'order.status_changed',
+        tenantId,
+        orderType: 'transfer_order',
+        orderId: id,
+        orderNumber: order.toNumber,
+        fromStatus: order.status,
+        toStatus: newStatus,
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      console.error(`[transfer-orders] Failed to publish order.status_changed event for ${order.toNumber}`);
+    }
 
     const lines = await db
       .select()

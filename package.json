@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
+    "apps/*",
     "packages/*",
     "services/*"
   ],
@@ -20,9 +21,14 @@
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
     "turbo": "^2.4.0",
-    "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": ">=20.0.0",
