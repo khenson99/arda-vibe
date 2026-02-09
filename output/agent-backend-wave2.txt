@@ -1,0 +1,36 @@
+BACKEND_WAVE2_COMPLETE
+
+Tasks completed:
+  #29 — RBAC matrix spec + TypeScript permission registry
+  #30 — JWT token service with rotation and replay detection
+  #31 — Tenant context propagation middleware
+  #32 — PostgreSQL RLS policies (spec + SQL + TypeScript helpers)
+  #33 — Route-level authorization guards for all services
+  #34 — Security audit events + CI security workflow
+
+Files created:
+  docs/spec/security/rbac-matrix.md
+  docs/spec/security/rls-policies.md
+  packages/auth-utils/src/permissions.ts
+  packages/auth-utils/src/permissions.test.ts
+  packages/auth-utils/src/tenant-context.ts
+  packages/auth-utils/src/tenant-context.test.ts
+  packages/events/src/security-events.ts
+  packages/events/src/security-events.test.ts
+  packages/db/src/rls/policies.sql
+  packages/db/src/rls/set-tenant.ts
+  packages/db/src/rls/rls.test.ts
+  services/auth/src/services/token.service.ts
+  services/auth/src/services/token.service.test.ts
+  services/kanban/src/middleware/auth-guards.ts
+  services/kanban/src/middleware/auth-guards.test.ts
+  services/orders/src/middleware/auth-guards.ts
+  services/catalog/src/middleware/auth-guards.ts
+  services/notifications/src/middleware/auth-guards.ts
+  .github/workflows/security.yml
+
+Files modified:
+  packages/auth-utils/src/index.ts (added exports for permissions + tenant-context)
+  packages/events/src/index.ts (added SecurityEvent to ArdaEvent union + re-exports)
+
+Timestamp: 2026-02-08
