@@ -57,13 +57,18 @@ jobs:
       fail-fast: false
       matrix:
         workspace:
+          - '@arda/auth-utils'
+          - '@arda/db'
+          - '@arda/events'
           - '@arda/jobs'
-          - '@arda/storage'
           - '@arda/search'
-          - '@arda/observability'
-          - '@arda/kanban'
-          - '@arda/orders'
-          - '@arda/notifications'
+          - '@arda/storage'
+          - '@arda/auth-service'
+          - '@arda/catalog-service'
+          - '@arda/kanban-service'
+          - '@arda/notifications-service'
+          - '@arda/orders-service'
+          - '@arda/web'
 
     steps:
       - uses: actions/checkout@v4
