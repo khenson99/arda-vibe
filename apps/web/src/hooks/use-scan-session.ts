@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { triggerScan, createReplayAdapter } from '@/lib/scan-api';
 import { useOfflineQueue } from '@/hooks/use-offline-queue';
 import { errorCodeToConflictType } from '@/components/scan/conflict-resolver';
@@ -65,10 +65,14 @@ export function useScanSession(): UseScanSessionReturn {
 
     setConflicts(newConflicts);
 
-    if (newConflicts.length > 0 && state !== 'result') {
-      setState('conflict');
+    if (newConflicts.length > 0) {
+      setState((prev) => (prev === 'result' ? prev : 'conflict'));
     }
-  }, [queue.events, state]);
+  }, [queue.events]);
+
+  useEffect(() => {
+    refreshConflicts();
+  }, [refreshConflicts]);
 
   // Process a scan (online or offline)
   const processScan = useCallback(
@@ -185,11 +189,17 @@ export function useScanSession(): UseScanSessionReturn {
   // Dismiss current result and check for conflicts
   const dismissResult = useCallback(() => {
     setResult(null);
-    refreshConflicts();
-    if (conflicts.length === 0) {
+    const hasQueuedConflicts = queue.events.some(
+      (event) => event.status === 'failed' && Boolean(event.lastErrorCode),
+    );
+    if (hasQueuedConflicts) {
+      refreshConflicts();
+      setState('conflict');
+    } else {
+      setConflicts([]);
       setState('idle');
     }
-  }, [refreshConflicts, conflicts.length]);
+  }, [queue.events, refreshConflicts]);
 
   // Resolve a conflict
   const resolveConflict = useCallback(
@@ -229,21 +239,20 @@ export function useScanSession(): UseScanSessionReturn {
         await queue.refresh();
 
         // Remove resolved conflict from local state
-        setConflicts((prev) =>
-          prev.filter((c) => c.queueItemId !== queueItemId),
-        );
-
-        // If no more conflicts, return to idle
-        if (conflicts.length <= 1) {
-          setState('idle');
-        }
+        setConflicts((prev) => {
+          const next = prev.filter((c) => c.queueItemId !== queueItemId);
+          if (next.length === 0) {
+            setState('idle');
+          }
+          return next;
+        });
       } catch (err) {
         console.error('[scan-session] Failed to resolve conflict:', err);
       } finally {
         setIsProcessing(false);
       }
     },
-    [queue, conflicts.length],
+    [queue],
   );
 
   return {

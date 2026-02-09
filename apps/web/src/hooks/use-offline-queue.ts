@@ -65,6 +65,7 @@ export function useOfflineQueue({
   const [isReplaying, setIsReplaying] = useState(false);
 
   const sendFnRef = useRef(sendFn);
+  const reconnectReplayTimerRef = useRef<number | null>(null);
   sendFnRef.current = sendFn;
 
   // Refresh queue state from IndexedDB
@@ -127,13 +128,23 @@ export function useOfflineQueue({
       setIsOnline(online);
       if (online && autoReplay) {
         // Small delay to let network settle
-        setTimeout(() => {
+        if (reconnectReplayTimerRef.current !== null) {
+          window.clearTimeout(reconnectReplayTimerRef.current);
+        }
+        reconnectReplayTimerRef.current = window.setTimeout(() => {
           replay();
+          reconnectReplayTimerRef.current = null;
         }, 1000);
       }
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (reconnectReplayTimerRef.current !== null) {
+        window.clearTimeout(reconnectReplayTimerRef.current);
+        reconnectReplayTimerRef.current = null;
+      }
+    };
   }, [autoReplay, replay]);
 
   // Initial load
