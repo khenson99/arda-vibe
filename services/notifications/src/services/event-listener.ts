@@ -2,6 +2,61 @@ import { getEventBus, type ArdaEvent } from '@arda/events';
 import { db, schema } from '@arda/db';
 import { and, eq } from 'drizzle-orm';
 
+type OrderStatusChangedEvent = Extract<ArdaEvent, { type: 'order.status_changed' }>;
+
+function formatStatus(status: string): string {
+  return status.replace(/_/g, ' ');
+}
+
+function buildOrderStatusNotification(event: OrderStatusChangedEvent): {
+  type: string;
+  title: string;
+  body: string;
+} {
+  const transitionBody = `${event.orderNumber} moved from ${formatStatus(event.fromStatus)} to ${formatStatus(event.toStatus)}.`;
+
+  if (event.orderType === 'purchase_order') {
+    if (event.toStatus === 'sent') {
+      return {
+        type: 'po_sent',
+        title: 'Purchase order sent',
+        body: `${event.orderNumber} was sent to the supplier.`,
+      };
+    }
+
+    if (event.toStatus === 'received' || event.toStatus === 'partially_received') {
+      return {
+        type: 'po_received',
+        title:
+          event.toStatus === 'received'
+            ? 'Purchase order received'
+            : 'Purchase order partially received',
+        body: transitionBody,
+      };
+    }
+
+    return {
+      type: 'system_alert',
+      title: 'Purchase order status updated',
+      body: transitionBody,
+    };
+  }
+
+  if (event.orderType === 'work_order') {
+    return {
+      type: 'wo_status_change',
+      title: 'Work order status updated',
+      body: transitionBody,
+    };
+  }
+
+  return {
+    type: 'transfer_status_change',
+    title: 'Transfer order status updated',
+    body: transitionBody,
+  };
+}
+
 export async function startEventListener(redisUrl: string): Promise<void> {
   const eventBus = getEventBus(redisUrl);
 
@@ -36,6 +91,25 @@ export async function startEventListener(redisUrl: string): Promise<void> {
             },
           });
           break;
+
+        case 'order.status_changed': {
+          const notification = buildOrderStatusNotification(event);
+          await createNotification(eventBus, {
+            tenantId: event.tenantId,
+            type: notification.type,
+            title: notification.title,
+            body: notification.body,
+            actionUrl: `/orders/${event.orderId}`,
+            metadata: {
+              orderId: event.orderId,
+              orderNumber: event.orderNumber,
+              orderType: event.orderType,
+              fromStatus: event.fromStatus,
+              toStatus: event.toStatus,
+            },
+          });
+          break;
+        }
 
         case 'relowisa.recommendation':
           await createNotification(eventBus, {
