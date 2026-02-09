@@ -264,6 +264,23 @@ async function register(input: {
   });
 }
 
+async function requestPasswordReset(input: { email: string }): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>("/api/auth/forgot-password", {
+    method: "POST",
+    body: input,
+  });
+}
+
+async function resetPasswordWithToken(input: {
+  token: string;
+  newPassword: string;
+}): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>("/api/auth/reset-password", {
+    method: "POST",
+    body: input,
+  });
+}
+
 async function fetchMe(token: string): Promise<SessionUser> {
   return apiRequest<SessionUser>("/api/auth/me", { token });
 }
