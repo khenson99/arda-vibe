@@ -82,6 +82,9 @@ COPY --from=builder /app/packages/shared-types/package.json packages/shared-type
 COPY --from=builder /app/services/${SERVICE}/dist services/${SERVICE}/dist
 COPY --from=builder /app/services/${SERVICE}/package.json services/${SERVICE}/package.json
 
+# Ensure all files are readable (COPY --from preserves source permissions)
+RUN chmod -R a+rX /app
+
 # Non-root user for security
 RUN addgroup -g 1001 -S arda && \
     adduser -S arda -u 1001 -G arda

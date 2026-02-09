@@ -23,7 +23,8 @@
     "@arda/config": "*",
     "@arda/db": "*",
     "@arda/auth-utils": "*",
-    "@arda/events": "*"
+    "@arda/events": "*",
+    "@arda/shared-types": "*"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
