@@ -96,6 +96,26 @@ export const refreshTokens = authSchema.table(
   ]
 );
 
+// ─── Password Reset Tokens ────────────────────────────────────────────
+export const passwordResetTokens = authSchema.table(
+  'password_reset_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 255 }).notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('password_reset_tokens_user_idx').on(table.userId),
+    index('password_reset_tokens_hash_idx').on(table.tokenHash),
+    index('password_reset_tokens_expires_idx').on(table.expiresAt),
+  ]
+);
+
 // ─── Relations ────────────────────────────────────────────────────────
 export const usersRelations = relations(users, ({ one, many }) => ({
   tenant: one(tenants, {
@@ -104,6 +124,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   }),
   oauthAccounts: many(oauthAccounts),
   refreshTokens: many(refreshTokens),
+  passwordResetTokens: many(passwordResetTokens),
 }));
 
 export const oauthAccountsRelations = relations(oauthAccounts, ({ one }) => ({
@@ -116,6 +137,13 @@ export const oauthAccountsRelations = relations(oauthAccounts, ({ one }) => ({
 export const refreshTokensRelations = relations(refreshTokens, ({ one }) => ({
   user: one(users, {
     fields: [refreshTokens.userId],
+    references: [users.id],
+  }),
+}));
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [passwordResetTokens.userId],
     references: [users.id],
   }),
 }));
