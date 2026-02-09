@@ -1,7 +1,7 @@
 import { Server as HttpServer } from 'http';
 import { Server as SocketServer, type Socket } from 'socket.io';
 import { verifyAccessToken, type JwtPayload } from '@arda/auth-utils';
-import { config, createLogger, getCorsOrigins } from '@arda/config';
+import { config, createLogger } from '@arda/config';
 import { getEventBus, type ArdaEvent } from '@arda/events';
 import { db, schema } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
@@ -15,7 +15,7 @@ const log = createLogger('ws');
 export function setupWebSocket(httpServer: HttpServer, redisUrl: string): SocketServer {
   const io = new SocketServer(httpServer, {
     cors: {
-      origin: getCorsOrigins(),
+      origin: config.APP_URL,
       credentials: true,
     },
     path: '/socket.io',

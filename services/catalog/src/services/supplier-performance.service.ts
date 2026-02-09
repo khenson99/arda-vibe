@@ -66,10 +66,10 @@ export function calculateLeadTimeDays(
 
   const msPerDay = 1000 * 60 * 60 * 24;
   // Normalize to midnight UTC to get calendar day difference
-  const sentDay = Date.UTC(sentAt.getUTCFullYear(), sentAt.getUTCMonth(), sentAt.getUTCDate());
-  const deliveredDay = Date.UTC(deliveredAt.getUTCFullYear(), deliveredAt.getUTCMonth(), deliveredAt.getUTCDate());
+  const sentDay = new Date(sentAt.getFullYear(), sentAt.getMonth(), sentAt.getDate());
+  const deliveredDay = new Date(deliveredAt.getFullYear(), deliveredAt.getMonth(), deliveredAt.getDate());
 
-  return Math.round((deliveredDay - sentDay) / msPerDay);
+  return Math.round((deliveredDay.getTime() - sentDay.getTime()) / msPerDay);
 }
 
 /**
@@ -82,10 +82,10 @@ export function isOnTimeDelivery(
 ): boolean | null {
   if (!actualDeliveryDate || !expectedDeliveryDate) return null;
 
-  const actualDay = Date.UTC(actualDeliveryDate.getUTCFullYear(), actualDeliveryDate.getUTCMonth(), actualDeliveryDate.getUTCDate());
-  const expectedDay = Date.UTC(expectedDeliveryDate.getUTCFullYear(), expectedDeliveryDate.getUTCMonth(), expectedDeliveryDate.getUTCDate());
+  const actualDay = new Date(actualDeliveryDate.getFullYear(), actualDeliveryDate.getMonth(), actualDeliveryDate.getDate());
+  const expectedDay = new Date(expectedDeliveryDate.getFullYear(), expectedDeliveryDate.getMonth(), expectedDeliveryDate.getDate());
 
-  return actualDay <= expectedDay;
+  return actualDay.getTime() <= expectedDay.getTime();
 }
 
 /**
@@ -99,10 +99,10 @@ export function calculateLeadTimeVariance(
   if (!actualDeliveryDate || !expectedDeliveryDate) return null;
 
   const msPerDay = 1000 * 60 * 60 * 24;
-  const actualDay = Date.UTC(actualDeliveryDate.getUTCFullYear(), actualDeliveryDate.getUTCMonth(), actualDeliveryDate.getUTCDate());
-  const expectedDay = Date.UTC(expectedDeliveryDate.getUTCFullYear(), expectedDeliveryDate.getUTCMonth(), expectedDeliveryDate.getUTCDate());
+  const actualDay = new Date(actualDeliveryDate.getFullYear(), actualDeliveryDate.getMonth(), actualDeliveryDate.getDate());
+  const expectedDay = new Date(expectedDeliveryDate.getFullYear(), expectedDeliveryDate.getMonth(), expectedDeliveryDate.getDate());
 
-  return Math.round((actualDay - expectedDay) / msPerDay);
+  return Math.round((actualDay.getTime() - expectedDay.getTime()) / msPerDay);
 }
 
 /**

@@ -49,7 +49,6 @@ const envSchema = z.object({
   // Application
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   APP_URL: z.string().url().default('http://localhost:5173'),
-  CORS_ORIGINS: z.string().optional(),
   SERVICE_HOST: z.string().default('localhost'),
   API_GATEWAY_PORT: z.coerce.number().default(3000),
   AUTH_SERVICE_PORT: z.coerce.number().default(3001),
@@ -105,15 +104,6 @@ export const serviceUrls = {
   orders: config.ORDERS_SERVICE_URL || `http://${config.SERVICE_HOST}:${config.ORDERS_SERVICE_PORT}`,
   notifications: config.NOTIFICATIONS_SERVICE_URL || `http://${config.SERVICE_HOST}:${config.NOTIFICATIONS_SERVICE_PORT}`,
 } as const;
-
-// ─── CORS Origins ────────────────────────────────────────────────────
-export function getCorsOrigins(): string | string[] {
-  const raw = config.CORS_ORIGINS;
-  if (!raw) return config.APP_URL;
-
-  const origins = raw.split(',').map((o) => o.trim()).filter(Boolean);
-  return origins.length === 1 ? origins[0] : origins;
-}
 
 // ─── Structured Logger Factory ───────────────────────────────────────
 export function createLogger(name: string) {
