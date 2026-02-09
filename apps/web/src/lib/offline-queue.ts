@@ -39,6 +39,13 @@ export interface QueueStatusCounts {
   total: number;
 }
 
+export interface EnqueueScanOptions {
+  /** Reuse a client-generated key to preserve idempotency across retries */
+  idempotencyKey?: string;
+  /** Preserve the original capture time when retrying online/offline paths */
+  scannedAt?: string;
+}
+
 // ─── Constants ──────────────────────────────────────────────────────
 
 const DB_NAME = 'arda-offline-queue';
@@ -53,6 +60,9 @@ const BASE_DELAY_MS = 1000;
 
 /** Maximum backoff delay (ms) */
 const MAX_DELAY_MS = 30000;
+
+/** Syncing entries older than this are treated as interrupted and retried */
+const STALE_SYNCING_TIMEOUT_MS = 60_000;
 
 // ─── IndexedDB Helpers ──────────────────────────────────────────────
 
@@ -137,12 +147,13 @@ function generateIdempotencyKey(cardId: string): string {
 export async function enqueueScan(
   cardId: string,
   location?: { lat: number; lng: number },
+  options?: EnqueueScanOptions,
 ): Promise<QueuedScanEvent> {
   const event: QueuedScanEvent = {
     id: generateQueueId(),
     cardId,
-    idempotencyKey: generateIdempotencyKey(cardId),
-    scannedAt: new Date().toISOString(),
+    idempotencyKey: options?.idempotencyKey ?? generateIdempotencyKey(cardId),
+    scannedAt: options?.scannedAt ?? new Date().toISOString(),
     location,
     status: 'pending',
     retryCount: 0,
@@ -286,6 +297,30 @@ export function isRetryable(errorCode?: string): boolean {
 }
 
 /**
+ * Move stale "syncing" rows back to pending.
+ * This recovers scans interrupted by tab/app crashes mid-replay.
+ */
+export async function recoverStaleSyncingItems(
+  staleAfterMs: number = STALE_SYNCING_TIMEOUT_MS,
+): Promise<number> {
+  const syncingEvents = await getQueuedEvents('syncing');
+  if (syncingEvents.length === 0) return 0;
+
+  const now = Date.now();
+  let recovered = 0;
+
+  for (const event of syncingEvents) {
+    const attemptedAt = event.lastAttemptAt ? new Date(event.lastAttemptAt).getTime() : 0;
+    if (!attemptedAt || now - attemptedAt >= staleAfterMs) {
+      await updateQueueItem(event.id, { status: 'pending' });
+      recovered++;
+    }
+  }
+
+  return recovered;
+}
+
+/**
  * Replay all pending queue items using the provided send function.
  * Returns the number of items processed.
  */
@@ -295,6 +330,7 @@ export async function replayQueue(sendFn: ReplayFn): Promise<{
   failed: number;
   conflicts: number;
 }> {
+  await recoverStaleSyncingItems();
   const pending = await getQueuedEvents('pending');
   let processed = 0;
   let succeeded = 0;
