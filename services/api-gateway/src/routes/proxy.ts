@@ -80,6 +80,15 @@ export function setupProxies(app: Express): void {
             proxyReq.setHeader('x-forwarded-for', String(clientIp));
           }
         },
+        proxyRes: (proxyRes) => {
+          // Enforce gateway-level CORS policy only; ignore upstream CORS headers.
+          delete proxyRes.headers['access-control-allow-origin'];
+          delete proxyRes.headers['access-control-allow-credentials'];
+          delete proxyRes.headers['access-control-allow-methods'];
+          delete proxyRes.headers['access-control-allow-headers'];
+          delete proxyRes.headers['access-control-expose-headers'];
+          delete proxyRes.headers['access-control-max-age'];
+        },
         error: (err, _req, res) => {
           log.error({ prefix: route.prefix, err: err.message }, 'Proxy error');
           if ('writeHead' in res && typeof res.writeHead === 'function') {
