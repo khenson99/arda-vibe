@@ -221,4 +221,112 @@ describe('event-listener service', () => {
       })
     );
   });
+
+  it('creates exception alerts for cancelled or on-hold statuses', async () => {
+    testState.activeUsers = [{ id: 'user-1' }];
+    await startEventListener('redis://test:6379');
+
+    await dispatchEvent({
+      type: 'order.status_changed',
+      tenantId: 'tenant-1',
+      orderType: 'purchase_order',
+      orderId: 'po-1',
+      orderNumber: 'PO-1002',
+      fromStatus: 'approved',
+      toStatus: 'cancelled',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(testState.insertedRows[0]).toEqual(
+      expect.objectContaining({
+        type: 'exception_alert',
+        title: 'Purchase order cancelled',
+      })
+    );
+
+    publishMock.mockClear();
+
+    await dispatchEvent({
+      type: 'order.status_changed',
+      tenantId: 'tenant-1',
+      orderType: 'work_order',
+      orderId: 'wo-2',
+      orderNumber: 'WO-2001',
+      fromStatus: 'in_progress',
+      toStatus: 'on_hold',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(testState.insertedRows[0]).toEqual(
+      expect.objectContaining({
+        type: 'exception_alert',
+        title: 'Work order requires attention',
+      })
+    );
+    expect(publishMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationType: 'exception_alert',
+      })
+    );
+  });
+
+  it('creates system alert notifications for loop parameter changes', async () => {
+    testState.activeUsers = [{ id: 'user-1' }];
+    await startEventListener('redis://test:6379');
+
+    await dispatchEvent({
+      type: 'loop.parameters_changed',
+      tenantId: 'tenant-1',
+      loopId: 'loop-123',
+      changeType: 'min_quantity',
+      reason: 'Adjusted from velocity trend',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(testState.insertedRows[0]).toEqual(
+      expect.objectContaining({
+        type: 'system_alert',
+        title: 'Kanban parameters updated',
+        actionUrl: '/loops/loop-123',
+      })
+    );
+    expect(publishMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationType: 'system_alert',
+      })
+    );
+  });
+
+  it('creates stockout warning notifications for queue risk events', async () => {
+    testState.activeUsers = [{ id: 'user-1' }];
+    await startEventListener('redis://test:6379');
+
+    await dispatchEvent({
+      type: 'queue.risk_detected',
+      tenantId: 'tenant-1',
+      queueType: 'procurement',
+      loopId: 'loop-1',
+      cardId: 'card-42',
+      partId: 'part-1',
+      facilityId: 'facility-1',
+      riskLevel: 'high',
+      triggeredAgeHours: 96,
+      estimatedDaysOfSupply: 1.5,
+      reason: 'triggered age 96h exceeds high threshold 48h',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(testState.insertedRows[0]).toEqual(
+      expect.objectContaining({
+        type: 'stockout_warning',
+        title: 'High stockout risk detected',
+        actionUrl: '/queue?loopType=procurement',
+      })
+    );
+    expect(publishMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationType: 'stockout_warning',
+      })
+    );
+  });
 });

@@ -15,6 +15,7 @@ const schemaMock = vi.hoisted(() => {
       action: 'audit_log.action',
       entityType: 'audit_log.entity_type',
       entityId: 'audit_log.entity_id',
+      newState: 'audit_log.new_state',
       timestamp: 'audit_log.timestamp',
     },
   };
@@ -28,6 +29,7 @@ const { dbMock, resetDbMockCalls } = vi.hoisted(() => {
     builder.orderBy = () => builder;
     builder.limit = () => builder;
     builder.offset = () => builder;
+    builder.groupBy = () => builder;
     builder.execute = async () => result;
     builder.then = (
       resolve: (value: unknown) => unknown,
@@ -49,6 +51,7 @@ const { dbMock, resetDbMockCalls } = vi.hoisted(() => {
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn(() => ({})),
+  asc: vi.fn(() => ({})),
   desc: vi.fn(() => ({})),
   eq: vi.fn(() => ({})),
   sql: vi.fn(() => ({})),
@@ -92,8 +95,14 @@ async function getJson(
     }
 
     const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
-    const json = (await response.json()) as Record<string, any>;
-    return { status: response.status, body: json };
+    const text = await response.text();
+    let body: Record<string, any>;
+    try {
+      body = JSON.parse(text) as Record<string, any>;
+    } catch {
+      body = { error: text };
+    }
+    return { status: response.status, body };
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -140,9 +149,112 @@ describe('audit routes', () => {
     expect(response.body.data).toHaveLength(2);
   });
 
+  it('returns audit summary aggregates', async () => {
+    testState.selectResults = [
+      [{ count: 5 }],
+      [
+        { action: 'purchase_order.created', count: 2 },
+        { action: 'work_order.status_changed', count: 3 },
+      ],
+      [
+        { entityType: 'purchase_order', count: 2 },
+        { entityType: 'work_order', count: 3 },
+      ],
+      [
+        { bucket: '2026-02-08', count: 1 },
+        { bucket: '2026-02-09', count: 4 },
+      ],
+      [
+        { status: 'sent', count: 3 },
+        { status: 'received', count: 2 },
+      ],
+      [
+        { action: 'purchase_order.created', count: 6 },
+        { action: 'work_order.status_changed', count: 4 },
+      ],
+      [{ action: 'work_order.status_changed', count: 2 }],
+    ];
+
+    const app = createTestApp(true);
+    const response = await getJson(
+      app,
+      '/audit/summary?granularity=day&dateFrom=2026-02-01T00:00:00.000Z&dateTo=2026-02-09T23:59:59.999Z'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual({
+      total: 5,
+      byAction: [
+        { action: 'purchase_order.created', count: 2 },
+        { action: 'work_order.status_changed', count: 3 },
+      ],
+      byEntityType: [
+        { entityType: 'purchase_order', count: 2 },
+        { entityType: 'work_order', count: 3 },
+      ],
+      byTimeBucket: [
+        { bucket: '2026-02-08', count: 1 },
+        { bucket: '2026-02-09', count: 4 },
+      ],
+      topActions: [
+        { action: 'work_order.status_changed', count: 3 },
+        { action: 'purchase_order.created', count: 2 },
+      ],
+      statusTransitionFunnel: [
+        { status: 'sent', count: 3 },
+        { status: 'received', count: 2 },
+      ],
+      recentAnomalies: [
+        {
+          action: 'purchase_order.created',
+          currentCount: 6,
+          previousCount: 0,
+          delta: 6,
+          percentChange: null,
+          severity: 'high',
+        },
+      ],
+    });
+    expect(response.body.filters.granularity).toBe('day');
+  });
+
+  it('supports week granularity in summary', async () => {
+    testState.selectResults = [
+      [{ count: 3 }],
+      [{ action: 'transfer_order.lines_received', count: 3 }],
+      [{ entityType: 'transfer_order', count: 3 }],
+      [{ bucket: '2026-W06', count: 3 }],
+      [{ status: 'received', count: 3 }],
+      [],
+      [],
+    ];
+
+    const app = createTestApp(true);
+    const response = await getJson(app, '/audit/summary?granularity=week');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.byTimeBucket).toEqual([{ bucket: '2026-W06', count: 3 }]);
+    expect(response.body.data.topActions).toEqual([
+      { action: 'transfer_order.lines_received', count: 3 },
+    ]);
+    expect(response.body.data.statusTransitionFunnel).toEqual([
+      { status: 'received', count: 3 },
+    ]);
+    expect(response.body.data.recentAnomalies).toEqual([]);
+    expect(response.body.filters.granularity).toBe('week');
+  });
+
   it('returns 401 without tenant context', async () => {
     const app = createTestApp(false);
     const response = await getJson(app, '/audit');
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: 'Unauthorized' });
+  });
+
+  it('returns 401 for summary without tenant context', async () => {
+    const app = createTestApp(false);
+    const response = await getJson(app, '/audit/summary');
 
     expect(response.status).toBe(401);
     expect(response.body).toEqual({ error: 'Unauthorized' });

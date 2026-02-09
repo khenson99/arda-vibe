@@ -14,6 +14,7 @@ import { transferOrdersRouter } from './routes/transfer-orders.routes.js';
 import { orderQueueRouter } from './routes/order-queue.routes.js';
 import { auditRouter } from './routes/audit.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { startQueueRiskScheduler } from './services/queue-risk-scheduler.service.js';
 
 const app = express();
 
@@ -58,9 +59,19 @@ const server = app.listen(PORT, () => {
   log.info({ port: PORT }, 'Orders service started');
 });
 
+const queueRiskScheduler = startQueueRiskScheduler({
+  enabled: config.ORDERS_QUEUE_RISK_SCAN_ENABLED,
+  intervalMinutes: config.ORDERS_QUEUE_RISK_SCAN_INTERVAL_MINUTES,
+  lookbackDays: config.ORDERS_QUEUE_RISK_LOOKBACK_DAYS,
+  minRiskLevel: config.ORDERS_QUEUE_RISK_MIN_LEVEL,
+  limit: config.ORDERS_QUEUE_RISK_SCAN_LIMIT,
+});
+void queueRiskScheduler.runOnce();
+
 // ─── Graceful Shutdown ───────────────────────────────────────────────
 function shutdown(signal: string) {
   log.info({ signal }, 'Shutting down gracefully');
+  queueRiskScheduler.stop();
   server.close(() => {
     log.info('HTTP server closed');
     process.exit(0);

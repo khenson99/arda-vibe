@@ -28,7 +28,7 @@ vi.mock('../services/card-lifecycle.service.js', () => ({
   transitionTriggeredCardToOrdered: vi.fn(),
 }));
 
-import { emitQueueOrderEvents } from './order-queue.routes.js';
+import { emitQueueOrderEvents, publishQueueRiskDetectedEvents } from './order-queue.routes.js';
 
 describe('emitQueueOrderEvents', () => {
   beforeEach(() => {
@@ -106,5 +106,81 @@ describe('emitQueueOrderEvents', () => {
         orderId: 'po-2',
       })
     );
+  });
+});
+
+describe('publishQueueRiskDetectedEvents', () => {
+  beforeEach(() => {
+    publishMock.mockReset();
+    getEventBusMock.mockClear();
+  });
+
+  it('publishes queue.risk_detected for each risk item', async () => {
+    await publishQueueRiskDetectedEvents({
+      tenantId: 'tenant-1',
+      risks: [
+        {
+          cardId: 'card-1',
+          loopId: 'loop-1',
+          loopType: 'procurement',
+          queueType: 'procurement',
+          partId: 'part-1',
+          facilityId: 'fac-1',
+          riskLevel: 'high',
+          triggeredAgeHours: 72,
+          estimatedDaysOfSupply: 1.2,
+          reason: 'triggered age 72h exceeds high threshold 48h',
+          thresholds: {
+            ageHours: { medium: 36, high: 48 },
+            daysOfSupply: { medium: 3, high: 1 },
+          },
+        },
+        {
+          cardId: 'card-2',
+          loopId: 'loop-2',
+          loopType: 'production',
+          queueType: 'production',
+          partId: 'part-2',
+          facilityId: 'fac-2',
+          riskLevel: 'medium',
+          triggeredAgeHours: 20,
+          estimatedDaysOfSupply: null,
+          reason: 'triggered age 20h exceeds medium threshold 18h',
+          thresholds: {
+            ageHours: { medium: 18, high: 24 },
+            daysOfSupply: null,
+          },
+        },
+      ],
+    });
+
+    expect(publishMock).toHaveBeenCalledTimes(2);
+    expect(publishMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'queue.risk_detected',
+        tenantId: 'tenant-1',
+        queueType: 'procurement',
+        cardId: 'card-1',
+        riskLevel: 'high',
+      })
+    );
+    expect(publishMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'queue.risk_detected',
+        tenantId: 'tenant-1',
+        queueType: 'production',
+        cardId: 'card-2',
+        riskLevel: 'medium',
+      })
+    );
+  });
+
+  it('does not publish events when risk list is empty', async () => {
+    await publishQueueRiskDetectedEvents({
+      tenantId: 'tenant-1',
+      risks: [],
+    });
+
+    expect(publishMock).not.toHaveBeenCalled();
   });
 });

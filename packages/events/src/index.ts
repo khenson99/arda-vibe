@@ -55,6 +55,21 @@ export interface ReloWisaRecommendationEvent {
   timestamp: string;
 }
 
+export interface QueueRiskDetectedEvent {
+  type: 'queue.risk_detected';
+  tenantId: string;
+  queueType: 'procurement' | 'production' | 'transfer';
+  loopId: string;
+  cardId: string;
+  partId: string;
+  facilityId: string;
+  riskLevel: 'medium' | 'high';
+  triggeredAgeHours: number;
+  estimatedDaysOfSupply: number | null;
+  reason: string;
+  timestamp: string;
+}
+
 export interface NotificationEvent {
   type: 'notification.created';
   tenantId: string;
@@ -71,6 +86,7 @@ export type ArdaEvent =
   | OrderStatusChangedEvent
   | LoopParameterChangedEvent
   | ReloWisaRecommendationEvent
+  | QueueRiskDetectedEvent
   | NotificationEvent;
 
 // ─── Event Channel Names ────────────────────────────────────────────

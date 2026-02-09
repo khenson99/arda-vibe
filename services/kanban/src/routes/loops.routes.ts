@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, sql, gt } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
+import { getEventBus } from '@arda/events';
+import { config } from '@arda/config';
 import type { AuthRequest } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
 
@@ -215,6 +217,24 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
       where: eq(kanbanLoops.id, req.params.id as string),
       with: { cards: true },
     });
+
+    if (updated) {
+      try {
+        const eventBus = getEventBus(config.REDIS_URL);
+        await eventBus.publish({
+          type: 'loop.parameters_changed',
+          tenantId,
+          loopId: updated.id,
+          changeType: 'manual',
+          reason: input.reason,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        console.error(
+          `[loops] Failed to publish loop.parameters_changed event for loop ${req.params.id as string}`
+        );
+      }
+    }
 
     res.json(updated);
   } catch (err) {

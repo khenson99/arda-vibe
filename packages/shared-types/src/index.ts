@@ -95,6 +95,72 @@ export type NotificationType =
   | 'transfer_status_change'
   | 'system_alert';
 
+// ─── Audit Summary API ───────────────────────────────────────────────
+export type AuditSummaryGranularity = 'day' | 'week';
+
+export interface AuditSummaryQuery {
+  action?: string;
+  entityType?: string;
+  entityId?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  granularity?: AuditSummaryGranularity;
+}
+
+export interface AuditSummaryCountByAction {
+  action: string;
+  count: number;
+}
+
+export interface AuditSummaryCountByEntityType {
+  entityType: string;
+  count: number;
+}
+
+export interface AuditSummaryCountByTimeBucket {
+  bucket: string;
+  count: number;
+}
+
+export interface AuditSummaryStatusTransition {
+  status: string;
+  count: number;
+}
+
+export interface AuditSummaryRecentAnomaly {
+  action: string;
+  currentCount: number;
+  previousCount: number;
+  delta: number;
+  percentChange: number | null;
+  severity: 'medium' | 'high';
+}
+
+export interface AuditSummaryData {
+  total: number;
+  byAction: AuditSummaryCountByAction[];
+  byEntityType: AuditSummaryCountByEntityType[];
+  byTimeBucket: AuditSummaryCountByTimeBucket[];
+  topActions: AuditSummaryCountByAction[];
+  statusTransitionFunnel: AuditSummaryStatusTransition[];
+  recentAnomalies: AuditSummaryRecentAnomaly[];
+}
+
+export interface AuditSummaryFilters extends Required<Pick<AuditSummaryQuery, 'granularity'>> {
+  action?: string;
+  entityType?: string;
+  entityId?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface AuditSummaryResponse {
+  data: AuditSummaryData;
+  filters: AuditSummaryFilters;
+}
+
 // ─── API Response Types ──────────────────────────────────────────────
 export interface ApiResponse<T = unknown> {
   data?: T;

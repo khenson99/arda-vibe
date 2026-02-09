@@ -2,6 +2,16 @@ import { z } from 'zod';
 import pino from 'pino';
 import 'dotenv/config';
 
+const booleanFromEnv = z.preprocess((value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return value;
+}, z.boolean());
+
 // ─── Environment Schema ───────────────────────────────────────────────
 const envSchema = z.object({
   // Database
@@ -46,6 +56,13 @@ const envSchema = z.object({
   KANBAN_SERVICE_PORT: z.coerce.number().default(3003),
   ORDERS_SERVICE_PORT: z.coerce.number().default(3004),
   NOTIFICATIONS_SERVICE_PORT: z.coerce.number().default(3005),
+
+  // Queue Risk Scheduler (Orders Service)
+  ORDERS_QUEUE_RISK_SCAN_ENABLED: booleanFromEnv.default(true),
+  ORDERS_QUEUE_RISK_SCAN_INTERVAL_MINUTES: z.coerce.number().int().positive().default(15),
+  ORDERS_QUEUE_RISK_LOOKBACK_DAYS: z.coerce.number().int().min(7).max(90).default(30),
+  ORDERS_QUEUE_RISK_MIN_LEVEL: z.enum(['medium', 'high']).default('medium'),
+  ORDERS_QUEUE_RISK_SCAN_LIMIT: z.coerce.number().int().positive().max(500).default(100),
 
   // Railway dynamic port (overrides service-specific ports)
   PORT: z.coerce.number().optional(),

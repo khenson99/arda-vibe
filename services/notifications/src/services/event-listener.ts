@@ -16,6 +16,14 @@ function buildOrderStatusNotification(event: OrderStatusChangedEvent): {
   const transitionBody = `${event.orderNumber} moved from ${formatStatus(event.fromStatus)} to ${formatStatus(event.toStatus)}.`;
 
   if (event.orderType === 'purchase_order') {
+    if (event.toStatus === 'cancelled') {
+      return {
+        type: 'exception_alert',
+        title: 'Purchase order cancelled',
+        body: transitionBody,
+      };
+    }
+
     if (event.toStatus === 'sent') {
       return {
         type: 'po_sent',
@@ -43,9 +51,25 @@ function buildOrderStatusNotification(event: OrderStatusChangedEvent): {
   }
 
   if (event.orderType === 'work_order') {
+    if (event.toStatus === 'on_hold' || event.toStatus === 'cancelled') {
+      return {
+        type: 'exception_alert',
+        title: 'Work order requires attention',
+        body: transitionBody,
+      };
+    }
+
     return {
       type: 'wo_status_change',
       title: 'Work order status updated',
+      body: transitionBody,
+    };
+  }
+
+  if (event.toStatus === 'cancelled') {
+    return {
+      type: 'exception_alert',
+      title: 'Transfer order cancelled',
       body: transitionBody,
     };
   }
@@ -111,6 +135,29 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           break;
         }
 
+        case 'queue.risk_detected':
+          await createNotification(eventBus, {
+            tenantId: event.tenantId,
+            type: 'stockout_warning',
+            title:
+              event.riskLevel === 'high'
+                ? 'High stockout risk detected'
+                : 'Stockout risk detected',
+            body: `${event.queueType.replace('_', ' ')} queue risk for card ${event.cardId}: ${event.reason}`,
+            actionUrl: `/queue?loopType=${event.queueType}`,
+            metadata: {
+              queueType: event.queueType,
+              cardId: event.cardId,
+              loopId: event.loopId,
+              partId: event.partId,
+              facilityId: event.facilityId,
+              riskLevel: event.riskLevel,
+              triggeredAgeHours: event.triggeredAgeHours,
+              estimatedDaysOfSupply: event.estimatedDaysOfSupply,
+            },
+          });
+          break;
+
         case 'relowisa.recommendation':
           await createNotification(eventBus, {
             tenantId: event.tenantId,
@@ -119,6 +166,21 @@ export async function startEventListener(redisUrl: string): Promise<void> {
             body: `Parameter optimization suggested for loop ${event.loopId} (confidence: ${event.confidenceScore}%)`,
             actionUrl: `/loops/${event.loopId}/recommendations/${event.recommendationId}`,
             metadata: { loopId: event.loopId, recommendationId: event.recommendationId },
+          });
+          break;
+
+        case 'loop.parameters_changed':
+          await createNotification(eventBus, {
+            tenantId: event.tenantId,
+            type: 'system_alert',
+            title: 'Kanban parameters updated',
+            body: `Loop ${event.loopId} parameters changed (${event.changeType}): ${event.reason}`,
+            actionUrl: `/loops/${event.loopId}`,
+            metadata: {
+              loopId: event.loopId,
+              changeType: event.changeType,
+              reason: event.reason,
+            },
           });
           break;
       }
