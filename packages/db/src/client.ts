@@ -9,11 +9,17 @@ if (!connectionString) {
   throw new Error('DATABASE_URL environment variable is required');
 }
 
+// All custom schemas used by the application.
+// Required because Drizzle's relational query API (db.query.*) does not
+// schema-qualify table names even when tables are defined via pgSchema().
+const SEARCH_PATH = 'auth,catalog,kanban,orders,locations,notifications,billing,audit,public';
+
 // Query client (pooled connections for application use)
 const queryClient = postgres(connectionString, {
   max: 20,
   idle_timeout: 20,
   connect_timeout: 10,
+  connection: { search_path: SEARCH_PATH },
 });
 
 // Drizzle instance with full schema for type-safe queries
@@ -42,6 +48,7 @@ export function createMigrationClient() {
   const migrationClient = postgres(connectionString, {
     max: 1,
     connect_timeout: 30,
+    connection: { search_path: SEARCH_PATH },
   });
   return drizzle(migrationClient, { schema });
 }
@@ -57,6 +64,7 @@ export function createDbPool(options?: { max?: number; idleTimeout?: number }) {
     max: options?.max ?? 20,
     idle_timeout: options?.idleTimeout ?? 20,
     connect_timeout: 10,
+    connection: { search_path: SEARCH_PATH },
   });
   return drizzle(poolClient, { schema });
 }
