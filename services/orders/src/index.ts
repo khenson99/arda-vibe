@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { config, createLogger } from '@arda/config';
+import { config, createLogger, getCorsOrigins } from '@arda/config';
 
 const log = createLogger('orders');
 import { db } from '@arda/db';

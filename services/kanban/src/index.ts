@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { config, createLogger } from '@arda/config';
+import { config, createLogger, getCorsOrigins } from '@arda/config';
 
 const log = createLogger('kanban');
 import { db } from '@arda/db';
@@ -18,7 +18,7 @@ import { errorHandler } from './middleware/error-handler.js';
 const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: config.APP_URL, credentials: true }));
+app.use(cors({ origin: getCorsOrigins(), credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 
 // ─── Health Check ─────────────────────────────────────────────────────
