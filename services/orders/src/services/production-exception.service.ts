@@ -13,7 +13,7 @@
  */
 
 import { db, schema } from '@arda/db';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
@@ -22,6 +22,7 @@ const log = createLogger('production-exception');
 
 const {
   workOrders,
+  workOrderRoutings,
   productionOperationLogs,
   productionQueueEntries,
   auditLog,
@@ -108,36 +109,26 @@ export async function checkScrapThreshold(
   // Create a rework WO for the scrapped quantity
   const now = new Date();
   const reworkWoNumber = `${wo.woNumber}-RW`;
-  const reworkPriority = Math.min(100, wo.priority + 10);
-
-  let linkedCard: { id: string; loopId: string } | null = null;
-  if (wo.kanbanCardId) {
-    const [card] = await db
-      .select({ id: kanbanCards.id, loopId: kanbanCards.loopId })
-      .from(kanbanCards)
-      .where(and(eq(kanbanCards.id, wo.kanbanCardId), eq(kanbanCards.tenantId, tenantId)))
-      .execute();
-    if (card) linkedCard = card;
-  }
 
   const [reworkWo] = await db
     .insert(workOrders)
     .values({
       tenantId,
       woNumber: reworkWoNumber,
-      kanbanCardId: wo.kanbanCardId,
+      cardId: wo.cardId,
+      loopId: wo.loopId,
       partId: wo.partId,
       facilityId: wo.facilityId,
       quantityToProduce: wo.quantityScrapped,
       quantityProduced: 0,
-      quantityRejected: 0,
       quantityScrapped: 0,
       status: 'draft',
       isExpedited: wo.isExpedited,
       isRework: true,
       parentWorkOrderId: workOrderId,
       routingTemplateId: wo.routingTemplateId,
-      priority: reworkPriority,
+      priorityScore: Math.min(100, wo.priorityScore + 10), // bump priority for rework
+      manualPriority: wo.manualPriority,
       createdAt: now,
       updatedAt: now,
     })
@@ -148,28 +139,21 @@ export async function checkScrapThreshold(
   await db.insert(productionQueueEntries).values({
     tenantId,
     workOrderId: reworkWo.id,
-    cardId: linkedCard?.id ?? null,
-    loopId: linkedCard?.loopId ?? null,
-    partId: wo.partId,
     facilityId: wo.facilityId,
-    priorityScore: reworkPriority.toFixed(4),
-    manualPriority: reworkPriority,
-    isExpedited: wo.isExpedited,
-    status: 'pending',
+    priorityScore: Math.min(100, wo.priorityScore + 10),
     enteredQueueAt: now,
-  }).execute();
+  });
 
   // Log the rework creation
   await db.insert(productionOperationLogs).values({
     tenantId,
     workOrderId,
     operationType: 'rework',
-    quantityProduced: 0,
-    quantityRejected: 0,
-    quantityScrapped: wo.quantityScrapped,
+    quantity: wo.quantityScrapped,
     notes: `Auto-rework: scrap rate ${scrapRate.toFixed(1)}% exceeded ${scrapThresholdPercent}% threshold. Rework WO: ${reworkWoNumber}`,
-    operatorUserId: userId || null,
-  }).execute();
+    performedByUserId: userId || null,
+    performedAt: now,
+  });
 
   // Audit
   await db.insert(auditLog).values({
@@ -236,7 +220,7 @@ export async function handleMaterialShortageHold(
     return { requeued: false, reason: 'WO is not on hold for material shortage' };
   }
 
-  if (!wo.kanbanCardId) {
+  if (!wo.cardId) {
     return { requeued: false, reason: 'WO has no linked Kanban card' };
   }
 
@@ -248,7 +232,7 @@ export async function handleMaterialShortageHold(
       currentStage: kanbanCards.currentStage,
     })
     .from(kanbanCards)
-    .where(and(eq(kanbanCards.id, wo.kanbanCardId), eq(kanbanCards.tenantId, tenantId)))
+    .where(and(eq(kanbanCards.id, wo.cardId), eq(kanbanCards.tenantId, tenantId)))
     .execute();
 
   if (!card) {
@@ -263,8 +247,9 @@ export async function handleMaterialShortageHold(
     workOrderId,
     operationType: 'hold',
     notes: `Material shortage detected. Card ${card.id} flagged for procurement review.`,
-    operatorUserId: userId || null,
-  }).execute();
+    performedByUserId: userId || null,
+    performedAt: now,
+  });
 
   // Audit the requeue intent
   await db.insert(auditLog).values({
@@ -365,36 +350,26 @@ export async function checkShortCompletion(
 
   const now = new Date();
   const followUpWoNumber = `${wo.woNumber}-FU`;
-  const followUpPriority = wo.priority;
-
-  let linkedCard: { id: string; loopId: string } | null = null;
-  if (wo.kanbanCardId) {
-    const [card] = await db
-      .select({ id: kanbanCards.id, loopId: kanbanCards.loopId })
-      .from(kanbanCards)
-      .where(and(eq(kanbanCards.id, wo.kanbanCardId), eq(kanbanCards.tenantId, tenantId)))
-      .execute();
-    if (card) linkedCard = card;
-  }
 
   const [followUpWo] = await db
     .insert(workOrders)
     .values({
       tenantId,
       woNumber: followUpWoNumber,
-      kanbanCardId: wo.kanbanCardId,
+      cardId: wo.cardId,
+      loopId: wo.loopId,
       partId: wo.partId,
       facilityId: wo.facilityId,
       quantityToProduce: shortfall,
       quantityProduced: 0,
-      quantityRejected: 0,
       quantityScrapped: 0,
       status: 'draft',
       isExpedited: wo.isExpedited,
       isRework: false,
       parentWorkOrderId: workOrderId,
       routingTemplateId: wo.routingTemplateId,
-      priority: followUpPriority,
+      priorityScore: wo.priorityScore,
+      manualPriority: wo.manualPriority,
       createdAt: now,
       updatedAt: now,
     })
@@ -405,16 +380,10 @@ export async function checkShortCompletion(
   await db.insert(productionQueueEntries).values({
     tenantId,
     workOrderId: followUpWo.id,
-    cardId: linkedCard?.id ?? null,
-    loopId: linkedCard?.loopId ?? null,
-    partId: wo.partId,
     facilityId: wo.facilityId,
-    priorityScore: followUpPriority.toFixed(4),
-    manualPriority: followUpPriority,
-    isExpedited: wo.isExpedited,
-    status: 'pending',
+    priorityScore: wo.priorityScore,
     enteredQueueAt: now,
-  }).execute();
+  });
 
   // Audit
   await db.insert(auditLog).values({

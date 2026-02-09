@@ -38,7 +38,10 @@
  */
 
 import { db, schema } from '@arda/db';
-import { eq, and, sql, gte, lte, asc } from 'drizzle-orm';
+import { eq, and, sql, gte, lte, desc, asc, count } from 'drizzle-orm';
+import { createLogger } from '@arda/config';
+
+const log = createLogger('production-analytics');
 
 const {
   workOrders,
@@ -170,8 +173,8 @@ export async function getProductionMetrics(
     .select({
       avgCycleTimeHours: sql<number | null>`
         avg(
-          extract(epoch from (${workOrders.actualEndDate} - ${workOrders.actualStartDate})) / 3600
-        ) filter (where ${workOrders.actualEndDate} is not null and ${workOrders.actualStartDate} is not null)
+          extract(epoch from (${workOrders.completedAt} - ${workOrders.startedAt})) / 3600
+        ) filter (where ${workOrders.completedAt} is not null and ${workOrders.startedAt} is not null)
       `,
     })
     .from(workOrders)
@@ -181,8 +184,8 @@ export async function getProductionMetrics(
   // Average WOs completed per day
   const [dateRange] = await db
     .select({
-      minDate: sql<string | null>`min(${workOrders.actualEndDate})`,
-      maxDate: sql<string | null>`max(${workOrders.actualEndDate})`,
+      minDate: sql<string | null>`min(${workOrders.completedAt})`,
+      maxDate: sql<string | null>`max(${workOrders.completedAt})`,
     })
     .from(workOrders)
     .where(and(...completedConditions))
@@ -207,7 +210,7 @@ export async function getProductionMetrics(
       avgWaitHours: sql<number | null>`
         avg(
           extract(epoch from (
-            coalesce(${productionQueueEntries.completedAt}, now()) - ${productionQueueEntries.enteredQueueAt}
+            coalesce(${productionQueueEntries.exitedQueueAt}, now()) - ${productionQueueEntries.enteredQueueAt}
           )) / 3600
         )
       `,
@@ -308,12 +311,12 @@ export async function getProductionMetrics(
   // ── Queue Health (single aggregate on queue_entries) ──
   const [queueHealth] = await db
     .select({
-      currentBacklog: sql<number>`count(*) filter (where ${productionQueueEntries.completedAt} is null)::int`,
-      avgPriority: sql<number>`coalesce(avg(${productionQueueEntries.priorityScore}) filter (where ${productionQueueEntries.completedAt} is null), 0)`,
+      currentBacklog: sql<number>`count(*) filter (where ${productionQueueEntries.exitedQueueAt} is null)::int`,
+      avgPriority: sql<number>`coalesce(avg(${productionQueueEntries.priorityScore}) filter (where ${productionQueueEntries.exitedQueueAt} is null), 0)`,
       oldestAgeHours: sql<number | null>`
         max(
           extract(epoch from (now() - ${productionQueueEntries.enteredQueueAt})) / 3600
-        ) filter (where ${productionQueueEntries.completedAt} is null)
+        ) filter (where ${productionQueueEntries.exitedQueueAt} is null)
       `,
       expeditedInQueue: sql<number>`0::int`, // would require join to workOrders
     })
