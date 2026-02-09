@@ -31,6 +31,10 @@ export interface UseScanSessionReturn {
   resolveConflict: (queueItemId: string, action: ConflictAction) => Promise<void>;
 }
 
+function buildScanIdempotencyKey(cardId: string, sessionId: string, scannedAt: string): string {
+  return `scan-${cardId}-${sessionId}-${Date.parse(scannedAt)}`;
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────
 
 export function useScanSession(): UseScanSessionReturn {
@@ -40,6 +44,11 @@ export function useScanSession(): UseScanSessionReturn {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const replayAdapter = useRef(createReplayAdapter());
+  const scanSessionId = useRef(
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10),
+  );
 
   const queue = useOfflineQueue({
     sendFn: replayAdapter.current,
@@ -79,11 +88,13 @@ export function useScanSession(): UseScanSessionReturn {
     async (cardId: string) => {
       setIsProcessing(true);
       setState('processing');
+      const scannedAt = new Date().toISOString();
+      const idempotencyKey = buildScanIdempotencyKey(cardId, scanSessionId.current, scannedAt);
 
       // If offline, queue immediately
       if (!queue.isOnline) {
         try {
-          await queue.enqueue(cardId);
+          await queue.enqueue(cardId, undefined, { idempotencyKey, scannedAt });
           setResult({
             type: 'queued',
             title: 'Scan Queued',
@@ -107,7 +118,7 @@ export function useScanSession(): UseScanSessionReturn {
 
       // Online: attempt direct trigger
       try {
-        const response = await triggerScan(cardId);
+        const response = await triggerScan(cardId, { idempotencyKey });
 
         if (response.ok) {
           setResult({
@@ -124,7 +135,7 @@ export function useScanSession(): UseScanSessionReturn {
           // Check if this is a network error (should queue) or a business error (show immediately)
           if (response.error.code === 'NETWORK_ERROR' || response.error.code === 'TIMEOUT') {
             // Network error: queue for retry
-            await queue.enqueue(cardId);
+            await queue.enqueue(cardId, undefined, { idempotencyKey, scannedAt });
             setResult({
               type: 'queued',
               title: 'Scan Queued',
@@ -156,7 +167,7 @@ export function useScanSession(): UseScanSessionReturn {
       } catch (err) {
         // Unexpected error: queue for retry
         try {
-          await queue.enqueue(cardId);
+          await queue.enqueue(cardId, undefined, { idempotencyKey, scannedAt });
           setResult({
             type: 'queued',
             title: 'Scan Queued',
