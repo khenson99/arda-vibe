@@ -141,6 +141,51 @@ async function writeTransferOrderLinesShippedAudit(
   });
 }
 
+async function writeTransferOrderLinesReceivedAudit(
+  tx: any,
+  input: {
+    tenantId: string;
+    transferOrderId: string;
+    transferOrderNumber: string;
+    status: string;
+    receivedLineChanges: Array<{
+      lineId: string;
+      fromQuantityReceived: number;
+      toQuantityReceived: number;
+    }>;
+    context: RequestAuditContext;
+  }
+) {
+  await tx.insert(schema.auditLog).values({
+    tenantId: input.tenantId,
+    userId: input.context.userId,
+    action: 'transfer_order.lines_received',
+    entityType: 'transfer_order',
+    entityId: input.transferOrderId,
+    previousState: {
+      status: input.status,
+      lineChanges: input.receivedLineChanges.map((line) => ({
+        lineId: line.lineId,
+        quantityReceived: line.fromQuantityReceived,
+      })),
+    },
+    newState: {
+      status: input.status,
+      lineChanges: input.receivedLineChanges.map((line) => ({
+        lineId: line.lineId,
+        quantityReceived: line.toQuantityReceived,
+      })),
+    },
+    metadata: {
+      source: 'transfer_orders.receive',
+      transferOrderNumber: input.transferOrderNumber,
+    },
+    ipAddress: input.context.ipAddress,
+    userAgent: input.context.userAgent,
+    timestamp: new Date(),
+  });
+}
+
 // Validation schemas
 const createTransferOrderSchema = z.object({
   sourceFacilityId: z.string().uuid(),
@@ -563,6 +608,32 @@ transferOrdersRouter.patch('/:id/ship', async (req: AuthRequest, res, next) => {
           )
         );
 
+      const fullyShipped = updatedLines.length > 0
+        && updatedLines.every((line) => line.quantityShipped >= line.quantityRequested);
+
+      if (fullyShipped && order.status !== 'shipped') {
+        await tx
+          .update(transferOrders)
+          .set({
+            status: 'shipped',
+            shippedDate: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(transferOrders.id, id), eq(transferOrders.tenantId, tenantId)));
+
+        await writeTransferOrderStatusAudit(tx, {
+          tenantId,
+          transferOrderId: id,
+          transferOrderNumber: order.toNumber,
+          fromStatus: order.status,
+          toStatus: 'shipped',
+          context: auditContext,
+          metadata: {
+            source: 'transfer_orders.ship',
+          },
+        });
+      }
+
       const [updatedOrder] = await tx
         .select()
         .from(transferOrders)
@@ -581,6 +652,26 @@ transferOrdersRouter.patch('/:id/ship', async (req: AuthRequest, res, next) => {
 
       return { updatedOrder, updatedLines };
     });
+
+    if (updatedOrder.status !== order.status) {
+      try {
+        const eventBus = getEventBus(config.REDIS_URL);
+        await eventBus.publish({
+          type: 'order.status_changed',
+          tenantId,
+          orderType: 'transfer_order',
+          orderId: id,
+          orderNumber: order.toNumber,
+          fromStatus: order.status,
+          toStatus: updatedOrder.status,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        console.error(
+          `[transfer-orders] Failed to publish order.status_changed event for ${order.toNumber}`
+        );
+      }
+    }
 
     res.json({
       ...updatedOrder,
@@ -620,6 +711,12 @@ transferOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
     }
 
     const { updatedOrder, updatedLines } = await db.transaction(async (tx) => {
+      const receivedLineChanges: Array<{
+        lineId: string;
+        fromQuantityReceived: number;
+        toQuantityReceived: number;
+      }> = [];
+
       for (const receiveLine of receiveLines) {
         const [line] = await tx
           .select()
@@ -640,6 +737,12 @@ transferOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
           throw new AppError(400, `Received quantity cannot exceed shipped quantity for line ${receiveLine.lineId}`);
         }
 
+        receivedLineChanges.push({
+          lineId: receiveLine.lineId,
+          fromQuantityReceived: line.quantityReceived,
+          toQuantityReceived: receiveLine.quantityReceived,
+        });
+
         await tx
           .update(transferOrderLines)
           .set({
@@ -653,6 +756,17 @@ transferOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
               eq(transferOrderLines.tenantId, tenantId),
             )
           );
+      }
+
+      if (receivedLineChanges.length > 0) {
+        await writeTransferOrderLinesReceivedAudit(tx, {
+          tenantId,
+          transferOrderId: id,
+          transferOrderNumber: order.toNumber,
+          status: order.status,
+          receivedLineChanges,
+          context: auditContext,
+        });
       }
 
       const updatedLines = await tx

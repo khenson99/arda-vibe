@@ -332,5 +332,94 @@ describe('order mutation audit logging', () => {
         }),
       })
     );
+    expect(publishMock).not.toHaveBeenCalled();
+  });
+
+  it('logs status audit and emits status event when PATCH /to/:id/ship fully ships order', async () => {
+    testState.dbSelectResults = [
+      [
+        {
+          id: TO_ID,
+          tenantId: 'tenant-1',
+          toNumber: 'TO-1001',
+          status: 'picking',
+        },
+      ],
+    ];
+    testState.txSelectResults = [
+      [
+        {
+          id: TO_LINE_ID,
+          transferOrderId: TO_ID,
+          tenantId: 'tenant-1',
+          quantityRequested: 10,
+          quantityShipped: 0,
+        },
+      ],
+      [
+        {
+          id: TO_LINE_ID,
+          transferOrderId: TO_ID,
+          tenantId: 'tenant-1',
+          quantityRequested: 10,
+          quantityShipped: 10,
+          quantityReceived: 0,
+        },
+      ],
+      [
+        {
+          id: TO_ID,
+          tenantId: 'tenant-1',
+          toNumber: 'TO-1001',
+          status: 'shipped',
+        },
+      ],
+    ];
+
+    const app = createTestApp();
+    const response = await requestJson(app, 'PATCH', `/to/${TO_ID}/ship`, {
+      lines: [{ lineId: TO_LINE_ID, quantityShipped: 10 }],
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: TO_ID,
+        status: 'shipped',
+      })
+    );
+
+    expect(testState.insertedAuditRows).toHaveLength(2);
+    expect(
+      testState.insertedAuditRows.find((row) => row.action === 'transfer_order.status_changed')
+    ).toEqual(
+      expect.objectContaining({
+        action: 'transfer_order.status_changed',
+        entityType: 'transfer_order',
+        entityId: TO_ID,
+        previousState: { status: 'picking' },
+        newState: { status: 'shipped' },
+      })
+    );
+    expect(
+      testState.insertedAuditRows.find((row) => row.action === 'transfer_order.lines_shipped')
+    ).toEqual(
+      expect.objectContaining({
+        action: 'transfer_order.lines_shipped',
+        entityType: 'transfer_order',
+        entityId: TO_ID,
+      })
+    );
+
+    expect(publishMock).toHaveBeenCalledTimes(1);
+    expect(publishMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'order.status_changed',
+        orderType: 'transfer_order',
+        orderId: TO_ID,
+        fromStatus: 'picking',
+        toStatus: 'shipped',
+      })
+    );
   });
 });

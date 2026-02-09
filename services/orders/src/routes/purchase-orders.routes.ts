@@ -138,6 +138,51 @@ async function writePurchaseOrderLineAddedAudit(
   });
 }
 
+async function writePurchaseOrderLinesReceivedAudit(
+  tx: any,
+  input: {
+    tenantId: string;
+    poId: string;
+    orderNumber: string;
+    status: string;
+    receivedLines: Array<{
+      lineId: string;
+      fromQuantityReceived: number;
+      toQuantityReceived: number;
+    }>;
+    context: RequestAuditContext;
+  }
+) {
+  await tx.insert(schema.auditLog).values({
+    tenantId: input.tenantId,
+    userId: input.context.userId,
+    action: 'purchase_order.lines_received',
+    entityType: 'purchase_order',
+    entityId: input.poId,
+    previousState: {
+      status: input.status,
+      lineChanges: input.receivedLines.map((line) => ({
+        lineId: line.lineId,
+        quantityReceived: line.fromQuantityReceived,
+      })),
+    },
+    newState: {
+      status: input.status,
+      lineChanges: input.receivedLines.map((line) => ({
+        lineId: line.lineId,
+        quantityReceived: line.toQuantityReceived,
+      })),
+    },
+    metadata: {
+      source: 'purchase_orders.receive',
+      orderNumber: input.orderNumber,
+    },
+    ipAddress: input.context.ipAddress,
+    userAgent: input.context.userAgent,
+    timestamp: new Date(),
+  });
+}
+
 // Validation schemas
 const PaginationSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -754,6 +799,12 @@ purchaseOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
     }
 
     const { updated, updatedLines } = await db.transaction(async (tx) => {
+      const receivedLineChanges: Array<{
+        lineId: string;
+        fromQuantityReceived: number;
+        toQuantityReceived: number;
+      }> = [];
+
       for (const receiveLine of receiveLines) {
         const existingLine = await tx
           .select()
@@ -771,6 +822,12 @@ purchaseOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
           throw new AppError(404, `Line item ${receiveLine.lineId} not found`);
         }
 
+        receivedLineChanges.push({
+          lineId: receiveLine.lineId,
+          fromQuantityReceived: existingLine[0].quantityReceived,
+          toQuantityReceived: receiveLine.quantityReceived,
+        });
+
         await tx
           .update(schema.purchaseOrderLines)
           .set({
@@ -784,6 +841,17 @@ purchaseOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
               eq(schema.purchaseOrderLines.tenantId, tenantId),
             ),
           );
+      }
+
+      if (receivedLineChanges.length > 0) {
+        await writePurchaseOrderLinesReceivedAudit(tx, {
+          tenantId,
+          poId: id,
+          orderNumber: po.poNumber,
+          status: po.status,
+          receivedLines: receivedLineChanges,
+          context: auditContext,
+        });
       }
 
       const allLines = await tx

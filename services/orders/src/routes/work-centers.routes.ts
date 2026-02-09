@@ -8,6 +8,56 @@ import { AppError } from '../middleware/error-handler.js';
 export const workCentersRouter = Router();
 const { workCenters } = schema;
 
+interface RequestAuditContext {
+  userId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+function getRequestAuditContext(req: AuthRequest): RequestAuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+
+  return {
+    userId: req.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
+
+async function writeWorkCenterAudit(
+  tx: any,
+  input: {
+    tenantId: string;
+    action: 'work_center.created' | 'work_center.updated' | 'work_center.deactivated';
+    centerId: string;
+    previousState: Record<string, unknown> | null;
+    newState: Record<string, unknown> | null;
+    metadata: Record<string, unknown>;
+    context: RequestAuditContext;
+  }
+) {
+  await tx.insert(schema.auditLog).values({
+    tenantId: input.tenantId,
+    userId: input.context.userId,
+    action: input.action,
+    entityType: 'work_center',
+    entityId: input.centerId,
+    previousState: input.previousState,
+    newState: input.newState,
+    metadata: input.metadata,
+    ipAddress: input.context.ipAddress,
+    userAgent: input.context.userAgent,
+    timestamp: new Date(),
+  });
+}
+
 // Validation schemas
 const createWorkCenterSchema = z.object({
   facilityId: z.string().uuid(),
@@ -110,6 +160,7 @@ workCentersRouter.post('/', async (req: AuthRequest, res, next) => {
   try {
     const payload = createWorkCenterSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     if (!tenantId) {
       throw new AppError(401, 'Unauthorized');
@@ -130,21 +181,42 @@ workCentersRouter.post('/', async (req: AuthRequest, res, next) => {
       throw new AppError(409, 'Work center code must be unique per tenant');
     }
 
-    const [createdCenter] = await db
-      .insert(workCenters)
-      .values({
+    const [createdCenter] = await db.transaction(async (tx) => {
+      const [createdCenter] = await tx
+        .insert(workCenters)
+        .values({
+          tenantId,
+          facilityId: payload.facilityId,
+          name: payload.name,
+          code: payload.code,
+          description: payload.description || null,
+          capacityPerHour: payload.capacityPerHour.toString(),
+          costPerHour: payload.costPerHour.toString(),
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      await writeWorkCenterAudit(tx, {
         tenantId,
-        facilityId: payload.facilityId,
-        name: payload.name,
-        code: payload.code,
-        description: payload.description || null,
-        capacityPerHour: payload.capacityPerHour.toString(),
-        costPerHour: payload.costPerHour.toString(),
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+        action: 'work_center.created',
+        centerId: createdCenter.id,
+        previousState: null,
+        newState: {
+          name: createdCenter.name,
+          code: createdCenter.code,
+          isActive: createdCenter.isActive,
+          facilityId: createdCenter.facilityId,
+        },
+        metadata: {
+          source: 'work_centers.create',
+        },
+        context: auditContext,
+      });
+
+      return [createdCenter];
+    });
 
     res.status(201).json(createdCenter);
   } catch (error) {
@@ -161,6 +233,7 @@ workCentersRouter.patch('/:id', async (req: AuthRequest, res, next) => {
     const id = req.params.id as string;
     const payload = updateWorkCenterSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     if (!tenantId) {
       throw new AppError(401, 'Unauthorized');
@@ -215,11 +288,41 @@ workCentersRouter.patch('/:id', async (req: AuthRequest, res, next) => {
       updateData.isActive = payload.isActive;
     }
 
-    const [updatedCenter] = await db
-      .update(workCenters)
-      .set(updateData)
-      .where(and(eq(workCenters.id, id), eq(workCenters.tenantId, tenantId)))
-      .returning();
+    const [updatedCenter] = await db.transaction(async (tx) => {
+      const [updatedCenter] = await tx
+        .update(workCenters)
+        .set(updateData)
+        .where(and(eq(workCenters.id, id), eq(workCenters.tenantId, tenantId)))
+        .returning();
+
+      await writeWorkCenterAudit(tx, {
+        tenantId,
+        action: 'work_center.updated',
+        centerId: id,
+        previousState: {
+          name: center.name,
+          code: center.code,
+          description: center.description,
+          capacityPerHour: center.capacityPerHour,
+          costPerHour: center.costPerHour,
+          isActive: center.isActive,
+        },
+        newState: {
+          name: updatedCenter.name,
+          code: updatedCenter.code,
+          description: updatedCenter.description,
+          capacityPerHour: updatedCenter.capacityPerHour,
+          costPerHour: updatedCenter.costPerHour,
+          isActive: updatedCenter.isActive,
+        },
+        metadata: {
+          source: 'work_centers.update',
+        },
+        context: auditContext,
+      });
+
+      return [updatedCenter];
+    });
 
     res.json(updatedCenter);
   } catch (error) {
@@ -235,6 +338,7 @@ workCentersRouter.delete('/:id', async (req: AuthRequest, res, next) => {
   try {
     const id = req.params.id as string;
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     if (!tenantId) {
       throw new AppError(401, 'Unauthorized');
@@ -249,14 +353,38 @@ workCentersRouter.delete('/:id', async (req: AuthRequest, res, next) => {
       throw new AppError(404, 'Work center not found');
     }
 
-    const [deletedCenter] = await db
-      .update(workCenters)
-      .set({
-        isActive: false,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(workCenters.id, id), eq(workCenters.tenantId, tenantId)))
-      .returning();
+    const [deletedCenter] = await db.transaction(async (tx) => {
+      const [deletedCenter] = await tx
+        .update(workCenters)
+        .set({
+          isActive: false,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(workCenters.id, id), eq(workCenters.tenantId, tenantId)))
+        .returning();
+
+      await writeWorkCenterAudit(tx, {
+        tenantId,
+        action: 'work_center.deactivated',
+        centerId: id,
+        previousState: {
+          isActive: center.isActive,
+          name: center.name,
+          code: center.code,
+        },
+        newState: {
+          isActive: deletedCenter.isActive,
+          name: deletedCenter.name,
+          code: deletedCenter.code,
+        },
+        metadata: {
+          source: 'work_centers.delete',
+        },
+        context: auditContext,
+      });
+
+      return [deletedCenter];
+    });
 
     res.json(deletedCenter);
   } catch (error) {

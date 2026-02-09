@@ -12,6 +12,7 @@ import { workOrdersRouter } from './routes/work-orders.routes.js';
 import { workCentersRouter } from './routes/work-centers.routes.js';
 import { transferOrdersRouter } from './routes/transfer-orders.routes.js';
 import { orderQueueRouter } from './routes/order-queue.routes.js';
+import { auditRouter } from './routes/audit.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 const app = express();
@@ -48,6 +49,7 @@ app.use('/work-orders', workOrdersRouter);
 app.use('/work-centers', workCentersRouter);
 app.use('/transfer-orders', transferOrdersRouter);
 app.use('/queue', orderQueueRouter);
+app.use('/audit', auditRouter);
 
 app.use(errorHandler);
 

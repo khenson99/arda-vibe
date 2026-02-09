@@ -224,7 +224,14 @@ describe('transfer order receive status change events', () => {
       })
     );
     expect(publishMock).not.toHaveBeenCalled();
-    expect(testState.insertedAuditRows).toHaveLength(0);
+    expect(testState.insertedAuditRows).toHaveLength(1);
+    expect(testState.insertedAuditRows[0]).toEqual(
+      expect.objectContaining({
+        action: 'transfer_order.lines_received',
+        entityType: 'transfer_order',
+        entityId: TO_ID,
+      })
+    );
   });
 
   it('publishes order.status_changed when receive transitions to received', async () => {
@@ -269,8 +276,19 @@ describe('transfer order receive status change events', () => {
         toStatus: 'received',
       })
     );
-    expect(testState.insertedAuditRows).toHaveLength(1);
-    expect(testState.insertedAuditRows[0]).toEqual(
+    expect(testState.insertedAuditRows).toHaveLength(2);
+    expect(
+      testState.insertedAuditRows.find((row) => row.action === 'transfer_order.lines_received')
+    ).toEqual(
+      expect.objectContaining({
+        action: 'transfer_order.lines_received',
+        entityType: 'transfer_order',
+        entityId: TO_ID,
+      })
+    );
+    expect(
+      testState.insertedAuditRows.find((row) => row.action === 'transfer_order.status_changed')
+    ).toEqual(
       expect.objectContaining({
         action: 'transfer_order.status_changed',
         entityType: 'transfer_order',
