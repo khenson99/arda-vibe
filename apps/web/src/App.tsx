@@ -24,6 +24,7 @@ import {
   QrCode,
   RefreshCw,
   Search,
+  Sparkles,
   SquareKanban,
   Truck,
   type LucideIcon,
@@ -40,6 +41,7 @@ import {
   Input,
 } from "@/components/ui";
 import { ConflictResolver, ManualLookup, ScanResult, Scanner, SyncStatus } from "@/components/scan";
+import { OrderPulseOnboarding } from "@/components/order-pulse";
 import { useScanSession } from "@/hooks/use-scan-session";
 import { configureScanApi } from "@/lib/scan-api";
 import { cn } from "@/lib/utils";
@@ -666,6 +668,10 @@ function App() {
             path="notifications"
             element={<NotificationsRoute session={session} onUnauthorized={clearSession} />}
           />
+          <Route
+            path="order-pulse"
+            element={<OrderPulseRoute session={session} onUnauthorized={clearSession} />}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
@@ -1148,6 +1154,7 @@ function AppShell({ session, onSignOut }: AppShellProps) {
       { to: "/scan", label: "Scan", icon: QrCode },
       { to: "/parts", label: "Parts", icon: Boxes },
       { to: "/notifications", label: "Notifications", icon: Bell },
+      { to: "/order-pulse", label: "Order Pulse", icon: Sparkles },
     ],
     [],
   );
@@ -1157,6 +1164,7 @@ function AppShell({ session, onSignOut }: AppShellProps) {
     if (location.pathname.startsWith("/scan")) return "Scan Workspace";
     if (location.pathname.startsWith("/parts")) return "Parts Catalog";
     if (location.pathname.startsWith("/notifications")) return "Notifications";
+    if (location.pathname.startsWith("/order-pulse")) return "Order Pulse";
     return "Operations Dashboard";
   }, [location.pathname]);
 
@@ -2004,6 +2012,65 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => voi
         </Button>
       </div>
     </div>
+  );
+}
+
+function OrderPulseRoute({
+  session,
+  onUnauthorized,
+}: {
+  session: AuthSession;
+  onUnauthorized: () => void;
+}) {
+  const [isComplete, setIsComplete] = React.useState(false);
+  const [syncedCount, setSyncedCount] = React.useState(0);
+
+  const handleComplete = React.useCallback(
+    (products: { id: string; name: string }[]) => {
+      setSyncedCount(products.length);
+      setIsComplete(true);
+    },
+    [],
+  );
+
+  const handleCancel = React.useCallback(() => {
+    window.history.pushState({}, "", "/");
+    window.location.reload();
+  }, []);
+
+  if (isComplete) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <Card className="w-full max-w-md text-center">
+          <CardContent className="p-8 space-y-4">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[hsl(var(--arda-success)/0.12)]">
+              <Sparkles className="h-8 w-8 text-[hsl(var(--arda-success))]" />
+            </div>
+            <h3 className="text-xl font-bold">Products Synced Successfully!</h3>
+            <p className="text-sm text-muted-foreground">
+              {syncedCount} products have been imported and synced to {session.user.tenantName}.
+              They'll appear in your Parts Catalog shortly.
+            </p>
+            <div className="flex flex-col gap-2 pt-2">
+              <Button asChild>
+                <Link to="/parts">View Parts Catalog</Link>
+              </Button>
+              <Button variant="outline" onClick={() => setIsComplete(false)}>
+                Import More Products
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <OrderPulseOnboarding
+      tenantName={session.user.tenantName}
+      onComplete={handleComplete}
+      onCancel={handleCancel}
+    />
   );
 }
 
