@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { config } from '@arda/config';
 
 interface PasswordResetEmailInput {
@@ -8,47 +8,24 @@ interface PasswordResetEmailInput {
   expiresInMinutes: number;
 }
 
-const hasSmtpCredentials = Boolean(config.SMTP_USER && config.SMTP_PASS);
+// Re-use the existing SMTP_PASS which is already a Resend API key (re_…)
+const resendApiKey = config.SMTP_PASS;
 const usingDefaultLocalSmtp =
   config.SMTP_HOST === 'localhost' &&
   config.SMTP_PORT === 1025 &&
-  !hasSmtpCredentials;
+  !resendApiKey;
 
-let transport: nodemailer.Transporter | null = null;
+let resend: Resend | null = null;
 
-function getTransport() {
-  if (!transport) {
-    transport = nodemailer.createTransport({
-      host: config.SMTP_HOST,
-      port: config.SMTP_PORT,
-      secure: config.SMTP_PORT === 465,
-      ...(hasSmtpCredentials
-        ? {
-            auth: {
-              user: config.SMTP_USER,
-              pass: config.SMTP_PASS,
-            },
-          }
-        : {}),
-    });
+function getResend(): Resend {
+  if (!resend) {
+    resend = new Resend(resendApiKey);
   }
-
-  return transport;
+  return resend;
 }
 
 export async function sendPasswordResetEmail(input: PasswordResetEmailInput): Promise<void> {
-  const subject = 'Reset your Arda password';
   const greetingName = input.toName?.trim() || 'there';
-  const text = [
-    `Hi ${greetingName},`,
-    '',
-    'We received a request to reset your Arda password.',
-    `Use this link to set a new password: ${input.resetUrl}`,
-    '',
-    `This link expires in ${input.expiresInMinutes} minutes.`,
-    '',
-    'If you did not request this, you can ignore this email.',
-  ].join('\n');
 
   if (usingDefaultLocalSmtp) {
     // In local/dev environments without configured SMTP, surface the reset link in logs.
@@ -57,11 +34,20 @@ export async function sendPasswordResetEmail(input: PasswordResetEmailInput): Pr
     return;
   }
 
-  await getTransport().sendMail({
+  const { error } = await getResend().emails.send({
     from: config.EMAIL_FROM,
     to: input.toEmail,
-    subject,
-    text,
+    subject: 'Reset your Arda password',
+    text: [
+      `Hi ${greetingName},`,
+      '',
+      'We received a request to reset your Arda password.',
+      `Use this link to set a new password: ${input.resetUrl}`,
+      '',
+      `This link expires in ${input.expiresInMinutes} minutes.`,
+      '',
+      'If you did not request this, you can ignore this email.',
+    ].join('\n'),
     html: `
       <p>Hi ${escapeHtml(greetingName)},</p>
       <p>We received a request to reset your Arda password.</p>
@@ -70,6 +56,10 @@ export async function sendPasswordResetEmail(input: PasswordResetEmailInput): Pr
       <p>If you did not request this, you can ignore this email.</p>
     `,
   });
+
+  if (error) {
+    throw new Error(`Failed to send password reset email: ${error.message}`);
+  }
 }
 
 function escapeHtml(value: string): string {
