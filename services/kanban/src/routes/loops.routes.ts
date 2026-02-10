@@ -132,6 +132,33 @@ loopsRouter.post('/', async (req: AuthRequest, res, next) => {
       res.status(400).json({ error: 'Validation error', details: err.errors });
       return;
     }
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: string }).code === '23505'
+    ) {
+      let loopId: string | undefined;
+      const parsedInput = createLoopSchema.safeParse(req.body);
+      if (parsedInput.success) {
+        const existing = await db.query.kanbanLoops.findFirst({
+          where: and(
+            eq(kanbanLoops.tenantId, req.user!.tenantId),
+            eq(kanbanLoops.partId, parsedInput.data.partId),
+            eq(kanbanLoops.facilityId, parsedInput.data.facilityId),
+            eq(kanbanLoops.loopType, parsedInput.data.loopType)
+          ),
+        });
+        loopId = existing?.id;
+      }
+
+      res.status(409).json({
+        error: 'A loop already exists for this part, facility, and loop type.',
+        code: 'LOOP_ALREADY_EXISTS',
+        loopId,
+      });
+      return;
+    }
     next(err);
   }
 });
@@ -143,6 +170,9 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
       minQuantity: z.number().int().positive().optional(),
       orderQuantity: z.number().int().positive().optional(),
       numberOfCards: z.number().int().positive().optional(),
+      leadTimeDays: z.number().int().nonnegative().optional(),
+      statedLeadTimeDays: z.number().int().nonnegative().optional(),
+      safetyStockDays: z.number().nonnegative().optional(),
       reason: z.string().min(1, 'Reason is required for parameter changes'),
     });
 
@@ -175,11 +205,16 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
       if (input.minQuantity) updateFields.minQuantity = input.minQuantity;
       if (input.orderQuantity) updateFields.orderQuantity = input.orderQuantity;
       if (input.numberOfCards) updateFields.numberOfCards = input.numberOfCards;
+      const leadTimeDays = input.statedLeadTimeDays ?? input.leadTimeDays;
+      if (leadTimeDays !== undefined) updateFields.statedLeadTimeDays = leadTimeDays;
+      if (input.safetyStockDays !== undefined) {
+        updateFields.safetyStockDays = String(input.safetyStockDays);
+      }
 
       await tx
         .update(kanbanLoops)
         .set(updateFields)
-        .where(eq(kanbanLoops.id, req.params.id as string));
+        .where(and(eq(kanbanLoops.id, req.params.id as string), eq(kanbanLoops.tenantId, tenantId)));
 
       // If numberOfCards changed, add or deactivate cards
       if (input.numberOfCards && input.numberOfCards !== existingLoop.numberOfCards) {
@@ -214,7 +249,7 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
     });
 
     const updated = await db.query.kanbanLoops.findFirst({
-      where: eq(kanbanLoops.id, req.params.id as string),
+      where: and(eq(kanbanLoops.id, req.params.id as string), eq(kanbanLoops.tenantId, tenantId)),
       with: { cards: true },
     });
 

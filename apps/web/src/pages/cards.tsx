@@ -1,9 +1,73 @@
 import * as React from "react";
 import { RefreshCw, ChevronLeft, ChevronRight, CreditCard } from "lucide-react";
-import type { AuthSession } from "@/types";
+import type { AuthSession, KanbanCard, LoopType } from "@/types";
+import { CARD_STAGES } from "@/types";
 import { useKanbanCards } from "@/hooks/use-kanban-cards";
-import { CardFilters, CardsTable } from "@/components/kanban-cards";
-import { Button } from "@/components/ui";
+import { useKanbanBoard } from "@/hooks/use-kanban-board";
+import type { GroupedCards } from "@/hooks/use-kanban-board";
+import { CardFilters, CardsTable, ViewToggle, useViewMode } from "@/components/kanban-cards";
+import {
+  BoardContainer,
+  BoardFilters,
+  CardDetailDrawer,
+} from "@/components/kanban-board";
+import type { BoardFilterState } from "@/components/kanban-board";
+import { Button, Skeleton } from "@/components/ui";
+
+/* ── Board filter logic (from board.tsx) ───────────────────── */
+
+function matchesCard(card: KanbanCard, search: string, activeLoopTypes: Set<LoopType>): boolean {
+  if (activeLoopTypes.size > 0 && card.loopType && !activeLoopTypes.has(card.loopType)) {
+    return false;
+  }
+  if (search) {
+    const cardNum = String(card.cardNumber);
+    const partName = (card.partName ?? "").toLowerCase();
+    if (!cardNum.includes(search) && !partName.includes(search)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function applyBoardFilters(
+  grouped: GroupedCards,
+  allCards: KanbanCard[],
+  filters: BoardFilterState,
+): { filteredGrouped: GroupedCards; filteredAllCards: KanbanCard[] } {
+  const search = filters.searchTerm.trim().toLowerCase();
+  const matches = (card: KanbanCard) => matchesCard(card, search, filters.activeLoopTypes);
+
+  const filteredAllCards = allCards.filter(matches);
+  const filteredGrouped = {} as GroupedCards;
+  for (const stage of CARD_STAGES) {
+    filteredGrouped[stage] = grouped[stage].filter(matches);
+  }
+
+  return { filteredGrouped, filteredAllCards };
+}
+
+/* ── Board loading skeleton ────────────────────────────────── */
+
+function BoardSkeleton(): React.ReactElement {
+  return (
+    <div className="space-y-4">
+      <Skeleton className="h-[88px] w-full rounded-xl" />
+      <div className="flex gap-3 overflow-hidden">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="w-[260px] shrink-0">
+            <Skeleton className="h-10 w-full rounded-t-xl" />
+            <div className="space-y-2 p-2">
+              {Array.from({ length: 3 }).map((_, j) => (
+                <Skeleton key={j} className="h-[72px] w-full rounded-xl" />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /* ── Props ───────────────────────────────────────────────────── */
 
@@ -15,35 +79,48 @@ interface Props {
 /* ── Page ─────────────────────────────────────────────────────── */
 
 export function CardsRoute({ session, onUnauthorized }: Props) {
-  const {
-    cards,
-    pagination,
-    isLoading,
-    error,
-    filters,
-    setFilters,
-    refresh,
-  } = useKanbanCards(session.tokens.accessToken, onUnauthorized);
+  const token = session.tokens.accessToken;
+  const [viewMode, setViewMode] = useViewMode();
 
+  /* ── Table view data ─────────────────────────────────────── */
+  const tableData = useKanbanCards(token, onUnauthorized);
+
+  /* ── Board view data (only fetches when board is active) ─── */
+  const boardData = useKanbanBoard(
+    viewMode === "board" ? token : null,
+    onUnauthorized,
+  );
+
+  /* ── Board filters ───────────────────────────────────────── */
+  const [boardFilters, setBoardFilters] = React.useState<BoardFilterState>({
+    searchTerm: "",
+    activeLoopTypes: new Set<LoopType>(),
+  });
+
+  const { filteredGrouped, filteredAllCards } = React.useMemo(
+    () => applyBoardFilters(boardData.grouped, boardData.allCards, boardFilters),
+    [boardData.grouped, boardData.allCards, boardFilters],
+  );
+
+  /* ── Card detail drawer ──────────────────────────────────── */
+  const [selectedCard, setSelectedCard] = React.useState<KanbanCard | null>(null);
+
+  /* ── Refresh logic ───────────────────────────────────────── */
   const [isRefreshing, setIsRefreshing] = React.useState(false);
 
   const handleRefresh = React.useCallback(async () => {
     setIsRefreshing(true);
-    await refresh();
+    if (viewMode === "board") {
+      await boardData.refresh();
+    } else {
+      await tableData.refresh();
+    }
     setIsRefreshing(false);
-  }, [refresh]);
+  }, [viewMode, boardData, tableData]);
 
-  const handlePrev = React.useCallback(() => {
-    if (pagination.page > 1) {
-      setFilters((f) => ({ ...f, page: f.page - 1 }));
-    }
-  }, [pagination.page, setFilters]);
-
-  const handleNext = React.useCallback(() => {
-    if (pagination.page < pagination.totalPages) {
-      setFilters((f) => ({ ...f, page: f.page + 1 }));
-    }
-  }, [pagination.page, pagination.totalPages, setFilters]);
+  /* ── Derived state ────────────────────────────────────────── */
+  const error = viewMode === "board" ? boardData.error : tableData.error;
+  const totalCards = viewMode === "board" ? boardData.allCards.length : tableData.pagination.total;
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
@@ -56,28 +133,27 @@ export function CardsRoute({ session, onUnauthorized }: Props) {
           <div>
             <h1 className="text-lg font-semibold">Kanban Cards</h1>
             <p className="text-xs text-muted-foreground">
-              {pagination.total > 0
-                ? `${pagination.total} card${pagination.total !== 1 ? "s" : ""} total`
+              {totalCards > 0
+                ? `${totalCards} card${totalCards !== 1 ? "s" : ""} total`
                 : "Manage physical kanban cards"}
             </p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 text-xs"
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-        >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`}
-          />
-          Refresh
-        </Button>
-      </div>
 
-      {/* Filters */}
-      <CardFilters filters={filters} onFiltersChange={setFilters} />
+        <div className="flex items-center gap-2">
+          <ViewToggle mode={viewMode} onChange={setViewMode} />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
+      </div>
 
       {/* Error */}
       {error && (
@@ -86,43 +162,84 @@ export function CardsRoute({ session, onUnauthorized }: Props) {
         </div>
       )}
 
-      {/* Table */}
-      <CardsTable
-        cards={cards}
-        isLoading={isLoading}
-        token={session.tokens.accessToken}
-        onUnauthorized={onUnauthorized}
-        onRefresh={refresh}
-      />
+      {/* ── Table View ─────────────────────────────────────── */}
+      {viewMode === "table" && (
+        <>
+          <CardFilters filters={tableData.filters} onFiltersChange={tableData.setFilters} />
 
-      {/* Pagination */}
-      {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
-            Page {pagination.page} of {pagination.totalPages}
-          </p>
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 w-8 p-0"
-              onClick={handlePrev}
-              disabled={pagination.page <= 1}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 w-8 p-0"
-              onClick={handleNext}
-              disabled={pagination.page >= pagination.totalPages}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+          <CardsTable
+            cards={tableData.cards}
+            isLoading={tableData.isLoading}
+            token={token}
+            onUnauthorized={onUnauthorized}
+            onRefresh={tableData.refresh}
+            onCardClick={setSelectedCard}
+          />
+
+          {tableData.pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Page {tableData.pagination.page} of {tableData.pagination.totalPages}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => tableData.setFilters((f) => ({ ...f, page: f.page - 1 }))}
+                  disabled={tableData.pagination.page <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => tableData.setFilters((f) => ({ ...f, page: f.page + 1 }))}
+                  disabled={tableData.pagination.page >= tableData.pagination.totalPages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
+
+      {/* ── Board View ──────────────────────────────────────── */}
+      {viewMode === "board" && (
+        <>
+          {boardData.isLoading ? (
+            <BoardSkeleton />
+          ) : (
+            <>
+              <BoardFilters
+                allCards={boardData.allCards}
+                grouped={filteredGrouped}
+                filters={boardFilters}
+                onFiltersChange={setBoardFilters}
+                isRefreshing={boardData.isRefreshing}
+                onRefresh={() => void boardData.refresh()}
+              />
+
+              <BoardContainer
+                grouped={filteredGrouped}
+                allCards={filteredAllCards}
+                moveCard={boardData.moveCard}
+                onCardClick={setSelectedCard}
+              />
+            </>
+          )}
+        </>
+      )}
+
+      {/* Card detail drawer -- available in both views */}
+      <CardDetailDrawer
+        card={selectedCard}
+        token={token}
+        onUnauthorized={onUnauthorized}
+        onClose={() => setSelectedCard(null)}
+      />
     </div>
   );
 }

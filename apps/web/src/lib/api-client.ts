@@ -39,12 +39,14 @@ import type {
 export class ApiError extends Error {
   status: number;
   code?: string;
+  details?: Record<string, unknown>;
 
-  constructor(status: number, message: string, code?: string) {
+  constructor(status: number, message: string, code?: string, details?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -108,7 +110,7 @@ export async function apiRequest<T>(
           : `Request failed with status ${response.status}`;
 
     const code = typeof payload.code === "string" ? payload.code : undefined;
-    throw new ApiError(response.status, message, code);
+    throw new ApiError(response.status, message, code, payload);
   }
 
   return payload as T;
@@ -589,6 +591,7 @@ export function toItemsInputPayload(part: PartRecord): ItemsServiceInputPayload 
     primarySupplier: part.primarySupplier?.trim() || "Unknown supplier",
     primarySupplierLink: normalizeOptionalString(part.primarySupplierLink),
     imageUrl: normalizeOptionalString(part.imageUrl),
+    notes: part.notes ?? null,
   };
 }
 
@@ -874,23 +877,124 @@ export async function createPurchaseOrderFromCards(
 
 /* ── Kanban Loops ─────────────────────────────────────────────── */
 
+type RawKanbanLoop = KanbanLoop & {
+  isActive?: boolean;
+  status?: string;
+  safetyStockDays?: number | string | null;
+  reorderPoint?: number | string | null;
+};
+
+interface RawKanbanParameterHistoryRecord {
+  changeType?: string | null;
+  previousMinQuantity?: number | null;
+  newMinQuantity?: number | null;
+  previousOrderQuantity?: number | null;
+  newOrderQuantity?: number | null;
+  previousNumberOfCards?: number | null;
+  newNumberOfCards?: number | null;
+  createdAt?: string | null;
+}
+
+function toFiniteNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeLoop(loop: RawKanbanLoop): KanbanLoop {
+  const status =
+    typeof loop.status === "string" && loop.status.length > 0
+      ? loop.status
+      : loop.isActive === false
+        ? "paused"
+        : "active";
+
+  return {
+    ...loop,
+    status,
+    safetyStockDays: toFiniteNumberOrNull(loop.safetyStockDays),
+    reorderPoint: toFiniteNumberOrNull(loop.reorderPoint),
+  };
+}
+
+function normalizeParameterHistory(
+  history: RawKanbanParameterHistoryRecord[] | undefined,
+): Array<{ parameter: string; oldValue: string; newValue: string; changedAt: string }> | undefined {
+  if (!history) return undefined;
+
+  return history.flatMap((entry) => {
+    const changedAt = entry.createdAt ?? new Date().toISOString();
+    const changes: Array<{ parameter: string; oldValue: string; newValue: string; changedAt: string }> = [];
+
+    const maybePushChange = (
+      parameter: string,
+      previousValue: number | null | undefined,
+      newValue: number | null | undefined,
+    ) => {
+      if (previousValue === null || previousValue === undefined) return;
+      if (newValue === null || newValue === undefined) return;
+      if (previousValue === newValue) return;
+      changes.push({
+        parameter,
+        oldValue: String(previousValue),
+        newValue: String(newValue),
+        changedAt,
+      });
+    };
+
+    maybePushChange("Min Quantity", entry.previousMinQuantity, entry.newMinQuantity);
+    maybePushChange("Order Quantity", entry.previousOrderQuantity, entry.newOrderQuantity);
+    maybePushChange("Number of Cards", entry.previousNumberOfCards, entry.newNumberOfCards);
+
+    if (changes.length > 0) return changes;
+
+    return [
+      {
+        parameter: entry.changeType ?? "Parameters",
+        oldValue: "--",
+        newValue: "--",
+        changedAt,
+      },
+    ];
+  });
+}
+
 export async function fetchLoops(
   token: string,
-  params?: { loopType?: string; page?: number; pageSize?: number },
+  params?: { loopType?: LoopType; page?: number; pageSize?: number },
 ): Promise<{ data: KanbanLoop[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } }> {
   const qs = new URLSearchParams();
   if (params?.loopType) qs.set("loopType", params.loopType);
   if (params?.page) qs.set("page", String(params.page));
   if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return apiRequest(`/api/kanban/loops${suffix}`, { token });
+  const response = await apiRequest<{ data: RawKanbanLoop[]; pagination: { page: number; pageSize: number; total: number; totalPages: number } }>(
+    `/api/kanban/loops${suffix}`,
+    { token },
+  );
+
+  return {
+    ...response,
+    data: response.data.map((loop) => normalizeLoop(loop)),
+  };
 }
 
 export async function fetchLoop(
   token: string,
   loopId: string,
 ): Promise<KanbanLoop & { cards?: KanbanCard[]; parameterHistory?: Array<{ parameter: string; oldValue: string; newValue: string; changedAt: string }> }> {
-  return apiRequest(`/api/kanban/loops/${encodeURIComponent(loopId)}`, { token });
+  const response = await apiRequest<
+    RawKanbanLoop & {
+      cards?: KanbanCard[];
+      parameterHistory?: RawKanbanParameterHistoryRecord[];
+    }
+  >(`/api/kanban/loops/${encodeURIComponent(loopId)}`, { token });
+
+  return {
+    ...normalizeLoop(response),
+    cards: response.cards,
+    parameterHistory: normalizeParameterHistory(response.parameterHistory),
+  };
 }
 
 export async function createLoop(
@@ -898,19 +1002,30 @@ export async function createLoop(
   input: {
     partId: string;
     facilityId: string;
-    loopType: string;
-    cardMode?: string;
+    loopType: LoopType;
+    cardMode?: "single" | "multi";
     numberOfCards?: number;
-    minQuantity?: number;
-    orderQuantity?: number;
-    leadTimeDays?: number;
+    minQuantity: number;
+    orderQuantity: number;
+    statedLeadTimeDays?: number;
+    primarySupplierId?: string;
+    sourceFacilityId?: string;
+    storageLocationId?: string;
+    safetyStockDays?: string;
+    notes?: string;
   },
 ): Promise<KanbanLoop> {
-  return apiRequest("/api/kanban/loops", {
-    method: "POST",
-    token,
-    body: input,
-  });
+  const response = await apiRequest<RawKanbanLoop | { loop: RawKanbanLoop; cards: KanbanCard[] }>(
+    "/api/kanban/loops",
+    {
+      method: "POST",
+      token,
+      body: input,
+    },
+  );
+
+  const rawLoop = "loop" in response ? response.loop : response;
+  return normalizeLoop(rawLoop);
 }
 
 export async function updateLoopParameters(
@@ -920,17 +1035,21 @@ export async function updateLoopParameters(
     minQuantity?: number;
     orderQuantity?: number;
     numberOfCards?: number;
-    leadTimeDays?: number;
+    statedLeadTimeDays?: number;
     safetyStockDays?: number;
-    reason?: string;
+    reason: string;
   },
 ): Promise<KanbanLoop> {
-  return apiRequest(`/api/kanban/loops/${encodeURIComponent(loopId)}/parameters`, {
+  const response = await apiRequest<RawKanbanLoop>(`/api/kanban/loops/${encodeURIComponent(loopId)}/parameters`, {
     method: "PATCH",
     token,
     body: input,
   });
+
+  return normalizeLoop(response);
 }
+
+/* ── Kanban Cards ─────────────────────────────────────────────── */
 
 export async function fetchLoopCardSummary(
   token: string,

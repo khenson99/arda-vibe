@@ -8,7 +8,6 @@ import {
   ClipboardList,
   CreditCard,
   HardHat,
-  LayoutDashboard,
   LogOut,
   Menu,
   PackageCheck,
@@ -43,7 +42,6 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
   const navItems = React.useMemo(
     () => [
       { to: "/", label: "Dashboard", icon: Activity, section: "kanban" as const },
-      { to: "/board", label: "Kanban Board", icon: LayoutDashboard, section: "kanban" as const },
       { to: "/cards", label: "Cards", icon: CreditCard, section: "kanban" as const },
       { to: "/loops", label: "Loops", icon: Repeat2, section: "kanban" as const },
       { to: "/parts", label: "Items", icon: Boxes, section: "operations" as const },

@@ -128,6 +128,30 @@ async function patchJson(
   }
 }
 
+async function postJson(
+  app: express.Express,
+  path: string,
+  body: Record<string, unknown>
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to start test server');
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = (await response.json()) as Record<string, unknown>;
+    return { status: response.status, body: json };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 describe('loops parameter updates', () => {
   beforeEach(() => {
     testState.existingLoop = {
@@ -176,6 +200,23 @@ describe('loops parameter updates', () => {
     );
   });
 
+  it('accepts leadTimeDays and safetyStockDays updates', async () => {
+    const app = createApp();
+    const response = await patchJson(app, '/loops/loop-1/parameters', {
+      leadTimeDays: 7,
+      safetyStockDays: 3.5,
+      reason: 'Tune replenishment targets',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: 'loop-1',
+      })
+    );
+    expect(publishMock).toHaveBeenCalledTimes(1);
+  });
+
   it('returns success even if loop.parameters_changed publish fails', async () => {
     publishMock.mockRejectedValueOnce(new Error('redis unavailable'));
 
@@ -193,5 +234,28 @@ describe('loops parameter updates', () => {
     );
     expect(publishMock).toHaveBeenCalledTimes(1);
   });
-});
 
+  it('returns 409 when creating a duplicate loop', async () => {
+    dbMock.transaction.mockRejectedValueOnce(Object.assign(new Error('duplicate'), { code: '23505' }));
+
+    const app = createApp();
+    const response = await postJson(app, '/loops', {
+      partId: '11111111-1111-1111-1111-111111111111',
+      facilityId: '22222222-2222-2222-2222-222222222222',
+      loopType: 'production',
+      cardMode: 'single',
+      minQuantity: 10,
+      orderQuantity: 25,
+      numberOfCards: 1,
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: 'A loop already exists for this part, facility, and loop type.',
+        code: 'LOOP_ALREADY_EXISTS',
+        loopId: 'loop-1',
+      })
+    );
+  });
+});

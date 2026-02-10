@@ -27,8 +27,8 @@ export function LoopParameterForm({
   const [minQuantity, setMinQuantity] = React.useState(String(loop.minQuantity));
   const [orderQuantity, setOrderQuantity] = React.useState(String(loop.orderQuantity));
   const [numberOfCards, setNumberOfCards] = React.useState(String(loop.numberOfCards));
-  const [leadTimeDays, setLeadTimeDays] = React.useState(
-    loop.leadTimeDays != null ? String(loop.leadTimeDays) : "",
+  const [statedLeadTimeDays, setStatedLeadTimeDays] = React.useState(
+    loop.statedLeadTimeDays != null ? String(loop.statedLeadTimeDays) : "",
   );
   const [safetyStockDays, setSafetyStockDays] = React.useState(
     loop.safetyStockDays != null ? String(loop.safetyStockDays) : "",
@@ -64,9 +64,9 @@ export function LoopParameterForm({
         input.numberOfCards = cardsNum;
       }
 
-      const leadNum = leadTimeDays.trim() ? Number(leadTimeDays) : undefined;
-      if (leadNum !== undefined && Number.isFinite(leadNum) && leadNum !== loop.leadTimeDays) {
-        input.leadTimeDays = leadNum;
+      const leadNum = statedLeadTimeDays.trim() ? Number(statedLeadTimeDays) : undefined;
+      if (leadNum !== undefined && Number.isFinite(leadNum) && leadNum !== loop.statedLeadTimeDays) {
+        input.statedLeadTimeDays = leadNum;
       }
 
       const safetyNum = safetyStockDays.trim() ? Number(safetyStockDays) : undefined;
@@ -145,8 +145,8 @@ export function LoopParameterForm({
             id="param-lead"
             type="number"
             min={0}
-            value={leadTimeDays}
-            onChange={(e) => setLeadTimeDays(e.target.value)}
+            value={statedLeadTimeDays}
+            onChange={(e) => setStatedLeadTimeDays(e.target.value)}
             placeholder="--"
             className="mt-1 h-8 text-sm"
           />

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button, Skeleton } from "@/components/ui";
 import { TabsList, TabsTrigger } from "@/components/ui";
@@ -24,6 +25,8 @@ interface Props {
 
 export function LoopsRoute({ session, onUnauthorized }: Props) {
   const token = session.tokens.accessToken;
+  const navigate = useNavigate();
+  const { loopId } = useParams<{ loopId: string }>();
 
   const {
     loops,
@@ -37,7 +40,8 @@ export function LoopsRoute({ session, onUnauthorized }: Props) {
     setFilterType,
     page,
     setPage,
-    toggleExpanded,
+    openLoopById,
+    collapseExpanded,
     refresh,
     refreshDetail,
   } = useKanbanLoops(token, onUnauthorized);
@@ -54,10 +58,22 @@ export function LoopsRoute({ session, onUnauthorized }: Props) {
     await refresh();
   };
 
+  const handleOpenExistingLoop = React.useCallback((existingLoopId: string) => {
+    navigate(`/loops/${existingLoopId}`);
+  }, [navigate]);
+
   const handleParametersSaved = async () => {
     await refreshDetail();
     await refresh();
   };
+
+  React.useEffect(() => {
+    if (loopId) {
+      void openLoopById(loopId);
+      return;
+    }
+    collapseExpanded();
+  }, [loopId, openLoopById, collapseExpanded]);
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-6">
@@ -84,6 +100,7 @@ export function LoopsRoute({ session, onUnauthorized }: Props) {
             token={token}
             onUnauthorized={onUnauthorized}
             onCreated={handleLoopCreated}
+            onOpenExistingLoop={handleOpenExistingLoop}
           />
         </div>
       </div>
@@ -159,7 +176,7 @@ export function LoopsRoute({ session, onUnauthorized }: Props) {
                 loop={loop}
                 cardSummary={summaryFromDetail}
                 isExpanded={isExpanded}
-                onToggle={() => toggleExpanded(loop.id)}
+                onToggle={() => navigate(isExpanded ? "/loops" : `/loops/${loop.id}`)}
               >
                 {isExpanded && (
                   <LoopDetailPanel

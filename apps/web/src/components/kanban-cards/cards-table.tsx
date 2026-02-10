@@ -63,6 +63,7 @@ interface CardsTableProps {
   token: string;
   onUnauthorized: () => void;
   onRefresh: () => Promise<void>;
+  onCardClick?: (card: KanbanCard) => void;
 }
 
 /* ── Component ───────────────────────────────────────────────── */
@@ -73,6 +74,7 @@ export function CardsTable({
   token,
   onUnauthorized,
   onRefresh,
+  onCardClick,
 }: CardsTableProps) {
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
 
@@ -211,7 +213,11 @@ export function CardsTable({
             return (
               <tr
                 key={card.id}
-                className="border-t border-border hover:bg-muted/50 transition-colors"
+                className={cn(
+                  "border-t border-border hover:bg-muted/50 transition-colors",
+                  onCardClick && "cursor-pointer",
+                )}
+                onClick={() => onCardClick?.(card)}
               >
                 {/* Card # */}
                 <td className="px-4 py-3 font-semibold text-[hsl(var(--link))] whitespace-nowrap">
@@ -271,7 +277,7 @@ export function CardsTable({
                 </td>
 
                 {/* Actions */}
-                <td className="px-4 py-3 whitespace-nowrap text-right">
+                <td className="px-4 py-3 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end gap-1">
                     {/* Print button */}
                     <Button

@@ -206,6 +206,7 @@ export interface ItemsServiceInputPayload {
   primarySupplier: string;
   primarySupplierLink: string | null;
   imageUrl: string | null;
+  notes?: string | null;
 }
 
 /* ── Orders ───────────────────────────────────────────────────── */
@@ -306,9 +307,13 @@ export interface KanbanLoop {
   numberOfCards: number;
   minQuantity: number;
   orderQuantity: number;
-  leadTimeDays: number | null;
+  statedLeadTimeDays: number | null;
   safetyStockDays: number | null;
   reorderPoint: number | null;
+  primarySupplierId?: string | null;
+  sourceFacilityId?: string | null;
+  storageLocationId?: string | null;
+  notes?: string | null;
   createdAt: string;
   updatedAt: string;
   partName?: string;

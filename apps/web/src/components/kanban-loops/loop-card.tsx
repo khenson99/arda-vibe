@@ -125,9 +125,9 @@ export function LoopCard({ loop, cardSummary, isExpanded, onToggle, children }: 
               <span>
                 Cards: <span className="font-semibold text-card-foreground">{loop.numberOfCards}</span>
               </span>
-              {loop.leadTimeDays != null && (
+              {loop.statedLeadTimeDays != null && (
                 <span>
-                  Lead: <span className="font-semibold text-card-foreground">{loop.leadTimeDays}d</span>
+                  Lead: <span className="font-semibold text-card-foreground">{loop.statedLeadTimeDays}d</span>
                 </span>
               )}
             </div>

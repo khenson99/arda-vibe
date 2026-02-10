@@ -56,6 +56,8 @@ export interface UseKanbanLoopsReturn {
 
   /** Expand / collapse a loop */
   toggleExpanded: (loopId: string) => void;
+  openLoopById: (loopId: string) => Promise<void>;
+  collapseExpanded: () => void;
 
   /** Re-fetch the list */
   refresh: () => Promise<void>;
@@ -115,7 +117,21 @@ export function useKanbanLoops(
 
       if (!isMountedRef.current) return;
 
-      setLoops(result.data);
+      setLoops(() => {
+        const hasExpandedLoopInPage =
+          expandedLoopId && result.data.some((loop) => loop.id === expandedLoopId);
+
+        if (
+          expandedLoopDetail?.loop &&
+          expandedLoopDetail.loop.id === expandedLoopId &&
+          !hasExpandedLoopInPage
+        ) {
+          const withoutExpanded = result.data.filter((loop) => loop.id !== expandedLoopId);
+          return [expandedLoopDetail.loop, ...withoutExpanded];
+        }
+
+        return result.data;
+      });
       setPagination(result.pagination);
     } catch (err) {
       if (!isMountedRef.current) return;
@@ -127,7 +143,7 @@ export function useKanbanLoops(
     } finally {
       if (isMountedRef.current) setIsLoading(false);
     }
-  }, [token, filterType, page, onUnauthorized]);
+  }, [token, filterType, page, onUnauthorized, expandedLoopId, expandedLoopDetail]);
 
   React.useEffect(() => {
     loadLoops();
@@ -141,7 +157,7 @@ export function useKanbanLoops(
   /* ── Detail fetch ──────────────────────────────────────── */
 
   const loadDetail = React.useCallback(
-    async (loopId: string) => {
+    async (loopId: string, ensureInList = false) => {
       if (!token) return;
 
       setIsDetailLoading(true);
@@ -160,6 +176,13 @@ export function useKanbanLoops(
           cardSummary,
           velocity,
         });
+        if (ensureInList) {
+          setLoops((currentLoops) =>
+            currentLoops.some((loop) => loop.id === loopDetail.id)
+              ? currentLoops
+              : [loopDetail, ...currentLoops]
+          );
+        }
       } catch (err) {
         if (!isMountedRef.current) return;
         if (isUnauthorized(err)) {
@@ -175,18 +198,32 @@ export function useKanbanLoops(
     [token, onUnauthorized],
   );
 
+  const collapseExpanded = React.useCallback(() => {
+    setExpandedLoopId(null);
+    setExpandedLoopDetail(null);
+  }, []);
+
   const toggleExpanded = React.useCallback(
     (loopId: string) => {
       if (expandedLoopId === loopId) {
-        setExpandedLoopId(null);
-        setExpandedLoopDetail(null);
+        collapseExpanded();
       } else {
         setExpandedLoopId(loopId);
         setExpandedLoopDetail(null);
         loadDetail(loopId);
       }
     },
-    [expandedLoopId, loadDetail],
+    [expandedLoopId, collapseExpanded, loadDetail],
+  );
+
+  const openLoopById = React.useCallback(
+    async (loopId: string) => {
+      if (!loopId) return;
+      setExpandedLoopId(loopId);
+      setExpandedLoopDetail(null);
+      await loadDetail(loopId, true);
+    },
+    [loadDetail],
   );
 
   const refreshDetail = React.useCallback(async () => {
@@ -208,6 +245,8 @@ export function useKanbanLoops(
     page,
     setPage,
     toggleExpanded,
+    openLoopById,
+    collapseExpanded,
     refresh: loadLoops,
     refreshDetail,
   };

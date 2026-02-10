@@ -12,7 +12,6 @@ import { DashboardRoute } from "@/pages/dashboard";
 import { QueueRoute } from "@/pages/queue";
 import { ScanRoute } from "@/pages/scan";
 import { PartsRoute } from "@/pages/parts";
-import { BoardRoute } from "@/pages/board";
 import { CardsRoute } from "@/pages/cards";
 import { LoopsRoute } from "@/pages/loops";
 import { OrderHistoryRoute } from "@/pages/order-history";
@@ -125,9 +124,10 @@ function App() {
       <Routes>
         <Route path="/" element={<AppShell session={session} onSignOut={clearSession} />}>
           <Route index element={<ErrorBoundary><DashboardRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
-          <Route path="board" element={<ErrorBoundary><BoardRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
+          <Route path="board" element={<Navigate to="/cards" replace />} />
           <Route path="cards" element={<ErrorBoundary><CardsRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="loops" element={<ErrorBoundary><LoopsRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
+          <Route path="loops/:loopId" element={<ErrorBoundary><LoopsRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="parts" element={<ErrorBoundary><PartsRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="queue" element={<ErrorBoundary><QueueRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="orders" element={<ErrorBoundary><OrderHistoryRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />

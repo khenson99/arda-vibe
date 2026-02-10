@@ -305,7 +305,7 @@ export function LoopDetailPanel({
             <ParamDisplay label="Min Quantity" value={loop.minQuantity} />
             <ParamDisplay label="Order Quantity" value={loop.orderQuantity} />
             <ParamDisplay label="Number of Cards" value={loop.numberOfCards} />
-            <ParamDisplay label="Lead Time" value={loop.leadTimeDays != null ? `${loop.leadTimeDays}d` : "--"} />
+            <ParamDisplay label="Lead Time" value={loop.statedLeadTimeDays != null ? `${loop.statedLeadTimeDays}d` : "--"} />
             <ParamDisplay label="Safety Stock" value={loop.safetyStockDays != null ? `${loop.safetyStockDays}d` : "--"} />
             <ParamDisplay label="Reorder Point" value={loop.reorderPoint ?? "--"} />
           </div>

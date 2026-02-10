@@ -1,6 +1,5 @@
 import * as React from "react";
 import {
-  X,
   Loader2,
   Printer,
   ShoppingCart,
@@ -10,6 +9,7 @@ import {
 import { toast } from "sonner";
 import {
   Button,
+  SidePanel,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
@@ -185,169 +185,139 @@ export function CardDetailDrawer({
   const stageMeta = card ? CARD_STAGE_META[card.currentStage] : null;
 
   return (
-    <>
-      {/* Backdrop */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/40 transition-opacity"
-          onClick={onClose}
-        />
-      )}
-
-      {/* Drawer panel */}
-      <div
-        className={cn(
-          "fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-background shadow-xl transition-transform duration-300 ease-in-out",
-          isOpen ? "translate-x-0" : "translate-x-full",
-        )}
-      >
-        {card && (
-          <>
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div>
-                <h2 className="text-base font-semibold">
-                  Card #{card.cardNumber}
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  {card.partName ?? `Part ${card.partId?.slice(0, 8) ?? "—"}`}
-                </p>
-              </div>
-              <Button variant="outline" size="sm" onClick={onClose} className="h-8 w-8 p-0">
-                <X className="h-4 w-4" />
-                <span className="sr-only">Close</span>
-              </Button>
+    <SidePanel
+      open={isOpen}
+      onClose={onClose}
+      title={card ? `Card #${card.cardNumber}` : ""}
+      subtitle={card ? (card.partName ?? `Part ${card.partId?.slice(0, 8) ?? "—"}`) : undefined}
+    >
+      {card && (
+        <div className="px-4 py-4 space-y-5">
+          {/* Current stage */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Current Stage
+            </p>
+            <div className="mt-1.5 flex items-center gap-2">
+              <div
+                className="h-3 w-3 rounded-full"
+                style={{ backgroundColor: stageMeta?.color }}
+              />
+              <span className={cn("text-sm font-semibold", stageMeta?.textClass)}>
+                {stageMeta?.label}
+              </span>
             </div>
+          </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
-              {/* Current stage */}
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Current Stage
-                </p>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <div
-                    className="h-3 w-3 rounded-full"
-                    style={{ backgroundColor: stageMeta?.color }}
-                  />
-                  <span className={cn("text-sm font-semibold", stageMeta?.textClass)}>
-                    {stageMeta?.label}
-                  </span>
-                </div>
+          {/* Card details */}
+          <div className="grid grid-cols-2 gap-3">
+            <DetailItem label="Loop Type" value={card.loopType ?? "—"} />
+            <DetailItem label="Completed Cycles" value={String(card.completedCycles)} />
+            <DetailItem
+              label="In Stage Since"
+              value={new Date(card.currentStageEnteredAt).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            />
+            <DetailItem label="Active" value={card.isActive ? "Yes" : "No"} />
+            {card.minQuantity !== undefined && (
+              <DetailItem label="Min Quantity" value={String(card.minQuantity)} />
+            )}
+            {card.orderQuantity !== undefined && (
+              <DetailItem label="Order Quantity" value={String(card.orderQuantity)} />
+            )}
+          </div>
+
+          {/* QR Code */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              QR Code
+            </p>
+            {isLoadingQR ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-
-              {/* Card details */}
-              <div className="grid grid-cols-2 gap-3">
-                <DetailItem label="Loop Type" value={card.loopType ?? "—"} />
-                <DetailItem label="Completed Cycles" value={String(card.completedCycles)} />
-                <DetailItem
-                  label="In Stage Since"
-                  value={new Date(card.currentStageEnteredAt).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
+            ) : qrDataUrl ? (
+              <div className="flex justify-center">
+                <img
+                  src={qrDataUrl}
+                  alt={`QR code for card #${card.cardNumber}`}
+                  className="h-32 w-32"
                 />
-                <DetailItem label="Active" value={card.isActive ? "Yes" : "No"} />
-                {card.minQuantity !== undefined && (
-                  <DetailItem label="Min Quantity" value={String(card.minQuantity)} />
-                )}
-                {card.orderQuantity !== undefined && (
-                  <DetailItem label="Order Quantity" value={String(card.orderQuantity)} />
-                )}
               </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6 text-xs text-muted-foreground">
+                <QrCode className="mb-1 h-8 w-8 opacity-30" />
+                QR code unavailable
+              </div>
+            )}
+          </div>
 
-              {/* QR Code */}
-              <div className="rounded-lg border border-border p-3">
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  QR Code
-                </p>
-                {isLoadingQR ? (
-                  <div className="flex items-center justify-center py-6">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : qrDataUrl ? (
-                  <div className="flex justify-center">
-                    <img
-                      src={qrDataUrl}
-                      alt={`QR code for card #${card.cardNumber}`}
-                      className="h-32 w-32"
-                    />
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-6 text-xs text-muted-foreground">
-                    <QrCode className="mb-1 h-8 w-8 opacity-30" />
-                    QR code unavailable
-                  </div>
-                )}
-              </div>
+          {/* Action buttons */}
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={isPrinting}
+              onClick={() => void handlePrint()}
+            >
+              {isPrinting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Printer className="h-3.5 w-3.5" />
+              )}
+              Print Label
+            </Button>
+            <Button
+              size="sm"
+              variant="accent"
+              className="gap-1.5"
+              disabled={isOrdering}
+              onClick={() => void handleCreateOrder()}
+            >
+              {isOrdering ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ShoppingCart className="h-3.5 w-3.5" />
+              )}
+              Create Order
+            </Button>
+          </div>
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5"
-                  disabled={isPrinting}
-                  onClick={() => void handlePrint()}
-                >
-                  {isPrinting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Printer className="h-3.5 w-3.5" />
-                  )}
-                  Print Label
-                </Button>
-                <Button
-                  size="sm"
-                  variant="accent"
-                  className="gap-1.5"
-                  disabled={isOrdering}
-                  onClick={() => void handleCreateOrder()}
-                >
-                  {isOrdering ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ShoppingCart className="h-3.5 w-3.5" />
-                  )}
-                  Create Order
-                </Button>
+          {/* Transition timeline */}
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Stage History
+            </p>
+            {isLoadingHistory ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-
-              {/* Transition timeline */}
-              <div>
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Stage History
-                </p>
-                {isLoadingHistory ? (
-                  <div className="flex items-center justify-center py-6">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : history.length === 0 ? (
-                  <p className="py-4 text-center text-xs text-muted-foreground">
-                    No transitions yet
-                  </p>
-                ) : (
-                  <div className="space-y-0">
-                    {history
-                      .slice()
-                      .sort(
-                        (a, b) =>
-                          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-                      )
-                      .map((transition) => (
-                        <TimelineItem key={transition.id} transition={transition} />
-                      ))}
-                  </div>
-                )}
+            ) : history.length === 0 ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">
+                No transitions yet
+              </p>
+            ) : (
+              <div className="space-y-0">
+                {history
+                  .slice()
+                  .sort(
+                    (a, b) =>
+                      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+                  )
+                  .map((transition) => (
+                    <TimelineItem key={transition.id} transition={transition} />
+                  ))}
               </div>
-            </div>
-          </>
-        )}
-      </div>
-    </>
+            )}
+          </div>
+        </div>
+      )}
+    </SidePanel>
   );
 }
 

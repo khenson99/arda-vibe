@@ -39,3 +39,4 @@ export {
 } from "./tooltip"
 export { Skeleton } from "./skeleton"
 export { Toaster } from "./sonner"
+export { SidePanel } from "./side-panel"

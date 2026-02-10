@@ -5,7 +5,6 @@ import {
   ChevronRight,
   CircleHelp,
   Loader2,
-  MessageSquare,
   Plus,
   Printer,
   RefreshCw,
@@ -18,11 +17,6 @@ import {
   Button,
   Card,
   CardContent,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
   Input,
   Skeleton,
   Tooltip,
@@ -30,6 +24,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui";
+import { ItemDetailPanel } from "@/components/item-detail";
 import { EditableCell, PaginationBar, ColumnConfig, BulkActionsBar, ItemCardList } from "@/components/data-table";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { ErrorBanner } from "@/components/error-banner";
@@ -55,7 +50,7 @@ import {
 } from "@/lib/formatters";
 import { ITEMS_PAGE_SIZE_STORAGE_KEY, ITEMS_VISIBLE_COLUMNS_STORAGE_KEY } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type { AuthSession, InlineEditableField, ItemTableColumnKey, KanbanLoop, LoopType, PartRecord } from "@/types";
+import type { AuthSession, InlineEditableField, ItemTableColumnKey, LoopType, PartRecord } from "@/types";
 import {
   ITEMS_PAGE_SIZE_OPTIONS,
   ITEM_TABLE_COLUMNS,
@@ -644,6 +639,7 @@ export function PartsRoute({
                         isSelected={selectedIds.has(part.id)}
                         onToggle={() => toggleOne(part.id)}
                         onOpenDetail={openItemDetailDialog}
+                        onCardCreated={refreshAll}
                       />
                     ))}
                   </tbody>
@@ -692,15 +688,13 @@ export function PartsRoute({
           void refreshAll();
         }}
       />
-      <ItemDetailDialog
+      <ItemDetailPanel
         open={itemDialogState.open}
         mode={itemDialogState.mode}
         part={itemDialogState.part}
         session={session}
         onUnauthorized={onUnauthorized}
-        onOpenChange={(nextOpen) => {
-          setItemDialogState((prev) => ({ ...prev, open: nextOpen }));
-        }}
+        onClose={() => setItemDialogState((prev) => ({ ...prev, open: false }))}
         onSaved={async () => {
           await refreshAll();
         }}
@@ -716,16 +710,17 @@ type ActionState = "idle" | "loading" | "done";
 function QuickActions({
   part,
   cardIds,
-  notes,
   session,
+  onCardCreated,
 }: {
   part: PartRecord;
   cardIds: string[];
-  notes: string;
   session: AuthSession;
+  onCardCreated?: () => Promise<void> | void;
 }) {
   const [printState, setPrintState] = React.useState<ActionState>("idle");
   const [orderState, setOrderState] = React.useState<ActionState>("idle");
+  const [createCardState, setCreateCardState] = React.useState<ActionState>("idle");
   const hasCards = cardIds.length > 0;
 
   const handlePrint = React.useCallback(async () => {
@@ -761,6 +756,53 @@ function QuickActions({
       toast.error(parseApiError(err));
     }
   }, [cardIds, hasCards, session.tokens.accessToken]);
+
+  const handleCreateCard = React.useCallback(async () => {
+    setCreateCardState("loading");
+    try {
+      const loopsResult = await fetchLoops(session.tokens.accessToken, { page: 1, pageSize: 200 });
+      const partLoops = loopsResult.data.filter((loop) => loop.partId === part.id);
+      if (partLoops.length === 0) {
+        setCreateCardState("idle");
+        toast.error("No loop exists for this item. Create a loop first.");
+        return;
+      }
+
+      const targetLoop =
+        partLoops.find((loop) => loop.loopType === "procurement") ||
+        partLoops.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+
+      if (!targetLoop) {
+        setCreateCardState("idle");
+        toast.error("Unable to identify a loop for this item.");
+        return;
+      }
+
+      const nextCardCount = Math.max(1, targetLoop.numberOfCards + 1);
+      await updateLoopParameters(session.tokens.accessToken, targetLoop.id, {
+        numberOfCards: nextCardCount,
+        reason: `Quick action: added card for ${part.partNumber}`,
+      });
+
+      setCreateCardState("done");
+      toast.success(
+        `Created card #${nextCardCount} in ${formatReadableLabel(targetLoop.loopType)} loop.`,
+      );
+      try {
+        await onCardCreated?.();
+      } catch {
+        // Keep quick action success even if refresh fails.
+      }
+      setTimeout(() => setCreateCardState("idle"), 1500);
+    } catch (err) {
+      setCreateCardState("idle");
+      if (isUnauthorized(err)) {
+        toast.error("Session expired. Sign in again.");
+        return;
+      }
+      toast.error(parseApiError(err));
+    }
+  }, [onCardCreated, part.id, part.partNumber, session.tokens.accessToken]);
 
   const actionBtnClass =
     "h-7 w-7 rounded-md border-border/80 transition-all hover:border-primary/45 hover:bg-[hsl(var(--arda-orange)/0.1)] active:scale-95";
@@ -821,12 +863,20 @@ function QuickActions({
             variant="outline"
             size="icon"
             className={actionBtnClass}
-            aria-label={`View notes for ${part.partNumber}`}
+            disabled={createCardState === "loading"}
+            onClick={handleCreateCard}
+            aria-label={`Create card for ${part.partNumber}`}
           >
-            <MessageSquare className="h-3.5 w-3.5" />
+            {createCardState === "loading" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : createCardState === "done" ? (
+              <Check className="h-3.5 w-3.5 text-[hsl(var(--arda-success))]" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" />
+            )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-[260px]">{notes}</TooltipContent>
+        <TooltipContent>Create a new card on this item&apos;s loop</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -853,6 +903,7 @@ interface ItemRowProps {
   isSelected: boolean;
   onToggle: () => void;
   onOpenDetail: (part: PartRecord) => void;
+  onCardCreated: () => Promise<void>;
 }
 
 const ItemRow = React.memo(function ItemRow({
@@ -866,6 +917,7 @@ const ItemRow = React.memo(function ItemRow({
   isSelected,
   onToggle,
   onOpenDetail,
+  onCardCreated,
 }: ItemRowProps) {
   const queueStats = queueStatsByPartId.get(part.id);
   const orderLineSummary = orderLineByItem[part.eId ?? part.id];
@@ -953,8 +1005,8 @@ const ItemRow = React.memo(function ItemRow({
             <QuickActions
               part={part}
               cardIds={queueStats?.cardIds ?? []}
-              notes={notes}
               session={session}
+              onCardCreated={onCardCreated}
             />
           </td>
         );
@@ -1136,425 +1188,3 @@ const ItemRow = React.memo(function ItemRow({
     </tr>
   );
 });
-
-/* ── Item detail / edit dialog ──────────────────────────────── */
-
-interface ItemDetailDialogProps {
-  open: boolean;
-  mode: "create" | "edit";
-  part: PartRecord | null;
-  session: AuthSession;
-  onUnauthorized: () => void;
-  onOpenChange: (nextOpen: boolean) => void;
-  onSaved: () => Promise<void>;
-}
-
-function ItemDetailDialog({
-  open,
-  mode,
-  part,
-  session,
-  onUnauthorized,
-  onOpenChange,
-  onSaved,
-}: ItemDetailDialogProps) {
-  const [itemCode, setItemCode] = React.useState("");
-  const [itemName, setItemName] = React.useState("");
-  const [supplier, setSupplier] = React.useState("");
-  const [location, setLocation] = React.useState("");
-  const [orderMethod, setOrderMethod] = React.useState("");
-  const [minQty, setMinQty] = React.useState("0");
-  const [minQtyUnit, setMinQtyUnit] = React.useState("each");
-  const [orderQty, setOrderQty] = React.useState("");
-  const [orderQtyUnit, setOrderQtyUnit] = React.useState("each");
-  const [isSavingItem, setIsSavingItem] = React.useState(false);
-
-  const [loops, setLoops] = React.useState<KanbanLoop[]>([]);
-  const [isLoadingLoops, setIsLoadingLoops] = React.useState(false);
-  const [savingLoopId, setSavingLoopId] = React.useState<string | null>(null);
-  const [loopReason, setLoopReason] = React.useState("Updated from item detail view");
-  const [loopEdits, setLoopEdits] = React.useState<
-    Record<string, { numberOfCards: string; minQuantity: string; orderQuantity: string }>
-  >({});
-
-  const isCreateMode = mode === "create";
-
-  const seedFromPart = React.useCallback((nextPart: PartRecord | null) => {
-    const fallbackCode = nextPart?.externalGuid?.trim() || nextPart?.partNumber || "";
-    setItemCode(fallbackCode);
-    setItemName(nextPart?.name?.trim() || "");
-    setSupplier(nextPart?.primarySupplier?.trim() || "");
-    setLocation(nextPart?.location?.trim() || "");
-    setOrderMethod(nextPart?.orderMechanism?.trim() || nextPart?.type?.trim() || "unspecified");
-    setMinQty(String(nextPart?.minQty ?? 0));
-    setMinQtyUnit(nextPart?.minQtyUnit?.trim() || nextPart?.uom?.trim() || "each");
-    setOrderQty(
-      typeof nextPart?.orderQty === "number" && Number.isFinite(nextPart.orderQty)
-        ? String(nextPart.orderQty)
-        : ""
-    );
-    setOrderQtyUnit(nextPart?.orderQtyUnit?.trim() || nextPart?.uom?.trim() || "each");
-  }, []);
-
-  const loadLoops = React.useCallback(async () => {
-    if (!open || isCreateMode || !part) {
-      setLoops([]);
-      setLoopEdits({});
-      return;
-    }
-
-    setIsLoadingLoops(true);
-    try {
-      const result = await fetchLoops(session.tokens.accessToken, { page: 1, pageSize: 200 });
-      const matchingLoops = result.data.filter((loop) => loop.partId === part.id);
-      setLoops(matchingLoops);
-      setLoopEdits(
-        matchingLoops.reduce(
-          (acc, loop) => {
-            acc[loop.id] = {
-              numberOfCards: String(loop.numberOfCards),
-              minQuantity: String(loop.minQuantity),
-              orderQuantity: String(loop.orderQuantity),
-            };
-            return acc;
-          },
-          {} as Record<string, { numberOfCards: string; minQuantity: string; orderQuantity: string }>
-        )
-      );
-    } catch (error) {
-      if (isUnauthorized(error)) {
-        onUnauthorized();
-        return;
-      }
-      toast.error(parseApiError(error));
-      setLoops([]);
-      setLoopEdits({});
-    } finally {
-      setIsLoadingLoops(false);
-    }
-  }, [isCreateMode, onUnauthorized, open, part, session.tokens.accessToken]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    seedFromPart(part);
-  }, [open, part, seedFromPart]);
-
-  React.useEffect(() => {
-    void loadLoops();
-  }, [loadLoops]);
-
-  const handleSaveItem = React.useCallback(async () => {
-    const normalizedCode = itemCode.trim();
-    if (!normalizedCode) {
-      toast.error("Item code is required.");
-      return;
-    }
-    if (!itemName.trim()) {
-      toast.error("Item name is required.");
-      return;
-    }
-
-    const parsedMinQty = Number.parseInt(minQty.trim() || "0", 10);
-    if (!Number.isFinite(parsedMinQty) || parsedMinQty < 0) {
-      toast.error("Min quantity must be a whole number >= 0.");
-      return;
-    }
-
-    const normalizedOrderQty = orderQty.trim();
-    const parsedOrderQty =
-      normalizedOrderQty === "" ? null : Number.parseInt(normalizedOrderQty, 10);
-    if (parsedOrderQty !== null && (!Number.isFinite(parsedOrderQty) || parsedOrderQty < 0)) {
-      toast.error("Order quantity must be a whole number >= 0.");
-      return;
-    }
-
-    const entityId = part?.eId || normalizedCode;
-    const author = normalizeOptionalString(session.user.email) || session.user.id;
-
-    setIsSavingItem(true);
-    try {
-      await updateItemRecord(session.tokens.accessToken, {
-        entityId,
-        tenantId: session.user.tenantId,
-        author,
-        payload: {
-          externalGuid: normalizedCode,
-          name: itemName.trim(),
-          orderMechanism: orderMethod.trim() || "unspecified",
-          location: normalizeOptionalString(location),
-          minQty: parsedMinQty,
-          minQtyUnit: minQtyUnit.trim() || "each",
-          orderQty: parsedOrderQty,
-          orderQtyUnit: normalizeOptionalString(orderQtyUnit),
-          primarySupplier: supplier.trim() || "Unknown supplier",
-          primarySupplierLink: null,
-          imageUrl: normalizeOptionalString(part?.imageUrl ?? null),
-        },
-      });
-      toast.success(isCreateMode ? "Item created with an initial card." : "Item updated.");
-      await onSaved();
-      onOpenChange(false);
-    } catch (error) {
-      if (isUnauthorized(error)) {
-        onUnauthorized();
-        return;
-      }
-      toast.error(parseApiError(error));
-    } finally {
-      setIsSavingItem(false);
-    }
-  }, [
-    isCreateMode,
-    itemCode,
-    itemName,
-    location,
-    minQty,
-    minQtyUnit,
-    onOpenChange,
-    onSaved,
-    onUnauthorized,
-    orderMethod,
-    orderQty,
-    orderQtyUnit,
-    part?.eId,
-    part?.imageUrl,
-    session.tokens.accessToken,
-    session.user.email,
-    session.user.id,
-    session.user.tenantId,
-    supplier,
-  ]);
-
-  const handleSaveLoop = React.useCallback(
-    async (loop: KanbanLoop) => {
-      const edit = loopEdits[loop.id];
-      if (!edit) return;
-
-      const parsedCardCount = Number.parseInt(edit.numberOfCards, 10);
-      const parsedMinQty = Number.parseInt(edit.minQuantity, 10);
-      const parsedOrderQty = Number.parseInt(edit.orderQuantity, 10);
-      if (!Number.isFinite(parsedCardCount) || parsedCardCount < 1) {
-        toast.error("Number of cards must be a whole number >= 1.");
-        return;
-      }
-      if (!Number.isFinite(parsedMinQty) || parsedMinQty < 1) {
-        toast.error("Loop min quantity must be a whole number >= 1.");
-        return;
-      }
-      if (!Number.isFinite(parsedOrderQty) || parsedOrderQty < 1) {
-        toast.error("Loop order quantity must be a whole number >= 1.");
-        return;
-      }
-
-      const reason = loopReason.trim() || "Updated from item detail view";
-
-      setSavingLoopId(loop.id);
-      try {
-        await updateLoopParameters(session.tokens.accessToken, loop.id, {
-          numberOfCards: parsedCardCount,
-          minQuantity: parsedMinQty,
-          orderQuantity: parsedOrderQty,
-          reason,
-        });
-        toast.success(`${LOOP_META[loop.loopType].label} loop updated.`);
-        await loadLoops();
-        await onSaved();
-      } catch (error) {
-        if (isUnauthorized(error)) {
-          onUnauthorized();
-          return;
-        }
-        toast.error(parseApiError(error));
-      } finally {
-        setSavingLoopId(null);
-      }
-    },
-    [loadLoops, loopEdits, loopReason, onSaved, onUnauthorized, session.tokens.accessToken]
-  );
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{isCreateMode ? "Create Item" : "Item Detail & Edit"}</DialogTitle>
-          <DialogDescription>
-            {isCreateMode
-              ? "Save to create the item and automatically provision one initial card."
-              : "Edit item fields and manage multi-card loop parameters from one place."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <section className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Item code</label>
-              <Input value={itemCode} onChange={(event) => setItemCode(event.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Item name</label>
-              <Input value={itemName} onChange={(event) => setItemName(event.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Supplier</label>
-              <Input value={supplier} onChange={(event) => setSupplier(event.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Location</label>
-              <Input value={location} onChange={(event) => setLocation(event.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Order method</label>
-              <Input value={orderMethod} onChange={(event) => setOrderMethod(event.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Min quantity</label>
-              <Input
-                type="number"
-                min={0}
-                value={minQty}
-                onChange={(event) => setMinQty(event.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Min unit</label>
-              <Input value={minQtyUnit} onChange={(event) => setMinQtyUnit(event.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Order quantity</label>
-              <Input
-                type="number"
-                min={0}
-                value={orderQty}
-                onChange={(event) => setOrderQty(event.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="text-xs font-medium text-muted-foreground">Order unit</label>
-              <Input value={orderQtyUnit} onChange={(event) => setOrderQtyUnit(event.target.value)} className="mt-1" />
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <Button onClick={() => void handleSaveItem()} disabled={isSavingItem}>
-              {isSavingItem && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isCreateMode ? "Create item" : "Save item"}
-            </Button>
-          </div>
-        </section>
-
-        {!isCreateMode && (
-          <section className="space-y-3 border-t border-border pt-4">
-            <div className="space-y-1">
-              <h3 className="text-sm font-semibold">Loop Management</h3>
-              <p className="text-xs text-muted-foreground">
-                Manage multi-card behavior by editing each loop&apos;s card count.
-              </p>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Audit reason</label>
-              <Input value={loopReason} onChange={(event) => setLoopReason(event.target.value)} className="mt-1" />
-            </div>
-
-            {isLoadingLoops && (
-              <div className="rounded-md border border-border p-3 text-xs text-muted-foreground">
-                Loading loops...
-              </div>
-            )}
-
-            {!isLoadingLoops && loops.length === 0 && (
-              <div className="rounded-md border border-border p-3 text-xs text-muted-foreground">
-                No loops found for this item yet.
-              </div>
-            )}
-
-            {!isLoadingLoops &&
-              loops.map((loop) => {
-                const loopEdit = loopEdits[loop.id];
-                return (
-                  <div key={loop.id} className="rounded-md border border-border p-3">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">{LOOP_META[loop.loopType].label}</Badge>
-                        <span className="text-xs text-muted-foreground">{loop.id.slice(0, 8)}...</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        disabled={!loopEdit || savingLoopId === loop.id}
-                        onClick={() => void handleSaveLoop(loop)}
-                      >
-                        {savingLoopId === loop.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        Save loop
-                      </Button>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div>
-                        <label className="text-[11px] font-medium text-muted-foreground"># of cards</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={loopEdit?.numberOfCards ?? String(loop.numberOfCards)}
-                          onChange={(event) =>
-                            setLoopEdits((prev) => ({
-                              ...prev,
-                              [loop.id]: {
-                                numberOfCards: event.target.value,
-                                minQuantity: prev[loop.id]?.minQuantity ?? String(loop.minQuantity),
-                                orderQuantity: prev[loop.id]?.orderQuantity ?? String(loop.orderQuantity),
-                              },
-                            }))
-                          }
-                          className="mt-1 h-8"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-muted-foreground">Min quantity</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={loopEdit?.minQuantity ?? String(loop.minQuantity)}
-                          onChange={(event) =>
-                            setLoopEdits((prev) => ({
-                              ...prev,
-                              [loop.id]: {
-                                numberOfCards: prev[loop.id]?.numberOfCards ?? String(loop.numberOfCards),
-                                minQuantity: event.target.value,
-                                orderQuantity: prev[loop.id]?.orderQuantity ?? String(loop.orderQuantity),
-                              },
-                            }))
-                          }
-                          className="mt-1 h-8"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-muted-foreground">Order quantity</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={loopEdit?.orderQuantity ?? String(loop.orderQuantity)}
-                          onChange={(event) =>
-                            setLoopEdits((prev) => ({
-                              ...prev,
-                              [loop.id]: {
-                                numberOfCards: prev[loop.id]?.numberOfCards ?? String(loop.numberOfCards),
-                                minQuantity: prev[loop.id]?.minQuantity ?? String(loop.minQuantity),
-                                orderQuantity: event.target.value,
-                              },
-                            }))
-                          }
-                          className="mt-1 h-8"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-          </section>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
