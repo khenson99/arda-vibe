@@ -6,7 +6,7 @@ import { config, createLogger } from '@arda/config';
 const log = createLogger('auth');
 import { db } from '@arda/db';
 import { sql } from 'drizzle-orm';
-import { authRouter } from './routes/auth.routes.js';
+import { authRouter, handleGoogleLinkCallback } from './routes/auth.routes.js';
 import { tenantRouter } from './routes/tenant.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
@@ -39,7 +39,15 @@ app.get('/health', async (_req, res) => {
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────
+// Compatibility aliases for Google OAuth callbacks.
+// These ensure callback URLs continue working across gateway/direct-host setups.
+app.get('/api/auth/google/callback', handleGoogleLinkCallback);
+app.get('/api/auth/google/link/callback', handleGoogleLinkCallback);
+app.get('/auth/google/callback', handleGoogleLinkCallback);
+app.get('/auth/google/link/callback', handleGoogleLinkCallback);
+
 app.use('/auth', authRouter);
+app.use('/api/auth', authRouter);
 app.use('/tenants', tenantRouter);
 
 // ─── Error Handler ────────────────────────────────────────────────────

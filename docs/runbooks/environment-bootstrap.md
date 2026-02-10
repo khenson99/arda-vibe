@@ -127,7 +127,7 @@ npm run dev --filter=@arda/orders        # Orders service only
 |----------|-------------|---------|
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID | _(optional)_ |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | _(optional)_ |
-| `GOOGLE_CALLBACK_URL` | OAuth callback URL | _(optional)_ |
+| `GOOGLE_CALLBACK_URL` | OAuth callback URL (`/api/auth/google/link/callback`), required in production for Gmail linking | _(optional)_ |
 
 ### Stripe (Optional)
 

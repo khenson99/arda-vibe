@@ -2,9 +2,8 @@
  * Order Pulse — Onboarding Workflow Types
  *
  * Defines the data model for each step of the multi-source product
- * import wizard: email linking → vendor selection → MOQ analysis →
- * product enrichment → UPC scanning → AI identification →
- * link/CSV import → reconciliation & sync.
+ * import wizard: email linking → vendor selection → background analysis/enrichment →
+ * UPC scanning → AI identification → link import → CSV upload → reconciliation & sync.
  */
 
 /* ------------------------------------------------------------------ */
@@ -14,21 +13,42 @@
 export type OnboardingStep =
   | "connect-email"
   | "select-vendors"
-  | "analyze-orders"
-  | "enrich-products"
   | "scan-upcs"
   | "identify-images"
   | "import-links"
-  | "reconcile";
+  | "upload-csv"
+  | "reconcile"
+  // Legacy/manual modules that are no longer guided steps
+  | "analyze-orders"
+  | "enrich-products";
+
+/* ------------------------------------------------------------------ */
+/*  Import module identifiers (for FAB / dialog system)               */
+/* ------------------------------------------------------------------ */
+
+/** Modules as surfaced from the FAB — combined flows + standalone modules */
+export type ImportModuleId =
+  | "email-scan"         // combined: connect-email + analysis
+  | "import-links"       // standalone links
+  | "upload-csv"         // standalone csv
+  | "vendor-discovery"   // combined: select-vendors + enrich-products
+  | "scan-upcs"          // standalone
+  | "ai-identify"        // standalone
+  | "reconcile"          // standalone
+  // Individual steps (used by guided onboarding flow)
+  | "connect-email"
+  | "select-vendors"
+  | "analyze-orders"
+  | "enrich-products"
+  | "identify-images";
 
 export const ONBOARDING_STEPS: OnboardingStep[] = [
   "connect-email",
   "select-vendors",
-  "analyze-orders",
-  "enrich-products",
   "scan-upcs",
   "identify-images",
   "import-links",
+  "upload-csv",
   "reconcile",
 ];
 
@@ -46,35 +66,41 @@ export const STEP_META: Record<
     label: "Select Vendors",
     description: "Choose the suppliers you order from regularly",
   },
-  "analyze-orders": {
-    index: 2,
-    label: "Analyze Orders",
-    description: "We'll determine order frequency and minimum order quantities",
-  },
-  "enrich-products": {
-    index: 3,
-    label: "Enrich Products",
-    description: "Pull images, ASINs, and product details from vendor APIs",
-  },
   "scan-upcs": {
-    index: 4,
+    index: 2,
     label: "Scan UPCs",
     description: "Use your phone to scan barcodes via the on-screen QR code",
   },
   "identify-images": {
-    index: 5,
+    index: 3,
     label: "AI Identify",
     description: "Upload photos and let AI identify your products",
   },
   "import-links": {
-    index: 6,
-    label: "Import Links & CSV",
-    description: "Paste product URLs or upload a spreadsheet of items",
+    index: 4,
+    label: "Import Links",
+    description: "Paste product URLs and scrape item data",
+  },
+  "upload-csv": {
+    index: 5,
+    label: "Upload CSV",
+    description: "Upload a spreadsheet of products to import",
   },
   reconcile: {
-    index: 7,
+    index: 6,
     label: "Reconcile & Sync",
     description: "Review, correct, and sync everything to Arda",
+  },
+  // Legacy/manual module metadata
+  "analyze-orders": {
+    index: 97,
+    label: "Analyze Orders",
+    description: "We'll determine order frequency and minimum order quantities",
+  },
+  "enrich-products": {
+    index: 98,
+    label: "Enrich Products",
+    description: "Pull images, ASINs, and product details from vendor APIs",
   },
 };
 

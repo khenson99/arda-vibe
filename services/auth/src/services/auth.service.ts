@@ -58,6 +58,47 @@ interface AuthResponse {
   };
 }
 
+export interface GoogleOAuthProfile {
+  googleId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  avatarUrl?: string;
+}
+
+export interface GoogleOAuthTokenBundle {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: Date;
+}
+
+export interface GmailDiscoveredSupplier {
+  vendorId: string;
+  vendorName: string;
+  domain: string;
+  messageCount: number;
+  lastSeenAt: string;
+}
+
+export interface GmailSupplierDiscoveryResult {
+  suppliers: GmailDiscoveredSupplier[];
+  scannedMessages: number;
+  hasMore: boolean;
+}
+
+const GMAIL_DISCOVERY_DOMAIN_DENYLIST = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'google.com',
+  'outlook.com',
+  'hotmail.com',
+  'yahoo.com',
+  'icloud.com',
+  'aol.com',
+  'proton.me',
+  'protonmail.com',
+]);
+
 // ─── Register (Creates Tenant + Admin User) ──────────────────────────
 export async function register(input: RegisterInput): Promise<AuthResponse> {
   const normalizedEmail = input.email.trim().toLowerCase();
@@ -360,13 +401,7 @@ export async function refreshAccessToken(token: string): Promise<TokenPair> {
 }
 
 // ─── Google ID Token Verification ────────────────────────────────────
-export async function verifyGoogleIdToken(idToken: string): Promise<{
-  googleId: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  avatarUrl?: string;
-}> {
+export async function verifyGoogleIdToken(idToken: string): Promise<GoogleOAuthProfile> {
   if (!config.GOOGLE_CLIENT_ID) {
     throw new AppError(500, 'Google OAuth is not configured (missing GOOGLE_CLIENT_ID)', 'GOOGLE_NOT_CONFIGURED');
   }
@@ -527,6 +562,366 @@ export async function handleGoogleOAuth(profile: {
       tenantId: result.tenant.id,
       tenantName: result.tenant.name,
     },
+  };
+}
+
+export function generateGoogleOAuthAuthorizationUrl(input: {
+  state: string;
+  redirectUri: string;
+}): string {
+  if (!config.GOOGLE_CLIENT_ID || !config.GOOGLE_CLIENT_SECRET) {
+    throw new AppError(
+      500,
+      'Google OAuth is not configured (missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)',
+      'GOOGLE_NOT_CONFIGURED',
+    );
+  }
+
+  const client = new OAuth2Client(
+    config.GOOGLE_CLIENT_ID,
+    config.GOOGLE_CLIENT_SECRET,
+    input.redirectUri,
+  );
+
+  return client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    include_granted_scopes: true,
+    scope: [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ],
+    state: input.state,
+  });
+}
+
+export async function exchangeGoogleOAuthCode(input: {
+  code: string;
+  redirectUri: string;
+}): Promise<{ profile: GoogleOAuthProfile; tokens: GoogleOAuthTokenBundle }> {
+  if (!config.GOOGLE_CLIENT_ID || !config.GOOGLE_CLIENT_SECRET) {
+    throw new AppError(
+      500,
+      'Google OAuth is not configured (missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)',
+      'GOOGLE_NOT_CONFIGURED',
+    );
+  }
+
+  const client = new OAuth2Client(
+    config.GOOGLE_CLIENT_ID,
+    config.GOOGLE_CLIENT_SECRET,
+    input.redirectUri,
+  );
+
+  let tokenResponse;
+  try {
+    tokenResponse = await client.getToken(input.code);
+  } catch {
+    throw new AppError(401, 'Unable to exchange Google OAuth code', 'GOOGLE_CODE_EXCHANGE_FAILED');
+  }
+
+  const accessToken = tokenResponse.tokens.access_token;
+  if (!accessToken) {
+    throw new AppError(401, 'Google OAuth did not return an access token', 'GOOGLE_ACCESS_TOKEN_MISSING');
+  }
+
+  const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  if (!userInfoResponse.ok) {
+    throw new AppError(401, 'Unable to fetch Google user profile', 'GOOGLE_USERINFO_FAILED');
+  }
+
+  const userInfo = (await userInfoResponse.json()) as {
+    id?: string;
+    email?: string;
+    given_name?: string;
+    family_name?: string;
+    picture?: string;
+  };
+  if (!userInfo.id || !userInfo.email) {
+    throw new AppError(401, 'Google user profile missing required fields', 'GOOGLE_USERINFO_INVALID');
+  }
+
+  return {
+    profile: {
+      googleId: userInfo.id,
+      email: userInfo.email,
+      firstName: userInfo.given_name || '',
+      lastName: userInfo.family_name || '',
+      avatarUrl: userInfo.picture,
+    },
+    tokens: {
+      accessToken,
+      refreshToken: tokenResponse.tokens.refresh_token ?? undefined,
+      expiresAt: tokenResponse.tokens.expiry_date
+        ? new Date(tokenResponse.tokens.expiry_date)
+        : undefined,
+    },
+  };
+}
+
+export async function linkGoogleOAuthForUser(input: {
+  userId: string;
+  profile: GoogleOAuthProfile;
+  tokens: GoogleOAuthTokenBundle;
+}): Promise<void> {
+  const [existingForGoogleId, existingForUser] = await Promise.all([
+    db.query.oauthAccounts.findFirst({
+      where: and(
+        eq(oauthAccounts.provider, 'google'),
+        eq(oauthAccounts.providerAccountId, input.profile.googleId),
+      ),
+    }),
+    db.query.oauthAccounts.findFirst({
+      where: and(eq(oauthAccounts.provider, 'google'), eq(oauthAccounts.userId, input.userId)),
+    }),
+  ]);
+
+  if (existingForGoogleId && existingForGoogleId.userId !== input.userId) {
+    throw new AppError(409, 'This Google account is linked to another workspace user', 'GOOGLE_ALREADY_LINKED');
+  }
+
+  const targetRecord = existingForGoogleId || existingForUser;
+  const nextAccessToken =
+    input.tokens.accessToken ?? targetRecord?.accessToken ?? undefined;
+  const nextRefreshToken =
+    input.tokens.refreshToken ?? targetRecord?.refreshToken ?? undefined;
+  const nextExpiresAt = input.tokens.expiresAt ?? targetRecord?.expiresAt ?? null;
+
+  if (targetRecord) {
+    await db
+      .update(oauthAccounts)
+      .set({
+        providerAccountId: input.profile.googleId,
+        accessToken: nextAccessToken ?? null,
+        refreshToken: nextRefreshToken ?? null,
+        expiresAt: nextExpiresAt,
+      })
+      .where(eq(oauthAccounts.id, targetRecord.id));
+    return;
+  }
+
+  await db.insert(oauthAccounts).values({
+    userId: input.userId,
+    provider: 'google',
+    providerAccountId: input.profile.googleId,
+    accessToken: nextAccessToken ?? null,
+    refreshToken: nextRefreshToken ?? null,
+    expiresAt: nextExpiresAt,
+  });
+}
+
+async function getValidGoogleAccessTokenForUser(userId: string): Promise<string> {
+  const account = await db.query.oauthAccounts.findFirst({
+    where: and(eq(oauthAccounts.provider, 'google'), eq(oauthAccounts.userId, userId)),
+  });
+
+  if (!account) {
+    throw new AppError(404, 'No Gmail account is linked to this user.', 'GOOGLE_NOT_LINKED');
+  }
+
+  const expiresSoon =
+    !!account.expiresAt && account.expiresAt.getTime() <= Date.now() + 5 * 60 * 1000;
+  if (account.accessToken && !expiresSoon) {
+    return account.accessToken;
+  }
+
+  if (!account.refreshToken) {
+    throw new AppError(401, 'Google OAuth token expired. Reconnect Gmail.', 'GOOGLE_REAUTH_REQUIRED');
+  }
+
+  if (!config.GOOGLE_CLIENT_ID || !config.GOOGLE_CLIENT_SECRET) {
+    throw new AppError(
+      500,
+      'Google OAuth is not configured (missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)',
+      'GOOGLE_NOT_CONFIGURED',
+    );
+  }
+
+  try {
+    const oauth2Client = new OAuth2Client(config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET);
+    oauth2Client.setCredentials({ refresh_token: account.refreshToken });
+    const { credentials } = await oauth2Client.refreshAccessToken();
+
+    const nextAccessToken = credentials.access_token ?? account.accessToken;
+    if (!nextAccessToken) {
+      throw new AppError(401, 'Google OAuth refresh failed. Reconnect Gmail.', 'GOOGLE_REAUTH_REQUIRED');
+    }
+
+    await db
+      .update(oauthAccounts)
+      .set({
+        accessToken: nextAccessToken,
+        refreshToken: credentials.refresh_token ?? account.refreshToken,
+        expiresAt: credentials.expiry_date ? new Date(credentials.expiry_date) : account.expiresAt,
+      })
+      .where(eq(oauthAccounts.id, account.id));
+
+    return nextAccessToken;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError(401, 'Google OAuth refresh failed. Reconnect Gmail.', 'GOOGLE_REAUTH_REQUIRED');
+  }
+}
+
+function extractEmailDomain(fromHeader: string): string | null {
+  const emailMatch = fromHeader.match(/[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})/i);
+  if (!emailMatch?.[1]) return null;
+  const normalized = emailMatch[1].trim().toLowerCase().replace(/^www\./, '');
+  if (!normalized || GMAIL_DISCOVERY_DOMAIN_DENYLIST.has(normalized)) return null;
+  return normalized;
+}
+
+function extractSenderName(fromHeader: string): string | null {
+  const nameOnly = fromHeader.split('<')[0]?.trim().replace(/^"+|"+$/g, '');
+  if (nameOnly && !nameOnly.includes('@')) return nameOnly;
+  return null;
+}
+
+function formatVendorNameFromDomain(domain: string): string {
+  const base = domain.split('.')[0] || domain;
+  return base
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+export async function discoverGmailSuppliersForUser(input: {
+  userId: string;
+  maxResults?: number;
+}): Promise<GmailSupplierDiscoveryResult> {
+  const accessToken = await getValidGoogleAccessTokenForUser(input.userId);
+  const cappedResults = Math.max(20, Math.min(input.maxResults ?? 120, 250));
+  const query = [
+    'newer_than:180d',
+    '(subject:(invoice OR receipt OR order OR shipped OR purchase OR confirmation) OR has:attachment)',
+  ].join(' ');
+
+  const listParams = new URLSearchParams({
+    maxResults: String(cappedResults),
+    q: query,
+  });
+
+  const listResponse = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?${listParams.toString()}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+  );
+
+  if (!listResponse.ok) {
+    throw new AppError(502, 'Failed to read Gmail messages.', 'GMAIL_FETCH_FAILED');
+  }
+
+  const listPayload = (await listResponse.json()) as {
+    messages?: Array<{ id?: string | null }>;
+    nextPageToken?: string;
+  };
+  const messages = (listPayload.messages || [])
+    .map((message) => message.id)
+    .filter((id): id is string => Boolean(id));
+
+  if (messages.length === 0) {
+    return {
+      suppliers: [],
+      scannedMessages: 0,
+      hasMore: Boolean(listPayload.nextPageToken),
+    };
+  }
+
+  const supplierByDomain = new Map<
+    string,
+    {
+      vendorName: string;
+      messageCount: number;
+      lastSeenEpochMs: number;
+    }
+  >();
+
+  await Promise.all(
+    messages.map(async (messageId) => {
+      const messageParams = new URLSearchParams();
+      messageParams.set('format', 'metadata');
+      messageParams.append('metadataHeaders', 'From');
+      messageParams.append('metadataHeaders', 'Date');
+
+      const messageResponse = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?${messageParams.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        },
+      );
+
+      if (!messageResponse.ok) {
+        return;
+      }
+
+      const payload = (await messageResponse.json()) as {
+        internalDate?: string;
+        payload?: { headers?: Array<{ name?: string; value?: string }> };
+      };
+      const headers = payload.payload?.headers || [];
+      const fromHeader =
+        headers.find((header) => header.name?.toLowerCase() === 'from')?.value || '';
+      if (!fromHeader) return;
+
+      const domain = extractEmailDomain(fromHeader);
+      if (!domain) return;
+
+      const dateHeader =
+        headers.find((header) => header.name?.toLowerCase() === 'date')?.value || '';
+      const parsedDate = Date.parse(dateHeader);
+      const internalDateEpochMs = Number(payload.internalDate || 0);
+      const lastSeenEpochMs = Number.isFinite(parsedDate) && parsedDate > 0
+        ? parsedDate
+        : internalDateEpochMs > 0
+          ? internalDateEpochMs
+          : Date.now();
+
+      const senderName = extractSenderName(fromHeader);
+      const current = supplierByDomain.get(domain);
+
+      if (!current) {
+        supplierByDomain.set(domain, {
+          vendorName: senderName || formatVendorNameFromDomain(domain),
+          messageCount: 1,
+          lastSeenEpochMs,
+        });
+        return;
+      }
+
+      current.messageCount += 1;
+      current.lastSeenEpochMs = Math.max(current.lastSeenEpochMs, lastSeenEpochMs);
+      if (!senderName) return;
+      if (current.vendorName === formatVendorNameFromDomain(domain)) {
+        current.vendorName = senderName;
+      }
+    }),
+  );
+
+  const suppliers: GmailDiscoveredSupplier[] = Array.from(supplierByDomain.entries())
+    .map(([domain, aggregate]) => ({
+      vendorId: `gmail-${domain.replace(/[^a-z0-9]+/g, '-')}`,
+      vendorName: aggregate.vendorName,
+      domain,
+      messageCount: aggregate.messageCount,
+      lastSeenAt: new Date(aggregate.lastSeenEpochMs).toISOString(),
+    }))
+    .sort((a, b) => {
+      if (b.messageCount !== a.messageCount) return b.messageCount - a.messageCount;
+      return Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt);
+    });
+
+  return {
+    suppliers,
+    scannedMessages: messages.length,
+    hasMore: Boolean(listPayload.nextPageToken),
   };
 }
 

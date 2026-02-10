@@ -65,7 +65,7 @@
     --arda-info-light: 199 89% 95%;
 
     /* Base semantic tokens - Light mode (from Figma) */
-    --background: 0 0% 100%;
+    --background: 0 0% 97%;
     --foreground: 0 0% 4%;
 
     --card: 0 0% 100%;
@@ -78,10 +78,10 @@
     --primary: 14 93% 57%;
     --primary-foreground: 0 0% 98%;
 
-    --secondary: 0 0% 96%;
+    --secondary: 0 0% 94%;
     --secondary-foreground: 0 0% 4%;
 
-    --muted: 0 0% 96%;
+    --muted: 0 0% 94%;
     --muted-foreground: 0 0% 45%;
 
     /* Accent uses Arda Blue (#0a68f3) */
@@ -94,9 +94,12 @@
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
+    --border: 0 0% 88%;
+    --input: 0 0% 84%;
     --ring: 14 93% 57%;
+
+    --arda-canvas: 210 16% 97%;
+    --arda-canvas-tint: 210 18% 95%;
 
     --radius: 0.625rem;
 
@@ -200,6 +203,31 @@
     --spacing-unit: 2px;
     --icon-size: 14px;
   }
+
+  /* Shop Floor Mode — optimized for touch screens and quick glance reading */
+  .shop-floor-mode {
+    --row-height: 44px;
+    --cell-padding: 14px;
+    --font-size-base: 16px;
+    --spacing-unit: 4px;
+    --icon-size: 22px;
+    font-size: 16px;
+  }
+
+  .shop-floor-mode button,
+  .shop-floor-mode a[role="button"],
+  .shop-floor-mode [role="checkbox"],
+  .shop-floor-mode [role="radio"],
+  .shop-floor-mode select {
+    min-height: 48px;
+    min-width: 48px;
+  }
+
+  .shop-floor-mode input[type="checkbox"],
+  .shop-floor-mode input[type="radio"] {
+    width: 24px;
+    height: 24px;
+  }
 }
 
 @layer base {
@@ -269,7 +297,7 @@
 
   /* Order Queue Item card (from Figma: rounded-xl, shadow-sm) */
   .card-order-item {
-    @apply bg-card border border-border rounded-xl shadow-sm px-4 py-1;
+    @apply bg-card border border-border rounded-xl shadow-sm px-4 py-3;
   }
 
   /* Arda Link styling (from Figma: --base/link = #0a68f3) */
@@ -293,7 +321,8 @@
   /* Table cell with density-aware padding */
   .table-cell-density {
     padding: var(--cell-padding);
-    height: var(--row-height);
+    min-height: var(--row-height);
+    vertical-align: middle;
   }
 
   /* Icon button with density-aware sizing */
@@ -309,11 +338,20 @@
 
   /* Sidebar nav item */
   .sidebar-nav-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sidebar-foreground hover:bg-sidebar-accent transition-colors;
+    @apply relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sidebar-foreground transition-colors hover:bg-sidebar-accent;
   }
 
   .sidebar-nav-item.active {
     @apply bg-sidebar-accent text-sidebar-primary;
+  }
+
+  .sidebar-nav-item::before {
+    content: "";
+    @apply absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-sidebar-primary opacity-0 transition-opacity;
+  }
+
+  .sidebar-nav-item.active::before {
+    @apply opacity-100;
   }
 
   /* Badge for sidebar counts */
@@ -328,6 +366,13 @@
       hsl(var(--arda-coral-start)) 0%,
       hsl(var(--arda-coral-end)) 100%
     );
+  }
+
+  .app-shell-backdrop {
+    background:
+      radial-gradient(circle at 0% 0%, hsl(var(--arda-blue) / 0.05), transparent 30%),
+      radial-gradient(circle at 100% 100%, hsl(var(--arda-orange) / 0.06), transparent 34%),
+      linear-gradient(180deg, hsl(var(--arda-canvas)) 0%, hsl(var(--arda-canvas-tint)) 100%);
   }
 
   /* Status badges */

@@ -588,6 +588,14 @@ export function OrderPulseOnboarding({
             onCsvUpload={handleCsvUpload}
           />
         )}
+        {currentStep === "upload-csv" && (
+          <StepImportLinks
+            links={linkImports}
+            csvResult={csvResult}
+            onAddLinks={handleAddLinks}
+            onCsvUpload={handleCsvUpload}
+          />
+        )}
         {currentStep === "reconcile" && (
           <StepReconcile
             items={reconciliationItems}
