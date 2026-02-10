@@ -9,7 +9,10 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "express": "^4.21.0",
@@ -20,7 +23,9 @@
     "postgres": "^3.4.5",
     "@arda/config": "*",
     "@arda/db": "*",
-    "@arda/auth-utils": "*"
+    "@arda/auth-utils": "*",
+    "@arda/search": "*",
+    "@arda/observability": "*"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

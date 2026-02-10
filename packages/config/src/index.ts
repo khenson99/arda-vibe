@@ -34,6 +34,14 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().url().optional(),
 
+  // AI / LLM
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default('gpt-4.1-mini'),
+  OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+
+  // UPC lookup
+  BARCODE_LOOKUP_API_KEY: z.string().optional(),
+
   // Stripe
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -57,6 +65,7 @@ const envSchema = z.object({
   KANBAN_SERVICE_PORT: z.coerce.number().default(3003),
   ORDERS_SERVICE_PORT: z.coerce.number().default(3004),
   NOTIFICATIONS_SERVICE_PORT: z.coerce.number().default(3005),
+  ITEMS_SERVICE_PORT: z.coerce.number().default(3006),
 
   // Queue Risk Scheduler (Orders Service)
   ORDERS_QUEUE_RISK_SCAN_ENABLED: booleanFromEnv.default(true),
@@ -74,6 +83,7 @@ const envSchema = z.object({
   KANBAN_SERVICE_URL: z.string().url().optional(),
   ORDERS_SERVICE_URL: z.string().url().optional(),
   NOTIFICATIONS_SERVICE_URL: z.string().url().optional(),
+  ITEMS_SERVICE_URL: z.string().url().optional(),
 
   // AWS
   AWS_REGION: z.string().default('us-east-1'),
@@ -104,6 +114,7 @@ export const serviceUrls = {
   kanban: config.KANBAN_SERVICE_URL || `http://${config.SERVICE_HOST}:${config.KANBAN_SERVICE_PORT}`,
   orders: config.ORDERS_SERVICE_URL || `http://${config.SERVICE_HOST}:${config.ORDERS_SERVICE_PORT}`,
   notifications: config.NOTIFICATIONS_SERVICE_URL || `http://${config.SERVICE_HOST}:${config.NOTIFICATIONS_SERVICE_PORT}`,
+  items: config.ITEMS_SERVICE_URL || `http://${config.SERVICE_HOST}:${config.ITEMS_SERVICE_PORT}`,
 } as const;
 
 // ─── Structured Logger Factory ───────────────────────────────────────

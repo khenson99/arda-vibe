@@ -48,3 +48,11 @@ export {
   requestLoggingMiddleware,
   type CorrelatedLoggerOptions,
 } from './logging.js';
+
+// Express integration
+export {
+  setupObservability,
+  addObservabilityErrorHandler,
+  getServiceLogger,
+  type ObservabilityOptions,
+} from './express-setup.js';

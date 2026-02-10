@@ -11,11 +11,13 @@ concurrency:
   cancel-in-progress: true
 
 # ─── Quality Gates ──────────────────────────────────────────────────
-# Gate 1: Lint + Typecheck (fast fail)
+# Gate 1: Lint + Typecheck (fast fail — catches syntax/style issues)
 # Gate 2: Unit tests (parallel per workspace)
-# Gate 3: Integration tests (requires DB/Redis)
-# Gate 4: Migration safety check (PR only)
-# Gate 5: Docker build matrix (main branch only)
+# Gate 3: Coverage reporting (PR-only, target 60%)
+# Gate 4: Security audit (npm audit — blocks on critical)
+# Gate 5: Integration tests (requires DB/Redis)
+# Gate 6: Migration safety check (PR-only, blocks destructive ops)
+# Gate 7: Docker build matrix (main branch push only)
 # ────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -40,11 +42,10 @@ jobs:
         run: npx turbo build --filter='./packages/*'
 
       - name: Typecheck all workspaces
-        run: npx turbo build
+        run: npx turbo typecheck
 
-      - name: Lint
+      - name: Lint all workspaces
         run: npx turbo lint
-        continue-on-error: true
 
   # ─── Gate 2: Unit Tests ────────────────────────────────────────────
   unit-tests:
@@ -63,6 +64,7 @@ jobs:
           - '@arda/jobs'
           - '@arda/search'
           - '@arda/storage'
+          - '@arda/observability'
           - '@arda/auth-service'
           - '@arda/catalog-service'
           - '@arda/kanban-service'
@@ -89,7 +91,99 @@ jobs:
           WORKSPACE: ${{ matrix.workspace }}
         run: npx turbo test --filter="$WORKSPACE"
 
-  # ─── Gate 3: Integration Tests ─────────────────────────────────────
+  # ─── Gate 3: Coverage Report (PR only) ─────────────────────────────
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint-typecheck
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages
+        run: npx turbo build --filter='./packages/*'
+
+      - name: Run tests with coverage
+        run: npx turbo test:coverage
+        continue-on-error: true
+
+      - name: Generate coverage summary
+        run: |
+          echo "## Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Statements | Branches | Functions | Lines |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----------|----------|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+
+          for dir in packages/*/coverage services/*/coverage; do
+            if [ -f "$dir/coverage-summary.json" ]; then
+              PKG=$(echo "$dir" | sed 's|/coverage||')
+              node -e "
+                const fs = require('fs');
+                const data = JSON.parse(fs.readFileSync('./$dir/coverage-summary.json', 'utf8'));
+                const t = data.total;
+                const name = '$PKG';
+                const stmt = t.statements.pct + '%';
+                const branch = t.branches.pct + '%';
+                const func = t.functions.pct + '%';
+                const lines = t.lines.pct + '%';
+                console.log('| ' + name + ' | ' + stmt + ' | ' + branch + ' | ' + func + ' | ' + lines + ' |');
+              " >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Target: 60% line coverage (enforced after stabilization phase)" >> $GITHUB_STEP_SUMMARY
+
+  # ─── Gate 4: Security Audit ────────────────────────────────────────
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: lint-typecheck
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm audit (critical blocks, high warns)
+        run: |
+          echo "## Security Audit" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run audit and capture output
+          set +e
+          npm audit --audit-level=critical 2>&1
+          AUDIT_EXIT=$?
+          set -e
+
+          if [ $AUDIT_EXIT -eq 0 ]; then
+            echo "No critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Critical vulnerabilities detected — review required before merge" >> $GITHUB_STEP_SUMMARY
+            npm audit --audit-level=critical
+          fi
+
+      - name: Check high-severity (warning only)
+        run: npm audit --audit-level=high || true
+
+  # ─── Gate 5: Integration Tests ─────────────────────────────────────
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
@@ -151,7 +245,7 @@ jobs:
         env:
           INTEGRATION: 'true'
 
-  # ─── Gate 4: Migration Safety Check ────────────────────────────────
+  # ─── Gate 6: Migration Safety Check ────────────────────────────────
   migration-check:
     name: Migration Safety
     runs-on: ubuntu-latest
@@ -159,26 +253,10 @@ jobs:
     needs: lint-typecheck
     if: github.event_name == 'pull_request'
 
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: arda_v2_migration
-          POSTGRES_USER: arda
-          POSTGRES_PASSWORD: arda_migration_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U arda -d arda_v2_migration"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-
-    env:
-      DATABASE_URL: postgresql://arda:arda_migration_password@localhost:5432/arda_v2_migration
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -191,16 +269,57 @@ jobs:
       - name: Build packages
         run: npx turbo build --filter='./packages/*'
 
-      - name: Check for pending migrations
-        run: npx turbo run db:check --filter=@arda/db
-        continue-on-error: true
+      - name: Check for destructive migrations
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          echo "## Migration Safety Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-  # ─── Gate 5: Docker Builds ─────────────────────────────────────────
+          # Find new/modified migration files vs base branch
+          CHANGED_SQL=$(git diff --name-only --diff-filter=AM "$BASE_SHA" -- 'packages/db/drizzle/*.sql' || true)
+
+          if [ -z "$CHANGED_SQL" ]; then
+            echo "No new or modified migration files" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "### New/Modified Migrations" >> $GITHUB_STEP_SUMMARY
+          echo "$CHANGED_SQL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check for destructive operations
+          DESTRUCTIVE_FOUND=false
+          for f in $CHANGED_SQL; do
+            if [ -f "$f" ]; then
+              HITS=$(grep -inE "DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM" "$f" || true)
+              if [ -n "$HITS" ]; then
+                DESTRUCTIVE_FOUND=true
+                echo "Destructive ops in $f:" >> $GITHUB_STEP_SUMMARY
+                echo "$HITS" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          done
+
+          if [ "$DESTRUCTIVE_FOUND" = true ]; then
+            if [[ "$PR_LABELS" != *"migration-approved"* ]]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Missing migration-approved label — add it to proceed" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            else
+              echo "migration-approved label present" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "No destructive operations in migrations" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ─── Gate 7: Docker Builds ─────────────────────────────────────────
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [unit-tests, integration-tests]
+    needs: [unit-tests, integration-tests, security-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     strategy:

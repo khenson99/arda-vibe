@@ -4,11 +4,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config, serviceUrls, createLogger } from '@arda/config';
+import { authMiddleware } from '@arda/auth-utils';
 import { getEventBus } from '@arda/events';
 
 const log = createLogger('api-gateway');
 import { db } from '@arda/db';
 import { sql } from 'drizzle-orm';
+import { itemsCompatRouter } from './routes/items-compat.routes.js';
 import { setupProxies } from './routes/proxy.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { setupWebSocket } from './ws/socket-handler.js';
@@ -89,6 +91,7 @@ app.get('/health', async (_req, res) => {
 });
 
 // ─── Service Proxies ──────────────────────────────────────────────────
+app.use('/api/items', express.json({ limit: '2mb' }), authMiddleware, itemsCompatRouter);
 setupProxies(app);
 
 // ─── 404 Handler ──────────────────────────────────────────────────────

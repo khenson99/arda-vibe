@@ -52,6 +52,12 @@ const routes: RouteConfig[] = [
     requiresAuth: true,
   },
   {
+    prefix: '/api/items',
+    target: serviceUrls.items,
+    pathRewrite: { '^/': '/v1/items/' },
+    requiresAuth: true,
+  },
+  {
     prefix: '/api/notifications',
     target: serviceUrls.notifications,
     pathRewrite: {},

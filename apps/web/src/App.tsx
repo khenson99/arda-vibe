@@ -4,6 +4,8 @@ import { Loader2 } from "lucide-react";
 
 import { readStoredSession, writeStoredSession, fetchMe } from "@/lib/api-client";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { ImportContextProvider, ModuleDialog } from "@/components/order-pulse";
+import { Toaster } from "@/components/ui";
 import { AuthPage } from "@/pages/auth-page";
 import { AppShell } from "@/layouts/app-shell";
 import { DashboardRoute } from "@/pages/dashboard";
@@ -13,12 +15,40 @@ import { PartsRoute } from "@/pages/parts";
 import { NotificationsRoute } from "@/pages/notifications";
 import type { AuthResponse, AuthSession } from "@/types";
 
+function detectGuestMobileImportLink(): boolean {
+  if (typeof window === "undefined") return false;
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("mobile") !== "1") return false;
+
+  const moduleParam = params.get("import");
+  const sessionId = params.get("sid")?.trim();
+  const sessionToken = params.get("st")?.trim();
+
+  const isSupportedModule = moduleParam === "scan-upcs" || moduleParam === "ai-identify";
+  return Boolean(isSupportedModule && sessionId && sessionToken);
+}
+
+function GuestMobileImportApp() {
+  return (
+    <ImportContextProvider>
+      <div className="min-h-screen bg-background px-3 py-4">
+        <div className="mx-auto max-w-5xl">
+          <ModuleDialog />
+          <Toaster />
+        </div>
+      </div>
+    </ImportContextProvider>
+  );
+}
+
 function App() {
   const [session, setSession] = React.useState<AuthSession | null>(() => {
     if (typeof window === "undefined") return null;
     return readStoredSession();
   });
   const [bootstrapping, setBootstrapping] = React.useState(true);
+  const [allowGuestMobileImport] = React.useState(() => detectGuestMobileImportLink());
 
   const clearSession = React.useCallback(() => {
     setSession(null);
@@ -80,6 +110,9 @@ function App() {
   }
 
   if (!session) {
+    if (allowGuestMobileImport) {
+      return <GuestMobileImportApp />;
+    }
     return <AuthPage onAuthSuccess={handleAuthSuccess} />;
   }
 

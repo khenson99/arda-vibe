@@ -47,9 +47,38 @@ export function buildMobileImportUrl(module: ImportModuleId): string {
   return url.toString();
 }
 
+export function buildMobileImportSessionUrl(
+  module: ImportModuleId,
+  sessionId: string,
+  sessionToken: string,
+): string {
+  const base = buildMobileImportUrl(module);
+  if (!base) return "";
+  const url = new URL(base);
+  url.searchParams.set("sid", sessionId);
+  url.searchParams.set("st", sessionToken);
+  return url.toString();
+}
+
 export function isMobileImportMode(): boolean {
   if (typeof window === "undefined") return false;
   return new URLSearchParams(window.location.search).get("mobile") === "1";
+}
+
+export function readMobileImportSessionParams(): {
+  sessionId: string | null;
+  sessionToken: string | null;
+} {
+  if (typeof window === "undefined") {
+    return { sessionId: null, sessionToken: null };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const sessionId = params.get("sid");
+  const sessionToken = params.get("st");
+  return {
+    sessionId: sessionId?.trim() || null,
+    sessionToken: sessionToken?.trim() || null,
+  };
 }
 
 export function buildQrCodeImageUrl(targetUrl: string, size = 180): string {

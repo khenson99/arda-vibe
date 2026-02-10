@@ -15,7 +15,7 @@ const app = express();
 // ─── Global Middleware ────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({ origin: config.APP_URL, credentials: true }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '8mb' }));
 
 // ─── Health Check ─────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {

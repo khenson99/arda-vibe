@@ -51,31 +51,33 @@ export function ImportLinksModule({ mode = "both" }: ImportLinksModuleProps) {
     dispatch({ type: "ADD_LINK_IMPORTS", items });
     setLinkText("");
 
-    // Simulate scraping each
+    // Deterministic lightweight scrape stub so onboarding is stable.
     for (const item of items) {
       setTimeout(
         () => {
-          const success = Math.random() > 0.15;
+          let hostname = "product-link";
+          try {
+            hostname = new URL(item.url).hostname.replace(/^www\./, "");
+          } catch {
+            hostname = "product-link";
+          }
+
           dispatch({
             type: "UPDATE_LINK_IMPORT",
             id: item.id,
             update: {
-              status: success ? "scraped" : "error",
-              scrapedProduct: success
-                ? {
-                    name: `Scraped Product from ${new URL(item.url).hostname}`,
-                    productUrl: item.url,
-                    source: "link-scrape" as ProductSource,
-                    moq: Math.floor(Math.random() * 100 + 5),
-                  }
-                : undefined,
-              errorMessage: !success
-                ? "Could not parse product data from this URL"
-                : undefined,
+              status: "scraped",
+              scrapedProduct: {
+                name: `Imported from ${hostname}`,
+                productUrl: item.url,
+                source: "link-scrape" as ProductSource,
+                moq: 10,
+              },
+              errorMessage: undefined,
             },
           });
         },
-        1000 + Math.random() * 2000,
+        800,
       );
     }
   };

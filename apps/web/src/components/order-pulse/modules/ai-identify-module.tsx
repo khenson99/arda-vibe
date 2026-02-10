@@ -9,84 +9,286 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui";
+import {
+  createMobileImportSession,
+  fetchMobileImportSession,
+  identifyImageWithAi,
+  parseApiError,
+  readStoredSession,
+  submitMobileImportImage,
+} from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import type { AiPrediction, ProductSource } from "../types";
+import type { AiPrediction } from "../types";
 import { useImportContext, nextId } from "../import-context";
 import {
+  buildMobileImportSessionUrl,
   buildMobileImportUrl,
   buildQrCodeImageUrl,
   isMobileImportMode,
+  readMobileImportSessionParams,
 } from "../mobile-links";
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read image file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function optimizeImageDataUrl(file: File): Promise<string> {
+  const rawDataUrl = await fileToDataUrl(file);
+  if (rawDataUrl.length <= 1_200_000) return rawDataUrl;
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const longestEdge = Math.max(bitmap.width, bitmap.height);
+    const scale = longestEdge > 1400 ? 1400 / longestEdge : 1;
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return rawDataUrl;
+
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.78);
+  } catch {
+    return rawDataUrl;
+  }
+}
 
 export function AiIdentifyModule() {
   const { state, dispatch } = useImportContext();
   const { imageIdentifications: images } = state;
 
   const isMobileFlow = React.useMemo(() => isMobileImportMode(), []);
+  const mobileSessionParams = React.useMemo(() => readMobileImportSessionParams(), []);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const mobileCaptureUrl = React.useMemo(() => buildMobileImportUrl("ai-identify"), []);
+  const lastPolledSequenceRef = React.useRef(0);
+
+  const [desktopSession, setDesktopSession] = React.useState<{
+    sessionId: string;
+    sessionToken: string;
+  } | null>(null);
+  const [syncMessage, setSyncMessage] = React.useState<string | null>(null);
+
+  const mobileCaptureUrl = React.useMemo(() => {
+    if (desktopSession) {
+      return buildMobileImportSessionUrl(
+        "ai-identify",
+        desktopSession.sessionId,
+        desktopSession.sessionToken,
+      );
+    }
+    return buildMobileImportUrl("ai-identify");
+  }, [desktopSession]);
   const mobileCaptureQrUrl = React.useMemo(
     () => (mobileCaptureUrl ? buildQrCodeImageUrl(mobileCaptureUrl) : ""),
     [mobileCaptureUrl],
   );
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      handleUpload(files[i]);
-    }
-    e.target.value = "";
-  };
-
-  const handleUpload = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
+  const ingestImageDataUrl = React.useCallback(
+    (
+      input: {
+        fileName: string;
+        imageDataUrl: string;
+      },
+      options?: { skipServerSync?: boolean },
+    ) => {
       const id = nextId("img");
       dispatch({
         type: "ADD_IMAGE_IDENTIFICATION",
         item: {
           id,
-          imageDataUrl: reader.result as string,
-          fileName: file.name,
+          imageDataUrl: input.imageDataUrl,
+          fileName: input.fileName,
           uploadedAt: new Date().toISOString(),
           predictions: [],
           status: "analyzing",
         },
       });
 
-      // Simulate AI analysis
-      setTimeout(() => {
+      if (
+        isMobileFlow &&
+        !options?.skipServerSync &&
+        mobileSessionParams.sessionId &&
+        mobileSessionParams.sessionToken
+      ) {
+        void submitMobileImportImage({
+          sessionId: mobileSessionParams.sessionId,
+          sessionToken: mobileSessionParams.sessionToken,
+          fileName: input.fileName,
+          imageDataUrl: input.imageDataUrl,
+        }).catch(() => {
+          setSyncMessage("Could not sync this photo to desktop. Check connectivity and retry.");
+        });
+      }
+
+      const accessToken = readStoredSession()?.tokens.accessToken;
+      if (!accessToken) {
+        if (isMobileFlow && !options?.skipServerSync) {
+          dispatch({
+            type: "UPDATE_IMAGE_IDENTIFICATION",
+            id,
+            update: {
+              status: "complete",
+              predictions: [],
+            },
+          });
+          setSyncMessage("Photo synced to desktop. AI analysis runs on your desktop workspace.");
+          return;
+        }
+
         dispatch({
           type: "UPDATE_IMAGE_IDENTIFICATION",
           id,
           update: {
-            status: "complete",
-            predictions: [
-              {
-                label: `Industrial Part (${file.name.split(".")[0]})`,
-                confidence: 0.92,
-                suggestedProduct: {
-                  name: `AI-Identified: ${file.name.split(".")[0]}`,
-                  source: "ai-image" as ProductSource,
-                  moq: 25,
-                },
-              },
-              {
-                label: "Similar Component Match",
-                confidence: 0.74,
-                suggestedProduct: {
-                  name: `Similar: ${file.name.split(".")[0]} variant`,
-                  source: "ai-image" as ProductSource,
-                  moq: 50,
-                },
-              },
-            ],
+            status: "error",
+            predictions: [],
           },
         });
-      }, 2500);
+        setSyncMessage("Sign in is required to run AI photo analysis.");
+        return;
+      }
+
+      void (async () => {
+        try {
+          const analysis = await identifyImageWithAi(accessToken, {
+            imageDataUrl: input.imageDataUrl,
+            fileName: input.fileName,
+          });
+
+          const predictions = analysis.predictions.map((prediction) => ({
+            ...prediction,
+            confidence: Math.max(0, Math.min(1, prediction.confidence)),
+            suggestedProduct: prediction.suggestedProduct
+              ? {
+                  ...prediction.suggestedProduct,
+                  source: "ai-image" as const,
+                }
+              : undefined,
+          }));
+
+          dispatch({
+            type: "UPDATE_IMAGE_IDENTIFICATION",
+            id,
+            update: {
+              status: "complete",
+              predictions,
+            },
+          });
+        } catch (error) {
+          dispatch({
+            type: "UPDATE_IMAGE_IDENTIFICATION",
+            id,
+            update: {
+              status: "error",
+              predictions: [],
+            },
+          });
+          setSyncMessage(parseApiError(error));
+        }
+      })();
+    },
+    [dispatch, isMobileFlow, mobileSessionParams.sessionId, mobileSessionParams.sessionToken],
+  );
+
+  React.useEffect(() => {
+    if (!isMobileFlow) return;
+    if (mobileSessionParams.sessionId && mobileSessionParams.sessionToken) return;
+    setSyncMessage("This mobile camera link is not paired to a desktop session.");
+  }, [isMobileFlow, mobileSessionParams.sessionId, mobileSessionParams.sessionToken]);
+
+  React.useEffect(() => {
+    if (isMobileFlow) return;
+
+    const session = readStoredSession();
+    const accessToken = session?.tokens.accessToken;
+    if (!accessToken) return;
+
+    let cancelled = false;
+    let pollTimer: number | null = null;
+
+    const start = async () => {
+      try {
+        const created = await createMobileImportSession(accessToken, { module: "ai-identify" });
+        if (cancelled) return;
+
+        setDesktopSession({
+          sessionId: created.sessionId,
+          sessionToken: created.sessionToken,
+        });
+        setSyncMessage(null);
+        lastPolledSequenceRef.current = 0;
+
+        const poll = async () => {
+          const snapshot = await fetchMobileImportSession({
+            sessionId: created.sessionId,
+            accessToken,
+            sinceSequence: lastPolledSequenceRef.current,
+          });
+          for (const event of snapshot.events) {
+            if (event.type === "image") {
+              ingestImageDataUrl(
+                {
+                  fileName: event.payload.fileName,
+                  imageDataUrl: event.payload.imageDataUrl,
+                },
+                { skipServerSync: true },
+              );
+            }
+            lastPolledSequenceRef.current = Math.max(lastPolledSequenceRef.current, event.sequence);
+          }
+        };
+
+        await poll();
+        pollTimer = window.setInterval(() => {
+          void poll().catch(() => {
+            setSyncMessage("Live mobile image sync lost. Trying to reconnect...");
+          });
+        }, 2000);
+      } catch {
+        if (!cancelled) {
+          setSyncMessage("Could not start mobile sync session for image capture.");
+        }
+      }
     };
-    reader.readAsDataURL(file);
+
+    void start();
+
+    return () => {
+      cancelled = true;
+      if (pollTimer !== null) {
+        window.clearInterval(pollTimer);
+      }
+    };
+  }, [ingestImageDataUrl, isMobileFlow]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      void (async () => {
+        try {
+          const imageDataUrl = await optimizeImageDataUrl(file);
+          ingestImageDataUrl({
+            fileName: file.name,
+            imageDataUrl,
+          });
+        } catch {
+          setSyncMessage("Could not process selected image.");
+        }
+      })();
+    }
+
+    e.target.value = "";
   };
 
   const handleSelectPrediction = (imgId: string, pred: AiPrediction) => {
@@ -166,6 +368,10 @@ export function AiIdentifyModule() {
               Take or upload photos
             </button>
           </div>
+        )}
+
+        {syncMessage && (
+          <p className="text-xs text-red-600">{syncMessage}</p>
         )}
 
         <button

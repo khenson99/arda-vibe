@@ -4,10 +4,6 @@ export { AddItemsFab } from "./add-items-fab";
 export { ModuleDialog } from "./module-dialog";
 export { OnboardingOverlay } from "./onboarding-overlay";
 
-// Legacy (kept for backward compatibility during migration)
-export { OrderPulseOnboarding } from "./order-pulse-onboarding";
-export type { OrderPulseOnboardingProps } from "./order-pulse-onboarding";
-
 // Types
 export type {
   ImportModuleId,

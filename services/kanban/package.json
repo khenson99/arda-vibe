@@ -9,6 +9,9 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -24,6 +27,8 @@
     "@arda/db": "*",
     "@arda/auth-utils": "*",
     "@arda/events": "*",
+    "@arda/jobs": "*",
+    "@arda/observability": "*",
     "@arda/shared-types": "*"
   },
   "devDependencies": {

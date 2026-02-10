@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   Badge,
@@ -11,6 +12,15 @@ import {
   CardTitle,
   Checkbox,
 } from "@/components/ui";
+import {
+  ApiError,
+  createCatalogPart,
+  findCatalogPartByPartNumber,
+  parseApiError,
+  readStoredSession,
+  updateItemRecord,
+  updateCatalogPart,
+} from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { ProductSource, EnrichedProduct } from "../types";
 import { useImportContext } from "../import-context";
@@ -24,6 +34,111 @@ const SOURCE_COLORS: Record<ProductSource, string> = {
   "csv-upload": "bg-amber-100 text-amber-700",
   manual: "bg-muted text-muted-foreground",
 };
+
+const VALID_UOMS = new Set([
+  "each",
+  "box",
+  "case",
+  "pallet",
+  "kg",
+  "lb",
+  "meter",
+  "foot",
+  "liter",
+  "gallon",
+  "roll",
+  "sheet",
+  "pair",
+  "set",
+  "other",
+] as const);
+
+function normalizePartNumber(raw: string): string {
+  const cleaned = raw
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toUpperCase();
+  return cleaned.slice(0, 100);
+}
+
+function toCatalogPartPayload(item: EnrichedProduct): Parameters<typeof createCatalogPart>[1] {
+  const candidatePartNumbers = [
+    item.sku,
+    item.upc,
+    item.asin,
+    item.name?.replace(/\s+/g, "-"),
+  ].filter((value): value is string => Boolean(value && value.trim()));
+
+  const basePartNumber =
+    candidatePartNumbers
+      .map((candidate) => normalizePartNumber(candidate))
+      .find(Boolean) ??
+    normalizePartNumber(`ONBOARD-${item.id}`);
+
+  const safePartNumber = basePartNumber || `ONBOARD-${Date.now()}`;
+
+  const description = item.description?.trim() || undefined;
+  const itemType =
+    item.source === "manual"
+      ? "other"
+      : item.source === "email-import" || item.source === "api-enrichment"
+        ? "component"
+        : "finished_good";
+
+  const maybeUom = (item as { minQtyUnit?: string | null; orderQtyUnit?: string | null }).minQtyUnit
+    || (item as { minQtyUnit?: string | null; orderQtyUnit?: string | null }).orderQtyUnit
+    || "each";
+  const normalizedUom = maybeUom.toLowerCase();
+  const uom = (VALID_UOMS.has(normalizedUom as any) ? normalizedUom : "each") as Parameters<
+    typeof createCatalogPart
+  >[1]["uom"];
+
+  const unitPriceValue =
+    typeof item.unitPrice === "number" && Number.isFinite(item.unitPrice)
+      ? item.unitPrice.toFixed(2)
+      : undefined;
+
+  const imageUrl =
+    typeof item.imageUrl === "string" && /^https?:\/\//i.test(item.imageUrl)
+      ? item.imageUrl
+      : undefined;
+
+  return {
+    partNumber: safePartNumber,
+    name: item.name?.trim() || `Imported ${safePartNumber}`,
+    description,
+    type: itemType,
+    uom,
+    unitPrice: unitPriceValue,
+    upcBarcode: item.upc?.trim() || undefined,
+    manufacturerPartNumber: item.sku?.trim() || item.asin?.trim() || undefined,
+    imageUrl,
+    isSellable: false,
+  };
+}
+
+function toItemsServicePayload(item: EnrichedProduct, externalGuid: string) {
+  const imageUrl =
+    typeof item.imageUrl === "string" && /^https?:\/\//i.test(item.imageUrl)
+      ? item.imageUrl
+      : null;
+  return {
+    externalGuid,
+    name: item.name?.trim() || externalGuid,
+    orderMechanism: item.orderCadenceDays ? "recurring" : "unspecified",
+    location: null,
+    minQty: Math.max(0, Math.trunc(item.moq || 0)),
+    minQtyUnit: "each",
+    orderQty: item.moq ? Math.max(0, Math.trunc(item.moq)) : null,
+    orderQtyUnit: "each",
+    primarySupplier: item.vendorName?.trim() || "Unknown supplier",
+    primarySupplierLink: item.productUrl?.trim() || null,
+    imageUrl,
+  };
+}
 
 interface ReconcileSyncModuleProps {
   onSync?: (products: EnrichedProduct[]) => void;
@@ -59,13 +174,103 @@ export function ReconcileSyncModule({ onSync }: ReconcileSyncModuleProps) {
   const approvedCount = items.filter((i) => i.isApproved).length;
 
   const handleSync = async () => {
-    dispatch({ type: "SET_SYNCING", value: true });
-    await new Promise((r) => setTimeout(r, 3000));
-    dispatch({ type: "SET_SYNCING", value: false });
+    const session = readStoredSession();
+    if (!session?.tokens?.accessToken) {
+      toast.error("You must be signed in to sync products.");
+      return;
+    }
 
     const approved = items.filter((item) => item.isApproved);
-    onSync?.(approved);
-    dispatch({ type: "CLOSE_MODULE" });
+    if (approved.length === 0) {
+      toast.error("No approved products to sync.");
+      return;
+    }
+
+    dispatch({ type: "SET_SYNCING", value: true });
+    let created = 0;
+    let updated = 0;
+    let failed = 0;
+
+    try {
+      for (const item of approved) {
+        const mergedItem: EnrichedProduct = {
+          ...item,
+          ...item.userOverrides,
+        };
+        const payload = toCatalogPartPayload(mergedItem);
+        const author = session.user.email?.trim() || session.user.id;
+
+        // Prefer Items Data Authority writes when available so the Items table
+        // (which reads /api/items first) reflects onboarding output immediately.
+        try {
+          const entityId = `onb-${payload.partNumber.toLowerCase()}`;
+          await updateItemRecord(session.tokens.accessToken, {
+            entityId,
+            tenantId: session.user.tenantId,
+            author,
+            payload: toItemsServicePayload(mergedItem, payload.partNumber),
+          });
+          created += 1;
+          continue;
+        } catch {
+          // Fall through to catalog service persistence for environments that
+          // don't expose /api/items yet.
+        }
+
+        try {
+          await createCatalogPart(session.tokens.accessToken, payload);
+          created += 1;
+          continue;
+        } catch (error) {
+          const isDuplicate = error instanceof ApiError && error.status === 409;
+          if (!isDuplicate) {
+            failed += 1;
+            continue;
+          }
+        }
+
+        try {
+          const existing = await findCatalogPartByPartNumber(
+            session.tokens.accessToken,
+            payload.partNumber,
+          );
+          if (!existing) {
+            failed += 1;
+            continue;
+          }
+          await updateCatalogPart(session.tokens.accessToken, existing.id, {
+            name: payload.name,
+            description: payload.description,
+            type: payload.type,
+            uom: payload.uom,
+            unitPrice: payload.unitPrice,
+            upcBarcode: payload.upcBarcode,
+            manufacturerPartNumber: payload.manufacturerPartNumber,
+            imageUrl: payload.imageUrl,
+            isSellable: payload.isSellable,
+          });
+          updated += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      if (created + updated > 0) {
+        toast.success(`Synced ${created + updated} products (${created} new, ${updated} updated).`);
+        onSync?.(approved);
+      }
+
+      if (failed > 0) {
+        toast.error(`${failed} product${failed === 1 ? "" : "s"} failed to sync. Review and retry.`);
+        return;
+      }
+
+      dispatch({ type: "CLOSE_MODULE" });
+    } catch (error) {
+      toast.error(parseApiError(error));
+    } finally {
+      dispatch({ type: "SET_SYNCING", value: false });
+    }
   };
 
   return (

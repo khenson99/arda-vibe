@@ -10,58 +10,85 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui";
-import type { DetectedOrder, EnrichedProduct } from "../types";
+import { enrichEmailOrdersWithAi, parseApiError, readStoredSession } from "@/lib/api-client";
 import { useImportContext, nextId } from "../import-context";
+import type { EnrichedProduct } from "../types";
 
-/* ------------------------------------------------------------------ */
-/*  Mock data generator (replace with real API call)                   */
-/* ------------------------------------------------------------------ */
-
-function mockEnrichedProducts(orders: DetectedOrder[]): EnrichedProduct[] {
-  const products: EnrichedProduct[] = [];
-
-  for (const order of orders) {
-    for (const item of order.items) {
-      products.push({
-        id: nextId("prod"),
-        name: item.name,
-        sku: item.sku,
-        asin: item.asin,
-        vendorId: order.vendorId,
-        vendorName: order.vendorName,
-        productUrl: item.url,
-        unitPrice: item.unitPrice,
-        moq: (Math.floor(Math.random() * 5) + 1) * 10,
-        orderCadenceDays: [7, 14, 21, 30, 45, 60, 90][Math.floor(Math.random() * 7)],
-        source: "email-import",
-        confidence: Math.floor(Math.random() * 30 + 70),
-        needsReview: Math.random() > 0.7,
-        imageUrl: undefined,
-        description: `Auto-detected from ${order.vendorName} order ${order.orderNumber}`,
-      });
-    }
-  }
-
-  return products;
+function toEnrichedProducts(products: Awaited<ReturnType<typeof enrichEmailOrdersWithAi>>["products"]): EnrichedProduct[] {
+  return products.map((product) => ({
+    id: nextId("prod"),
+    name: product.name,
+    sku: product.sku,
+    asin: product.asin,
+    upc: product.upc,
+    imageUrl: product.imageUrl,
+    vendorId: product.vendorId,
+    vendorName: product.vendorName,
+    productUrl: product.productUrl,
+    description: product.description,
+    unitPrice: product.unitPrice,
+    moq: product.moq,
+    orderCadenceDays: product.orderCadenceDays,
+    source: "email-import",
+    confidence: product.confidence,
+    needsReview: product.needsReview,
+  }));
 }
-
-/* ------------------------------------------------------------------ */
-/*  Component                                                         */
-/* ------------------------------------------------------------------ */
 
 export function EnrichProductsModule() {
   const { state, dispatch } = useImportContext();
   const { enrichedProducts: products, isEnriching, detectedOrders } = state;
+  const [enrichWarning, setEnrichWarning] = React.useState<string | null>(null);
+  const [enrichError, setEnrichError] = React.useState<string | null>(null);
+  const [enrichMode, setEnrichMode] = React.useState<"ai" | "heuristic" | null>(null);
 
   const orderItemCount = detectedOrders.reduce((n, o) => n + o.items.length, 0);
 
-  const handleEnrich = async () => {
+  const handleEnrich = React.useCallback(async () => {
+    if (isEnriching) return;
+    setEnrichError(null);
+    setEnrichWarning(null);
+
+    const session = readStoredSession();
+    const accessToken = session?.tokens.accessToken;
+    if (!accessToken) {
+      setEnrichError("Sign in again to run AI enrichment.");
+      return;
+    }
+
+    if (detectedOrders.length === 0) {
+      setEnrichError("Analyze Gmail orders first so there are line items to enrich.");
+      return;
+    }
+
     dispatch({ type: "SET_ENRICHING", value: true });
-    await new Promise((r) => setTimeout(r, 3000));
-    const enriched = mockEnrichedProducts(detectedOrders);
-    dispatch({ type: "SET_ENRICHED_PRODUCTS", products: enriched });
-    dispatch({ type: "SET_ENRICHING", value: false });
-  };
+    try {
+      const result = await enrichEmailOrdersWithAi(accessToken, {
+        orders: detectedOrders.map((order) => ({
+          vendorId: order.vendorId,
+          vendorName: order.vendorName,
+          orderDate: order.orderDate,
+          orderNumber: order.orderNumber,
+          items: order.items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            sku: item.sku,
+            asin: item.asin,
+            unitPrice: item.unitPrice,
+            url: item.url,
+          })),
+        })),
+      });
+
+      dispatch({ type: "SET_ENRICHED_PRODUCTS", products: toEnrichedProducts(result.products) });
+      setEnrichMode(result.mode);
+      setEnrichWarning(result.warning ?? null);
+    } catch (error) {
+      setEnrichError(parseApiError(error));
+    } finally {
+      dispatch({ type: "SET_ENRICHING", value: false });
+    }
+  }, [detectedOrders, dispatch, isEnriching]);
 
   return (
     <Card>
@@ -72,11 +99,31 @@ export function EnrichProductsModule() {
         </CardTitle>
         <CardDescription>
           {orderItemCount > 0
-            ? `Scraping images, ASINs, and product details from Amazon Product Advertising API and other vendor APIs for ${orderItemCount} detected line items.`
-            : "Analyze orders first to have line items to enrich."}
+            ? `Running AI enrichment for ${orderItemCount} detected Gmail line items to infer MOQ, cadence, and product metadata.`
+            : "Analyze Gmail orders first to provide line items for enrichment."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {enrichMode && (
+          <div className="rounded-xl border border-[hsl(var(--arda-blue)/0.24)] bg-[hsl(var(--arda-blue)/0.08)] px-3 py-2 text-xs text-[hsl(var(--arda-blue))]">
+            {enrichMode === "ai"
+              ? "AI enrichment active: product fields were generated from detected order lines."
+              : "Deterministic enrichment active due AI provider/config fallback."}
+          </div>
+        )}
+
+        {enrichWarning && (
+          <div className="rounded-xl border border-[hsl(var(--arda-orange)/0.3)] bg-[hsl(var(--arda-orange)/0.1)] px-3 py-2 text-xs text-[hsl(var(--arda-orange))]">
+            {enrichWarning}
+          </div>
+        )}
+
+        {enrichError && (
+          <div className="rounded-xl border border-[hsl(var(--arda-error)/0.28)] bg-[hsl(var(--arda-error)/0.08)] px-3 py-2 text-xs text-[hsl(var(--arda-error))]">
+            {enrichError}
+          </div>
+        )}
+
         {products.length === 0 ? (
           <div className="text-center py-8">
             <Button onClick={() => void handleEnrich()} disabled={isEnriching || orderItemCount === 0}>
@@ -95,6 +142,19 @@ export function EnrichProductsModule() {
           </div>
         ) : (
           <>
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={() => void handleEnrich()} disabled={isEnriching}>
+                {isEnriching ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Refreshing...
+                  </span>
+                ) : (
+                  "Refresh Enrichment"
+                )}
+              </Button>
+            </div>
+
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border bg-card p-4 text-center">
                 <p className="text-2xl font-bold">{products.length}</p>

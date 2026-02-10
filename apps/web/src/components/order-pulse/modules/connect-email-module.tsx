@@ -28,7 +28,7 @@ import {
   readStoredSession,
 } from "@/lib/api-client";
 import { API_BASE_URL } from "@/lib/constants";
-import { PRESET_VENDORS, type EmailProvider } from "../types";
+import type { EmailProvider } from "../types";
 import { useImportContext } from "../import-context";
 
 const PROVIDERS: { id: EmailProvider; label: string; icon: string }[] = [
@@ -60,14 +60,6 @@ export function ConnectEmailModule({ onConnected, onContinue }: ConnectEmailModu
   const [oauthError, setOauthError] = React.useState<string | null>(null);
   const [oauthStatus, setOauthStatus] = React.useState<string | null>(null);
 
-  const defaultVendorIds = React.useMemo(
-    () =>
-      PRESET_VENDORS.filter((vendor) => vendor.hasApi)
-        .slice(0, 3)
-        .map((vendor) => vendor.id),
-    [],
-  );
-
   const oauthEventSourceOrigin = React.useMemo(() => {
     if (typeof window === "undefined") return "";
     try {
@@ -89,16 +81,12 @@ export function ConnectEmailModule({ onConnected, onContinue }: ConnectEmailModu
         },
       });
 
-      if (state.selectedVendors.size === 0) {
-        dispatch({ type: "SET_VENDORS", vendorIds: defaultVendorIds });
-      }
-
       setIsConnecting(false);
       setOauthError(null);
       setOauthStatus(`Gmail linked as ${linkedEmail}`);
       onConnected?.();
     },
-    [defaultVendorIds, dispatch, onConnected, state.selectedVendors.size],
+    [dispatch, onConnected],
   );
 
   const waitForGooglePopupResult = React.useCallback(
@@ -282,10 +270,6 @@ export function ConnectEmailModule({ onConnected, onContinue }: ConnectEmailModu
     }
     await new Promise((r) => setTimeout(r, 350));
 
-    if (state.selectedVendors.size === 0) {
-      dispatch({ type: "SET_VENDORS", vendorIds: defaultVendorIds });
-    }
-
     dispatch({ type: "UPDATE_EMAIL_STATUS", status: "connected" });
     setIsConnecting(false);
     setOauthStatus(`Connected ${targetEmail}`);
@@ -338,8 +322,7 @@ export function ConnectEmailModule({ onConnected, onContinue }: ConnectEmailModu
               </div>
 
               <div className="rounded-lg border border-[hsl(var(--arda-blue)/0.22)] bg-[hsl(var(--arda-blue)/0.06)] px-3 py-2 text-xs text-[hsl(var(--arda-blue))]">
-                Smart defaults enabled: {state.selectedVendors.size} vendor channels preselected for
-                a fast first scan.
+                Next we&apos;ll scan 6 months of purchase emails, detect likely suppliers, and let you choose which vendors to import from.
               </div>
 
               <Button className="w-full" onClick={handleContinue}>

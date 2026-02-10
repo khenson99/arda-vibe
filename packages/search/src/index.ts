@@ -8,6 +8,7 @@
 // Clients
 export { ElasticsearchSearchClient, type ElasticsearchClientConfig } from './elasticsearch-client.js';
 export { MockSearchClient } from './mock-client.js';
+export { createSearchClient } from './client-factory.js';
 
 // Index mappings
 export { PARTS_INDEX, partsMapping } from './mappings/parts.js';

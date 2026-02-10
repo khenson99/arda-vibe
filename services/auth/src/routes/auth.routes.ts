@@ -6,8 +6,10 @@ import { db, schema } from '@arda/db';
 import { eq } from 'drizzle-orm';
 import { config } from '@arda/config';
 import crypto from 'crypto';
+import { mobileImportRouter } from './mobile-import.routes.js';
 
 export const authRouter = Router();
+authRouter.use('/mobile-import', mobileImportRouter);
 
 // ─── Validation Schemas ───────────────────────────────────────────────
 const registerSchema = z.object({
@@ -43,6 +45,49 @@ const googleLinkInitSchema = z.object({
 
 const googleVendorDiscoveryQuerySchema = z.object({
   maxResults: z.coerce.number().int().min(20).max(250).optional(),
+  lookbackDays: z.coerce.number().int().min(30).max(365).optional(),
+});
+
+const googleOrderDiscoveryQuerySchema = z.object({
+  maxResults: z.coerce.number().int().min(20).max(250).optional(),
+  lookbackDays: z.coerce.number().int().min(30).max(365).optional(),
+  vendorIds: z.string().trim().optional(),
+});
+
+const aiEmailEnrichSchema = z.object({
+  orders: z
+    .array(
+      z.object({
+        vendorId: z.string().min(1),
+        vendorName: z.string().min(1),
+        orderDate: z.string().min(1),
+        orderNumber: z.string().min(1),
+        items: z
+          .array(
+            z.object({
+              name: z.string().min(1),
+              quantity: z.coerce.number().positive().optional(),
+              sku: z.string().optional(),
+              asin: z.string().optional(),
+              upc: z.string().optional(),
+              unitPrice: z.coerce.number().nonnegative().optional(),
+              url: z.string().trim().max(2048).optional(),
+            }),
+          )
+          .min(1),
+      }),
+    )
+    .min(1)
+    .max(200),
+});
+
+const aiImageIdentifySchema = z.object({
+  imageDataUrl: z.string().min(20),
+  fileName: z.string().trim().max(200).optional(),
+});
+
+const upcLookupParamsSchema = z.object({
+  upc: z.string().trim().regex(/^\d{8,14}$/, 'UPC must be 8-14 digits'),
 });
 
 interface GoogleLinkStatePayload {
@@ -430,7 +475,114 @@ authRouter.get('/google/vendors/discover', authMiddleware, async (req: AuthReque
     const result = await authService.discoverGmailSuppliersForUser({
       userId: req.user!.sub,
       maxResults: query.maxResults,
+      lookbackDays: query.lookbackDays,
     });
+    res.json(result);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: 'Validation error',
+        details: err.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+      });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── GET /auth/google/orders/discover ───────────────────────────────
+// Pulls Gmail messages and derives purchase order candidates (AI first, deterministic fallback).
+authRouter.get('/google/orders/discover', authMiddleware, async (req: AuthRequest, res, next) => {
+  try {
+    const query = googleOrderDiscoveryQuerySchema.parse(req.query ?? {});
+    const vendorIds = query.vendorIds
+      ? query.vendorIds
+          .split(',')
+          .map((vendorId) => vendorId.trim())
+          .filter(Boolean)
+      : undefined;
+    const result = await authService.discoverGmailOrdersForUser({
+      userId: req.user!.sub,
+      maxResults: query.maxResults,
+      lookbackDays: query.lookbackDays,
+      vendorIds,
+    });
+    res.json(result);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: 'Validation error',
+        details: err.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+      });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── POST /auth/ai/email/enrich ─────────────────────────────────────
+// Enriches detected Gmail order lines into product-level procurement fields.
+authRouter.post('/ai/email/enrich', authMiddleware, async (req: AuthRequest, res, next) => {
+  try {
+    const input = aiEmailEnrichSchema.parse(req.body ?? {});
+    const result = await authService.enrichDetectedOrdersWithAi({
+      orders: input.orders.map((order) => ({
+        vendorId: order.vendorId,
+        vendorName: order.vendorName,
+        orderDate: order.orderDate,
+        orderNumber: order.orderNumber,
+        items: order.items.map((item) => ({
+          name: item.name,
+          quantity: item.quantity ?? 1,
+          sku: item.sku,
+          asin: item.asin,
+          upc: item.upc,
+          unitPrice: item.unitPrice,
+          url: item.url,
+        })),
+      })),
+    });
+    res.json(result);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: 'Validation error',
+        details: err.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+      });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── POST /auth/ai/image-identify ───────────────────────────────────
+// Runs vision analysis for uploaded product images.
+authRouter.post('/ai/image-identify', authMiddleware, async (req: AuthRequest, res, next) => {
+  try {
+    const input = aiImageIdentifySchema.parse(req.body ?? {});
+    const result = await authService.identifyProductImageWithAi({
+      imageDataUrl: input.imageDataUrl,
+      fileName: input.fileName,
+    });
+    res.json(result);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: 'Validation error',
+        details: err.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+      });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── GET /auth/upc/:upc ──────────────────────────────────────────────
+// Resolves a UPC against live providers (BarcodeLookup/OpenFoodFacts).
+authRouter.get('/upc/:upc', authMiddleware, async (req: AuthRequest, res, next) => {
+  try {
+    const params = upcLookupParamsSchema.parse(req.params ?? {});
+    const result = await authService.lookupUpcProduct({ upc: params.upc });
     res.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {

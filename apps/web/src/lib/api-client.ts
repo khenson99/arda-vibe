@@ -193,13 +193,131 @@ export interface GmailSupplierDiscoveryResponse {
   hasMore: boolean;
 }
 
+export interface GmailDiscoveredOrderItem {
+  name: string;
+  quantity: number;
+  sku?: string;
+  asin?: string;
+  upc?: string;
+  unitPrice?: number;
+  url?: string;
+}
+
+export interface GmailDiscoveredOrder {
+  vendorId: string;
+  vendorName: string;
+  domain?: string;
+  orderDate: string;
+  orderNumber: string;
+  summary?: string;
+  confidence: number;
+  items: GmailDiscoveredOrderItem[];
+}
+
+export interface GmailOrderDiscoveryResponse {
+  orders: GmailDiscoveredOrder[];
+  suppliers: GmailDiscoveredSupplier[];
+  scannedMessages: number;
+  hasMore: boolean;
+  analysisMode: "ai" | "heuristic";
+  analysisWarning?: string;
+}
+
+export interface AiEmailEnrichedProduct {
+  name: string;
+  sku?: string;
+  asin?: string;
+  upc?: string;
+  imageUrl?: string;
+  vendorId: string;
+  vendorName: string;
+  productUrl?: string;
+  description?: string;
+  unitPrice?: number;
+  moq: number;
+  orderCadenceDays?: number;
+  confidence: number;
+  needsReview: boolean;
+}
+
+export interface AiEmailEnrichmentResponse {
+  products: AiEmailEnrichedProduct[];
+  mode: "ai" | "heuristic";
+  warning?: string;
+}
+
+export interface AiImagePredictionResponse {
+  label: string;
+  confidence: number;
+  suggestedProduct?: Partial<AiEmailEnrichedProduct>;
+}
+
+export interface AiImageIdentifyResponse {
+  predictions: AiImagePredictionResponse[];
+}
+
+export interface UpcLookupProduct {
+  upc: string;
+  name: string;
+  brand?: string;
+  description?: string;
+  imageUrl?: string;
+  category?: string;
+  productUrl?: string;
+  moq?: number;
+  confidence: number;
+}
+
+export interface UpcLookupResponse {
+  upc: string;
+  found: boolean;
+  provider: "barcodelookup" | "openfoodfacts" | "none";
+  product?: UpcLookupProduct;
+}
+
+export type MobileImportModule = "scan-upcs" | "ai-identify";
+export type MobileImportEvent =
+  | {
+      id: string;
+      sequence: number;
+      type: "upc";
+      createdAt: string;
+      payload: { upc: string };
+    }
+  | {
+      id: string;
+      sequence: number;
+      type: "image";
+      createdAt: string;
+      payload: { imageDataUrl: string; fileName: string };
+    };
+
+export interface MobileImportSessionCreateResponse {
+  sessionId: string;
+  sessionToken: string;
+  module: MobileImportModule;
+  expiresAt: string;
+}
+
+export interface MobileImportSessionSnapshot {
+  sessionId: string;
+  module: MobileImportModule;
+  updatedAt: string;
+  expiresAt: string;
+  nextSequence: number;
+  events: MobileImportEvent[];
+}
+
 export async function discoverGmailSuppliers(
   token: string,
-  input: { maxResults?: number } = {},
+  input: { maxResults?: number; lookbackDays?: number } = {},
 ): Promise<GmailSupplierDiscoveryResponse> {
   const params = new URLSearchParams();
   if (typeof input.maxResults === "number") {
     params.set("maxResults", String(input.maxResults));
+  }
+  if (typeof input.lookbackDays === "number") {
+    params.set("lookbackDays", String(input.lookbackDays));
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
 
@@ -208,8 +326,148 @@ export async function discoverGmailSuppliers(
   });
 }
 
+export async function discoverGmailOrders(
+  token: string,
+  input: { maxResults?: number; lookbackDays?: number; vendorIds?: string[] } = {},
+): Promise<GmailOrderDiscoveryResponse> {
+  const params = new URLSearchParams();
+  if (typeof input.maxResults === "number") {
+    params.set("maxResults", String(input.maxResults));
+  }
+  if (typeof input.lookbackDays === "number") {
+    params.set("lookbackDays", String(input.lookbackDays));
+  }
+  if (input.vendorIds && input.vendorIds.length > 0) {
+    params.set("vendorIds", input.vendorIds.join(","));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+
+  return apiRequest<GmailOrderDiscoveryResponse>(`/api/auth/google/orders/discover${suffix}`, {
+    token,
+  });
+}
+
+export async function enrichEmailOrdersWithAi(
+  token: string,
+  input: {
+    orders: Array<{
+      vendorId: string;
+      vendorName: string;
+      orderDate: string;
+      orderNumber: string;
+      items: GmailDiscoveredOrderItem[];
+    }>;
+  },
+): Promise<AiEmailEnrichmentResponse> {
+  return apiRequest<AiEmailEnrichmentResponse>("/api/auth/ai/email/enrich", {
+    method: "POST",
+    token,
+    body: input,
+  });
+}
+
+export async function identifyImageWithAi(
+  token: string,
+  input: { imageDataUrl: string; fileName?: string },
+): Promise<AiImageIdentifyResponse> {
+  return apiRequest<AiImageIdentifyResponse>("/api/auth/ai/image-identify", {
+    method: "POST",
+    token,
+    body: input,
+  });
+}
+
+export async function lookupUpc(
+  token: string,
+  upc: string,
+): Promise<UpcLookupResponse> {
+  return apiRequest<UpcLookupResponse>(`/api/auth/upc/${encodeURIComponent(upc)}`, {
+    token,
+  });
+}
+
 export async function fetchMe(token: string): Promise<SessionUser> {
   return apiRequest<SessionUser>("/api/auth/me", { token });
+}
+
+export async function createMobileImportSession(
+  token: string,
+  input: { module: MobileImportModule },
+): Promise<MobileImportSessionCreateResponse> {
+  return apiRequest<MobileImportSessionCreateResponse>("/api/auth/mobile-import/sessions", {
+    method: "POST",
+    token,
+    body: input,
+  });
+}
+
+export async function fetchMobileImportSession(
+  input: {
+    sessionId: string;
+    sinceSequence?: number;
+    accessToken?: string;
+    sessionToken?: string;
+  },
+): Promise<MobileImportSessionSnapshot> {
+  const params = new URLSearchParams();
+  if (typeof input.sinceSequence === "number" && Number.isFinite(input.sinceSequence)) {
+    params.set("sinceSequence", String(Math.max(0, Math.trunc(input.sinceSequence))));
+  }
+  if (input.sessionToken) {
+    params.set("token", input.sessionToken);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+
+  return apiRequest<MobileImportSessionSnapshot>(
+    `/api/auth/mobile-import/sessions/${encodeURIComponent(input.sessionId)}${suffix}`,
+    {
+      token: input.accessToken,
+    },
+  );
+}
+
+export async function submitMobileImportUpc(
+  input: {
+    sessionId: string;
+    upc: string;
+    accessToken?: string;
+    sessionToken?: string;
+  },
+): Promise<{ accepted: boolean; event: MobileImportEvent }> {
+  return apiRequest<{ accepted: boolean; event: MobileImportEvent }>(
+    `/api/auth/mobile-import/sessions/${encodeURIComponent(input.sessionId)}/upcs`,
+    {
+      method: "POST",
+      token: input.accessToken,
+      body: {
+        upc: input.upc,
+        sessionToken: input.sessionToken,
+      },
+    },
+  );
+}
+
+export async function submitMobileImportImage(
+  input: {
+    sessionId: string;
+    imageDataUrl: string;
+    fileName?: string;
+    accessToken?: string;
+    sessionToken?: string;
+  },
+): Promise<{ accepted: boolean; event: MobileImportEvent }> {
+  return apiRequest<{ accepted: boolean; event: MobileImportEvent }>(
+    `/api/auth/mobile-import/sessions/${encodeURIComponent(input.sessionId)}/images`,
+    {
+      method: "POST",
+      token: input.accessToken,
+      body: {
+        imageDataUrl: input.imageDataUrl,
+        fileName: input.fileName,
+        sessionToken: input.sessionToken,
+      },
+    },
+  );
 }
 
 /* ── Queue ────────────────────────────────────────────────────── */
@@ -374,6 +632,83 @@ export async function fetchItemsDataAuthority(token: string): Promise<PartsRespo
 
 export async function fetchCatalogParts(token: string): Promise<PartsResponse> {
   return apiRequest<PartsResponse>("/api/catalog/parts?page=1&pageSize=100", { token });
+}
+
+export interface CatalogPartUpsertInput {
+  partNumber: string;
+  name: string;
+  description?: string;
+  type:
+    | "raw_material"
+    | "component"
+    | "subassembly"
+    | "finished_good"
+    | "consumable"
+    | "packaging"
+    | "other";
+  uom:
+    | "each"
+    | "box"
+    | "case"
+    | "pallet"
+    | "kg"
+    | "lb"
+    | "meter"
+    | "foot"
+    | "liter"
+    | "gallon"
+    | "roll"
+    | "sheet"
+    | "pair"
+    | "set"
+    | "other";
+  unitPrice?: string;
+  upcBarcode?: string;
+  manufacturerPartNumber?: string;
+  imageUrl?: string;
+  isSellable?: boolean;
+}
+
+export async function createCatalogPart(
+  token: string,
+  payload: CatalogPartUpsertInput,
+): Promise<PartRecord> {
+  return apiRequest<PartRecord>("/api/catalog/parts", {
+    method: "POST",
+    token,
+    body: payload,
+  });
+}
+
+export async function updateCatalogPart(
+  token: string,
+  partId: string,
+  payload: Partial<CatalogPartUpsertInput>,
+): Promise<PartRecord> {
+  return apiRequest<PartRecord>(`/api/catalog/parts/${encodeURIComponent(partId)}`, {
+    method: "PATCH",
+    token,
+    body: payload,
+  });
+}
+
+export async function findCatalogPartByPartNumber(
+  token: string,
+  partNumber: string,
+): Promise<PartRecord | null> {
+  const params = new URLSearchParams({
+    page: "1",
+    pageSize: "20",
+    search: partNumber,
+    isActive: "true",
+  });
+  const response = await apiRequest<PartsResponse>(`/api/catalog/parts?${params.toString()}`, {
+    token,
+  });
+  const target = partNumber.trim().toLowerCase();
+  return (
+    response.data.find((part) => part.partNumber.trim().toLowerCase() === target) ?? null
+  );
 }
 
 export async function fetchParts(token: string): Promise<PartsResponse> {

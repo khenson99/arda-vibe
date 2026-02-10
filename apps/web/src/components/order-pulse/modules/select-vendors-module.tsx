@@ -11,6 +11,12 @@ import {
   CardTitle,
   Input,
 } from "@/components/ui";
+import {
+  discoverGmailSuppliers,
+  parseApiError,
+  readStoredSession,
+  type GmailDiscoveredSupplier,
+} from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { PRESET_VENDORS } from "../types";
 import { useImportContext } from "../import-context";
@@ -18,11 +24,15 @@ import { runBackgroundImportPipeline } from "../background-import";
 
 export function SelectVendorsModule() {
   const { state, dispatch } = useImportContext();
-  const { selectedVendors, customVendors, detectedOrders, guidedStep } = state;
+  const { selectedVendors, customVendors, detectedOrders, guidedStep, emailConnection } = state;
 
   const [showCustomForm, setShowCustomForm] = React.useState(false);
   const [customName, setCustomName] = React.useState("");
   const [customDomain, setCustomDomain] = React.useState("");
+  const [discoveredSuppliers, setDiscoveredSuppliers] = React.useState<GmailDiscoveredSupplier[]>([]);
+  const [isDiscovering, setIsDiscovering] = React.useState(false);
+  const [discoveryError, setDiscoveryError] = React.useState<string | null>(null);
+  const customVendorIdsRef = React.useRef<Set<string>>(new Set());
 
   const allVendors = [...PRESET_VENDORS, ...customVendors];
   const vendorById = React.useMemo(
@@ -40,9 +50,19 @@ export function SelectVendorsModule() {
       ),
     [detectedOrders],
   );
-  const inferredSelectedCount = inferredVendorIds.filter((id) => selectedVendors.has(id)).length;
-  const missingInferredVendorIds = inferredVendorIds.filter((id) => !selectedVendors.has(id));
+  const discoveredVendorIds = React.useMemo(
+    () => discoveredSuppliers.map((supplier) => supplier.vendorId),
+    [discoveredSuppliers],
+  );
+  const candidateVendorIds = React.useMemo(() => {
+    const merged = Array.from(new Set([...discoveredVendorIds, ...inferredVendorIds]));
+    return merged.filter((vendorId) => allVendors.some((vendor) => vendor.id === vendorId));
+  }, [allVendors, discoveredVendorIds, inferredVendorIds]);
+
+  const candidateSelectedCount = candidateVendorIds.filter((id) => selectedVendors.has(id)).length;
+  const missingCandidateVendorIds = candidateVendorIds.filter((id) => !selectedVendors.has(id));
   const isGuidedVendorStep = guidedStep === "select-vendors";
+  const canContinue = selectedVendors.size > 0 && !isDiscovering;
   const selectedVendorNames = React.useMemo(
     () =>
       Array.from(selectedVendors)
@@ -50,6 +70,73 @@ export function SelectVendorsModule() {
         .slice(0, 5),
     [selectedVendors, vendorById],
   );
+
+  React.useEffect(() => {
+    const linkedGmail =
+      emailConnection?.status === "connected" && emailConnection.provider === "gmail";
+    if (!linkedGmail) return;
+    if (discoveredSuppliers.length > 0) return;
+    if (isDiscovering) return;
+
+    const session = readStoredSession();
+    const accessToken = session?.tokens.accessToken;
+    if (!accessToken) return;
+
+    let cancelled = false;
+    setIsDiscovering(true);
+    setDiscoveryError(null);
+
+    void discoverGmailSuppliers(accessToken, {
+      maxResults: 220,
+      lookbackDays: 180,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setDiscoveredSuppliers(result.suppliers);
+
+        const existingVendorIds = new Set(
+          [...PRESET_VENDORS.map((vendor) => vendor.id), ...customVendors.map((vendor) => vendor.id)],
+        );
+
+        for (const supplier of result.suppliers) {
+          if (existingVendorIds.has(supplier.vendorId)) continue;
+          if (customVendorIdsRef.current.has(supplier.vendorId)) continue;
+
+          customVendorIdsRef.current.add(supplier.vendorId);
+          existingVendorIds.add(supplier.vendorId);
+
+          dispatch({
+            type: "ADD_CUSTOM_VENDOR",
+            vendor: {
+              id: supplier.vendorId,
+              name: supplier.vendorName,
+              logo: "🏢",
+              domain: supplier.domain,
+              hasApi: false,
+            },
+          });
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setDiscoveryError(parseApiError(error));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsDiscovering(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    customVendors,
+    dispatch,
+    discoveredSuppliers.length,
+    emailConnection,
+    isDiscovering,
+  ]);
 
   const addCustom = () => {
     if (!customName.trim() || !customDomain.trim()) return;
@@ -69,12 +156,14 @@ export function SelectVendorsModule() {
   };
 
   const handleSelectAllDetected = () => {
-    if (inferredVendorIds.length === 0) return;
-    const merged = new Set([...selectedVendors, ...inferredVendorIds]);
+    if (candidateVendorIds.length === 0) return;
+    const merged = new Set([...selectedVendors, ...candidateVendorIds]);
     dispatch({ type: "SET_VENDORS", vendorIds: Array.from(merged) });
   };
 
   const handleContinue = () => {
+    if (!canContinue) return;
+
     void runBackgroundImportPipeline(state, dispatch);
 
     if (isGuidedVendorStep) {
@@ -94,8 +183,8 @@ export function SelectVendorsModule() {
           Select Your Vendors
         </CardTitle>
         <CardDescription>
-          Choose the suppliers you regularly order from. We'll search your email for
-          orders from these vendors and connect to their APIs when available.
+          We scan the last 6 months of email activity, prioritize Amazon and industrial
+          distributors, then let you choose which suppliers to import from.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -164,19 +253,37 @@ export function SelectVendorsModule() {
           </Button>
         )}
 
-        {inferredVendorIds.length > 0 && (
+        {isDiscovering && (
+          <div className="rounded-xl border border-dashed border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            Scanning inbox URLs and sender domains from the last 6 months to build supplier candidates...
+          </div>
+        )}
+
+        {discoveryError && (
+          <div className="rounded-xl border border-[hsl(var(--arda-error)/0.25)] bg-[hsl(var(--arda-error)/0.08)] px-3 py-2 text-xs text-[hsl(var(--arda-error))]">
+            Supplier discovery failed: {discoveryError}
+          </div>
+        )}
+
+        {!isDiscovering && candidateVendorIds.length === 0 && !discoveryError && (
+          <div className="rounded-xl border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            No supplier domains were auto-detected yet. Select vendors manually or add a custom vendor domain.
+          </div>
+        )}
+
+        {candidateVendorIds.length > 0 && (
           <div className="rounded-xl border border-[hsl(var(--arda-blue)/0.3)] bg-[hsl(var(--arda-blue)/0.07)] p-3 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-sm font-semibold text-[hsl(var(--arda-blue))]">
-                  Suppliers detected from scanned emails
+                  Potential suppliers detected from inbox activity
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {inferredSelectedCount} of {inferredVendorIds.length} detected supplier
-                  {inferredVendorIds.length !== 1 ? "s" : ""} selected
+                  {candidateSelectedCount} of {candidateVendorIds.length} detected supplier
+                  {candidateVendorIds.length !== 1 ? "s" : ""} selected
                 </p>
               </div>
-              {missingInferredVendorIds.length > 0 && (
+              {missingCandidateVendorIds.length > 0 && (
                 <Button size="sm" variant="accent" onClick={handleSelectAllDetected}>
                   Select detected
                 </Button>
@@ -184,7 +291,7 @@ export function SelectVendorsModule() {
             </div>
 
             <div className="flex flex-wrap gap-1.5">
-              {inferredVendorIds.map((vendorId) => {
+              {candidateVendorIds.map((vendorId) => {
                 const vendor = vendorById.get(vendorId);
                 const selected = selectedVendors.has(vendorId);
 
@@ -208,10 +315,12 @@ export function SelectVendorsModule() {
               <span className="font-semibold">{selectedVendors.size}</span> vendor
               {selectedVendors.size !== 1 ? "s" : ""} selected
             </p>
-            {selectedVendors.size > 0 ? (
+            {isDiscovering ? (
+              <Badge variant="secondary">Scanning inbox…</Badge>
+            ) : selectedVendors.size > 0 ? (
               <Badge variant="success">Ready to continue</Badge>
             ) : (
-              <Badge variant="warning">Smart discovery available</Badge>
+              <Badge variant="warning">Select one or more vendors</Badge>
             )}
           </div>
 
@@ -225,12 +334,11 @@ export function SelectVendorsModule() {
           <Button
             className="mt-3 w-full"
             onClick={handleContinue}
+            disabled={!canContinue}
           >
-            {selectedVendors.size > 0
-              ? isGuidedVendorStep
-                ? "Continue and start background analysis"
-                : "Start background analysis"
-              : "Continue with smart discovery in background"}
+            {isGuidedVendorStep
+              ? "Continue and start background analysis"
+              : "Start background analysis"}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
