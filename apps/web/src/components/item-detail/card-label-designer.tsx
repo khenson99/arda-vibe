@@ -13,11 +13,17 @@ import type { KanbanCard, PartRecord } from "@/types";
 import { CARD_STAGE_META, LOOP_META } from "@/types";
 import type { LoopType } from "@/types";
 import { cn } from "@/lib/utils";
+import { formatReadableLabel } from "@/lib/formatters";
 
 interface CardLabelDesignerProps {
   part: PartRecord;
   token: string;
   onUnauthorized: () => void;
+}
+
+export function resolveLoopLabel(loopType?: string | null): string | null {
+  if (!loopType) return null;
+  return LOOP_META[loopType as LoopType]?.label ?? formatReadableLabel(loopType);
 }
 
 export function CardLabelDesigner({
@@ -44,9 +50,13 @@ export function CardLabelDesigner({
         if (cancelled) return;
         const partCards = result.data.filter((c) => c.partId === part.id);
         setCards(partCards);
-        if (partCards.length > 0 && !selectedCard) {
-          setSelectedCard(partCards[0]);
-        }
+        setSelectedCard((current) => {
+          if (partCards.length === 0) return null;
+          if (current && partCards.some((card) => card.id === current.id)) {
+            return current;
+          }
+          return partCards[0];
+        });
       } catch (error) {
         if (isUnauthorized(error)) {
           onUnauthorized();
@@ -61,7 +71,7 @@ export function CardLabelDesigner({
     return () => {
       cancelled = true;
     };
-  }, [token, part.id, onUnauthorized]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, part.id, onUnauthorized]);
 
   // Load QR for selected card
   React.useEffect(() => {
@@ -85,7 +95,7 @@ export function CardLabelDesigner({
     return () => {
       cancelled = true;
     };
-  }, [token, selectedCard?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, selectedCard?.id]);
 
   const handlePrint = React.useCallback(async () => {
     if (!selectedCard) return;
@@ -127,7 +137,7 @@ export function CardLabelDesigner({
     );
   }
 
-  const loopType = selectedCard?.loopType;
+  const selectedLoopLabel = resolveLoopLabel(selectedCard?.loopType);
   const stageMeta = selectedCard
     ? CARD_STAGE_META[selectedCard.currentStage]
     : null;
@@ -149,7 +159,7 @@ export function CardLabelDesigner({
               <option key={card.id} value={card.id}>
                 Card #{card.cardNumber}
                 {card.loopType
-                  ? ` — ${LOOP_META[card.loopType].label}`
+                  ? ` — ${resolveLoopLabel(card.loopType)}`
                   : ""}
               </option>
             ))}
@@ -244,9 +254,9 @@ export function CardLabelDesigner({
 
             {/* Row 5: Badges */}
             <div className="flex items-center gap-2">
-              {loopType && (
+              {selectedLoopLabel && (
                 <Badge variant="secondary" className="text-[10px]">
-                  {LOOP_META[loopType as LoopType].label}
+                  {selectedLoopLabel}
                 </Badge>
               )}
               {stageMeta && (

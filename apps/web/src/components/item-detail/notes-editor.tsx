@@ -47,6 +47,7 @@ export function NotesEditor({
       }),
     ],
     content: part.notes || "",
+    immediatelyRender: false,
     editorProps: {
       attributes: {
         class:
@@ -64,7 +65,7 @@ export function NotesEditor({
         editor.commands.setContent(newContent);
       }
     }
-  }, [editor, part.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editor, part.id]);
 
   const handleSave = React.useCallback(async () => {
     if (!editor) return;
@@ -124,7 +125,22 @@ export function NotesEditor({
     }
   }, [editor, onSaved, onUnauthorized, part, session]);
 
-  if (!editor) return null;
+  if (!editor) {
+    return (
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">Item Notes</h3>
+          <p className="text-xs text-muted-foreground">
+            Initializing editor...
+          </p>
+        </div>
+        <div className="flex min-h-[200px] items-center justify-center rounded-md border border-border bg-muted/20 text-xs text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Loading editor
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
