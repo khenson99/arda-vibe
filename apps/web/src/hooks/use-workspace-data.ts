@@ -39,6 +39,7 @@ export interface WorkspaceData {
 
 export function useWorkspaceData(token: string | null, onUnauthorized: () => void): WorkspaceData {
   const isMountedRef = React.useRef(true);
+  const refreshInFlightRef = React.useRef(false);
   React.useEffect(() => {
     return () => { isMountedRef.current = false; };
   }, []);
@@ -75,6 +76,8 @@ export function useWorkspaceData(token: string | null, onUnauthorized: () => voi
   );
 
   const refreshAll = React.useCallback(async () => {
+    if (refreshInFlightRef.current) return;
+
     if (!token) {
       setQueueSummary(null);
       setQueueByLoop({ procurement: [], production: [], transfer: [] });
@@ -88,6 +91,7 @@ export function useWorkspaceData(token: string | null, onUnauthorized: () => voi
       return;
     }
 
+    refreshInFlightRef.current = true;
     setIsRefreshing(true);
 
     try {
@@ -133,6 +137,7 @@ export function useWorkspaceData(token: string | null, onUnauthorized: () => voi
     } catch (error) {
       if (isMountedRef.current) setError(parseApiError(error));
     } finally {
+      refreshInFlightRef.current = false;
       if (isMountedRef.current) {
         setIsLoading(false);
         setIsRefreshing(false);
@@ -220,6 +225,26 @@ export function useWorkspaceData(token: string | null, onUnauthorized: () => voi
   React.useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
+
+  React.useEffect(() => {
+    if (!token || typeof window === "undefined") return;
+
+    const AUTO_REFRESH_MS = 15000;
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshAll();
+    };
+
+    const intervalId = window.setInterval(refreshIfVisible, AUTO_REFRESH_MS);
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [refreshAll, token]);
 
   return {
     isLoading,

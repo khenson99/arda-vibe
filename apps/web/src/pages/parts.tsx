@@ -1,14 +1,10 @@
 import * as React from "react";
 import {
   Check,
-  ChevronDown,
-  ChevronRight,
   CircleHelp,
   Loader2,
   Plus,
   Printer,
-  RefreshCw,
-  Search,
   ShoppingCart,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -17,7 +13,6 @@ import {
   Button,
   Card,
   CardContent,
-  Input,
   Skeleton,
   Tooltip,
   TooltipContent,
@@ -28,7 +23,6 @@ import { ItemDetailPanel } from "@/components/item-detail";
 import { EditableCell, PaginationBar, ColumnConfig, BulkActionsBar, ItemCardList } from "@/components/data-table";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { ErrorBanner } from "@/components/error-banner";
-import { NextActionBanner } from "@/components/next-action-banner";
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import {
   createPrintJob,
@@ -56,7 +50,6 @@ import {
   ITEM_TABLE_COLUMNS,
   ITEM_TABLE_COLUMN_KEYS,
   ITEM_TABLE_DEFAULT_VISIBLE_COLUMNS,
-  LOOP_META,
   LOOP_ORDER,
 } from "@/types";
 
@@ -159,10 +152,9 @@ export function PartsRoute({
   session: AuthSession;
   onUnauthorized: () => void;
 }) {
-  const { isLoading, isRefreshing, error, queueSummary, queueByLoop, parts, partCount, orderLineByItem, refreshAll } =
+  const { isLoading, error, queueByLoop, parts, orderLineByItem, refreshAll } =
     useWorkspaceData(session.tokens.accessToken, onUnauthorized);
 
-  const [search, setSearch] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [activeTab, setActiveTab] = React.useState<"published" | "recentlyImported">("published");
   const [pageSize, setPageSize] = React.useState<number>(() => {
@@ -331,46 +323,17 @@ export function PartsRoute({
     [activeTab, effectiveParts, queueStatsByPartId],
   );
 
-  const filteredParts = React.useMemo(() => {
-    const normalized = search.trim().toLowerCase();
-    if (!normalized) return scopedParts;
-
-    return scopedParts.filter((part) => {
-      const queueStats = queueStatsByPartId.get(part.id);
-      const orderLineSummary = orderLineByItem[part.eId ?? part.id];
-      const loopText = queueStats
-        ? Array.from(queueStats.loopTypes)
-            .map((loopType) => LOOP_META[loopType].label)
-            .join(" ")
-            .toLowerCase()
-        : "";
-      const orderStatusText = (orderLineSummary?.status ?? "").toLowerCase();
-
-      return (
-        part.partNumber.toLowerCase().includes(normalized) ||
-        (part.externalGuid ?? "").toLowerCase().includes(normalized) ||
-        part.name.toLowerCase().includes(normalized) ||
-        (part.primarySupplier ?? "").toLowerCase().includes(normalized) ||
-        (part.orderMechanism ?? "").toLowerCase().includes(normalized) ||
-        (part.location ?? "").toLowerCase().includes(normalized) ||
-        (part.glCode ?? "").toLowerCase().includes(normalized) ||
-        (part.itemSubtype ?? "").toLowerCase().includes(normalized) ||
-        orderStatusText.includes(normalized) ||
-        part.type.toLowerCase().includes(normalized) ||
-        loopText.includes(normalized)
-      );
-    });
-  }, [orderLineByItem, queueStatsByPartId, scopedParts, search]);
+  const filteredParts = scopedParts;
 
   // Reset to page 1 when filters change
   React.useEffect(() => {
     setPage(1);
-  }, [activeTab, pageSize, search]);
+  }, [activeTab, pageSize]);
 
-  // Clear selection when page / tab / search changes
+  // Clear selection when page / tab changes
   React.useEffect(() => {
     setSelectedIds(new Set());
-  }, [activeTab, pageSize, search, page]);
+  }, [activeTab, pageSize, page]);
 
   const toggleOne = React.useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -387,7 +350,6 @@ export function PartsRoute({
   const pagedParts = filteredParts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const firstVisibleIndex = pagedParts.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const lastVisibleIndex = pagedParts.length === 0 ? 0 : (currentPage - 1) * pageSize + pagedParts.length;
-  const visibleColumnsSet = React.useMemo(() => new Set(visibleColumns), [visibleColumns]);
   const tableColumnCount = visibleColumns.length + 1;
   const tableMinWidth = Math.max(1280, 120 + visibleColumns.length * 138);
 
@@ -462,21 +424,24 @@ export function PartsRoute({
     <div className="density-compact space-y-2">
       {error && <ErrorBanner message={error} onRetry={refreshAll} />}
 
-      <NextActionBanner queueSummary={queueSummary} queueByLoop={queueByLoop} />
-
       <section className="space-y-2">
-        <div className="space-y-1">
-          <div className="flex items-center gap-1 text-[13px] text-muted-foreground">
-            <span>Home</span>
-            <ChevronRight className="h-3 w-3" />
-            <span className="text-foreground">Items</span>
-          </div>
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <h2 className="text-3xl leading-tight font-bold tracking-tight md:text-[40px] md:leading-[1.05]">
             Items
           </h2>
-          <p className="text-sm text-muted-foreground">
-            Create new items, print Kanban Cards, and add to order queue.
-          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <ColumnConfig visibleColumns={visibleColumns} onColumnsChange={setVisibleColumns} />
+            <Button variant="outline" className="h-9" asChild>
+              <a href="mailto:support@arda.app?subject=Arda%20Support%20Request">
+                <CircleHelp className="h-4 w-4" />
+                Support
+              </a>
+            </Button>
+            <Button className="h-9" onClick={openCreateItemDialog}>
+              <Plus className="h-4 w-4" />
+              Add item
+            </Button>
+          </div>
         </div>
 
         {/* ── Tabs ──────────────────────────────────────────── */}
@@ -520,45 +485,7 @@ export function PartsRoute({
           </button>
         </div>
 
-        {/* ── Toolbar + Table (tabpanel) ─────────────────── */}
-
         <div role="tabpanel" id={`panel-${activeTab}`} className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-1.5">
-          <div className="relative w-[360px] max-w-full">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="h-9 bg-card pl-9"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Filter items"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            <ColumnConfig visibleColumns={visibleColumns} onColumnsChange={setVisibleColumns} />
-
-            <Button variant="outline" className="h-9">
-              <CircleHelp className="h-4 w-4" />
-              Actions
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-            <Button className="h-9" onClick={openCreateItemDialog}>
-              <Plus className="h-4 w-4" />
-              Add item
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" className="h-9" onClick={() => void refreshAll()}>
-              {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Refresh
-            </Button>
-          </div>
-        </div>
-
-        <p className="text-[11px] text-muted-foreground">
-          Click editable cells (supplier, quantities, units, order method, location). Changes save automatically when
-          you press Enter or click away.
-        </p>
-
         {/* ── Table / Card list ────────────────────────────── */}
 
         {isMobile ? (
@@ -573,7 +500,7 @@ export function PartsRoute({
               session={session}
             />
             {pagedParts.length === 0 && (
-              <p className="py-10 text-center text-sm text-muted-foreground">No items match your search.</p>
+              <p className="py-10 text-center text-sm text-muted-foreground">No items available.</p>
             )}
           </>
         ) : (
@@ -621,7 +548,7 @@ export function PartsRoute({
                     {pagedParts.length === 0 && (
                       <tr>
                         <td colSpan={tableColumnCount} className="px-4 py-10 text-center text-muted-foreground">
-                          No items match your search.
+                          No items available.
                         </td>
                       </tr>
                     )}
@@ -630,7 +557,6 @@ export function PartsRoute({
                       <ItemRow
                         key={part.id}
                         part={part}
-                        visibleColumnsSet={visibleColumnsSet}
                         visibleColumns={visibleColumns}
                         queueStatsByPartId={queueStatsByPartId}
                         orderLineByItem={orderLineByItem}
@@ -822,7 +748,7 @@ function QuickActions({
       }
       toast.error(parseApiError(err));
     }
-  }, [onCardCreated, part.id, part.partNumber, session.tokens.accessToken]);
+  }, [onCardCreated, part, part.partNumber, session.tokens.accessToken]);
 
   const actionBtnClass =
     "h-7 w-7 rounded-md border-border/80 transition-all hover:border-primary/45 hover:bg-[hsl(var(--arda-orange)/0.1)] active:scale-95";
@@ -906,7 +832,6 @@ function QuickActions({
 
 interface ItemRowProps {
   part: PartRecord;
-  visibleColumnsSet: Set<ItemTableColumnKey>;
   visibleColumns: ItemTableColumnKey[];
   queueStatsByPartId: Map<string, {
     cards: number;
@@ -928,7 +853,6 @@ interface ItemRowProps {
 
 const ItemRow = React.memo(function ItemRow({
   part,
-  visibleColumnsSet,
   visibleColumns,
   queueStatsByPartId,
   orderLineByItem,

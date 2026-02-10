@@ -21,6 +21,7 @@ import {
   parseApiError,
 } from "@/lib/api-client";
 import { formatRelativeTime, formatStatus, queueAgingHours } from "@/lib/formatters";
+import { getPartLinkIds, normalizePartLinkId } from "@/lib/part-linking";
 import { cn } from "@/lib/utils";
 import type { AuthSession, PartRecord, QueueCard, QueueByLoop } from "@/types";
 import { LOOP_ORDER, LOOP_META } from "@/types";
@@ -268,13 +269,22 @@ export function QueueRoute({
   const partById = React.useMemo(() => {
     const map = new Map<string, PartRecord>();
     for (const part of parts) {
-      map.set(part.id, part);
-      if (part.eId && part.eId !== part.id) {
-        map.set(part.eId, part);
+      for (const linkId of getPartLinkIds(part)) {
+        if (!map.has(linkId)) {
+          map.set(linkId, part);
+        }
       }
     }
     return map;
   }, [parts]);
+
+  const resolvePartByCardPartId = React.useCallback(
+    (partId: string) => {
+      const normalizedCardPartId = normalizePartLinkId(partId);
+      return normalizedCardPartId ? partById.get(normalizedCardPartId) : undefined;
+    },
+    [partById],
+  );
 
   const loopsToRender = activeLoopFilter === "all" ? LOOP_ORDER : [activeLoopFilter];
 
@@ -285,7 +295,7 @@ export function QueueRoute({
       if (!normalizedSearch) return true;
 
       // Also search against the resolved part name
-      const part = partById.get(card.partId);
+      const part = resolvePartByCardPartId(card.partId);
       const partName = part?.name?.toLowerCase() ?? "";
 
       return (
@@ -304,7 +314,7 @@ export function QueueRoute({
       production: queueByLoop.production.filter(matchesSearch).sort(sortFn),
       transfer: queueByLoop.transfer.filter(matchesSearch).sort(sortFn),
     } satisfies QueueByLoop;
-  }, [queueByLoop, searchTerm, partById, sortKey]);
+  }, [queueByLoop, searchTerm, resolvePartByCardPartId, sortKey]);
 
   if (isLoading) {
     return (
@@ -421,7 +431,7 @@ export function QueueRoute({
                   <QueueCardItem
                     key={card.id}
                     card={card}
-                    part={partById.get(card.partId)}
+                    part={resolvePartByCardPartId(card.partId)}
                     session={session}
                   />
                 ))}

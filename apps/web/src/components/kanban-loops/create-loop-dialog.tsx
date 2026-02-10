@@ -232,7 +232,7 @@ export function CreateLoopDialog({
           <DialogTitle>Create Kanban Loop</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           {/* Part ID */}
           <div>
             <label className="text-xs font-medium text-muted-foreground" htmlFor="create-partId">

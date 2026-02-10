@@ -89,7 +89,7 @@ export function LoopParameterForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
+    <form onSubmit={handleSubmit} noValidate className="space-y-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {/* Min Quantity */}
         <div>

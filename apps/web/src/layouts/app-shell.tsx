@@ -9,7 +9,6 @@ import {
   CreditCard,
   HardHat,
   LogOut,
-  Menu,
   PackageCheck,
   QrCode,
   Repeat2,
@@ -103,10 +102,6 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
       <div className="flex min-h-screen flex-col">
         <header className="sticky top-0 z-20 border-b border-border/70 bg-card/85 px-3 py-1.5 backdrop-blur-md md:px-4">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-              <Menu className="h-4 w-4" />
-            </Button>
-
             <button
               type="button"
               onClick={() => setCommandPaletteOpen(true)}
@@ -138,8 +133,11 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
             >
               <HardHat className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-              <CircleHelp className="h-4 w-4" />
+            <Button variant="outline" size="sm" asChild>
+              <a href="mailto:support@arda.app?subject=Arda%20Support%20Request">
+                <CircleHelp className="h-4 w-4" />
+                Support
+              </a>
             </Button>
             <Button variant="ghost" size="icon" className="relative h-8 w-8 text-muted-foreground">
               <Bell className="h-4 w-4" />

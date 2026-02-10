@@ -8,6 +8,7 @@ import {
   isUnauthorized,
   parseApiError,
 } from "@/lib/api-client";
+import { partMatchesLinkId } from "@/lib/part-linking";
 import type { KanbanLoop, PartRecord } from "@/types";
 import { LOOP_META } from "@/types";
 
@@ -42,7 +43,7 @@ export function LoopManagementSection({
     setIsLoadingLoops(true);
     try {
       const result = await fetchLoops(token, { page: 1, pageSize: 200 });
-      const matchingLoops = result.data.filter((loop) => loop.partId === part.id);
+      const matchingLoops = result.data.filter((loop) => partMatchesLinkId(part, loop.partId));
       setLoops(matchingLoops);
       setLoopEdits(
         matchingLoops.reduce(

@@ -5,6 +5,7 @@ import { Badge, Button, Checkbox } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatStatus, formatQuantity, formatDateTime } from "@/lib/formatters";
 import { createPrintJob, createPurchaseOrderFromCards, parseApiError } from "@/lib/api-client";
+import { resolvePartLinkedValue } from "@/lib/part-linking";
 import type { PartRecord, LoopType, OrderLineByItemSummary, AuthSession } from "@/types";
 
 /* ── Types ──────────────────────────────────────────────────── */
@@ -251,7 +252,7 @@ export function ItemCardList({
           isSelected={selectedIds.has(part.id)}
           onToggleSelect={onToggleSelect}
           onOpenItemDetail={onOpenItemDetail}
-          queueStats={queueStatsByPartId.get(part.id)}
+          queueStats={resolvePartLinkedValue(part, queueStatsByPartId)}
           orderLineSummary={orderLineByItem[part.eId ?? part.id]}
           session={session}
         />
