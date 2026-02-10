@@ -400,7 +400,6 @@ export function useReceiving(
         void refreshMetrics();
         break;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, token]);
 
   return {
