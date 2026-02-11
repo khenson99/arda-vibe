@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
-import type { Database } from '@arda/db';
+import type { DbOrTransaction } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
 import { getEventBus } from '@arda/events';
 import { config } from '@arda/config';
@@ -42,7 +42,7 @@ function getRequestAuditContext(req: AuthRequest): RequestAuditContext {
 }
 
 async function writeTransferOrderStatusAudit(
-  tx: Database,
+  tx: DbOrTransaction,
   input: {
     tenantId: string;
     transferOrderId: string;
@@ -72,7 +72,7 @@ async function writeTransferOrderStatusAudit(
 }
 
 async function writeTransferOrderCreateAudit(
-  tx: Database,
+  tx: DbOrTransaction,
   input: {
     tenantId: string;
     transferOrderId: string;
@@ -104,7 +104,7 @@ async function writeTransferOrderCreateAudit(
 }
 
 async function writeTransferOrderLinesShippedAudit(
-  tx: Database,
+  tx: DbOrTransaction,
   input: {
     tenantId: string;
     transferOrderId: string;
@@ -149,7 +149,7 @@ async function writeTransferOrderLinesShippedAudit(
 }
 
 async function writeTransferOrderLinesReceivedAudit(
-  tx: Database,
+  tx: DbOrTransaction,
   input: {
     tenantId: string;
     transferOrderId: string;

@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import type { PgDatabase } from 'drizzle-orm/pg-core';
+import type { PostgresJsQueryResultHKT } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema/index.js';
 
@@ -70,4 +72,15 @@ export function createDbPool(options?: { max?: number; idleTimeout?: number }) {
 }
 
 export type Database = typeof db;
+
+/**
+ * Common base type that accepts both `db` and transaction `tx` arguments.
+ * Use this for helper functions that are called inside `db.transaction()`.
+ *
+ * `Database` (= `typeof db`) includes `{ $client }` which `PgTransaction`
+ * does not carry, so passing `tx` to a `Database`-typed param fails.
+ * `DbOrTransaction` uses the shared `PgDatabase` base that both extend.
+ */
+export type DbOrTransaction = PgDatabase<PostgresJsQueryResultHKT, typeof schema>;
+
 export { schema };
