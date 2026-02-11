@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useOutletContext } from "react-router-dom";
 import {
   Check,
   CircleHelp,
@@ -24,6 +25,7 @@ import { EditableCell, PaginationBar, ColumnConfig, BulkActionsBar, ItemCardList
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { ErrorBanner } from "@/components/error-banner";
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
+import type { AppShellOutletContext } from "@/layouts/app-shell";
 import {
   createPrintJob,
   createPurchaseOrderFromCards,
@@ -157,6 +159,7 @@ export function PartsRoute({
   session: AuthSession;
   onUnauthorized: () => void;
 }) {
+  const { setPageHeaderActions } = useOutletContext<AppShellOutletContext>();
   const { isLoading, error, queueByLoop, parts, orderLineByItem, refreshAll } =
     useWorkspaceData(session.tokens.accessToken, onUnauthorized);
 
@@ -239,6 +242,32 @@ export function PartsRoute({
       part,
     });
   }, []);
+
+  const partsHeaderActions = React.useMemo(
+    () => (
+      <>
+        <ColumnConfig visibleColumns={visibleColumns} onColumnsChange={setVisibleColumns} />
+        <Button variant="outline" className="h-9" asChild>
+          <a href="mailto:support@arda.app?subject=Arda%20Support%20Request">
+            <CircleHelp className="h-4 w-4" />
+            Support
+          </a>
+        </Button>
+        <Button className="h-9" onClick={openCreateItemDialog}>
+          <Plus className="h-4 w-4" />
+          Add item
+        </Button>
+      </>
+    ),
+    [openCreateItemDialog, visibleColumns],
+  );
+
+  React.useEffect(() => {
+    setPageHeaderActions(partsHeaderActions);
+    return () => {
+      setPageHeaderActions(null);
+    };
+  }, [partsHeaderActions, setPageHeaderActions]);
 
   // Persist page size + column config to localStorage
   React.useEffect(() => {
@@ -445,23 +474,10 @@ export function PartsRoute({
       {error && <ErrorBanner message={error} onRetry={refreshAll} />}
 
       <section className="space-y-2">
-        <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-wrap items-start gap-2">
           <h2 className="text-3xl leading-tight font-bold tracking-tight md:text-[40px] md:leading-[1.05]">
             Items
           </h2>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <ColumnConfig visibleColumns={visibleColumns} onColumnsChange={setVisibleColumns} />
-            <Button variant="outline" className="h-9" asChild>
-              <a href="mailto:support@arda.app?subject=Arda%20Support%20Request">
-                <CircleHelp className="h-4 w-4" />
-                Support
-              </a>
-            </Button>
-            <Button className="h-9" onClick={openCreateItemDialog}>
-              <Plus className="h-4 w-4" />
-              Add item
-            </Button>
-          </div>
         </div>
 
         {/* ── Tabs ──────────────────────────────────────────── */}

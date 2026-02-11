@@ -53,6 +53,7 @@ export interface QueueHeaderControls {
 
 export interface AppShellOutletContext {
   setQueueHeaderControls: React.Dispatch<React.SetStateAction<QueueHeaderControls | null>>;
+  setPageHeaderActions: React.Dispatch<React.SetStateAction<React.ReactNode>>;
 }
 
 export function AppShell({ session, onSignOut }: AppShellProps) {
@@ -61,6 +62,7 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
   const [queueHeaderControls, setQueueHeaderControls] = React.useState<QueueHeaderControls | null>(
     null,
   );
+  const [pageHeaderActions, setPageHeaderActions] = React.useState<React.ReactNode>(null);
 
   const { isShopFloorMode, toggleShopFloorMode } = useShopFloorMode();
 
@@ -70,6 +72,7 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
 
   React.useEffect(() => {
     setQueueHeaderControls(null);
+    setPageHeaderActions(null);
   }, [location.pathname]);
 
   const navItems = React.useMemo(
@@ -254,6 +257,12 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
               </div>
             )}
 
+            {!queueHeaderControls && pageHeaderActions && (
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
+                {pageHeaderActions}
+              </div>
+            )}
+
             <div className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5 md:hidden">
               {navItems.map((item) => {
                 const ItemIcon = item.icon;
@@ -286,6 +295,7 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
               context={
                 {
                   setQueueHeaderControls,
+                  setPageHeaderActions,
                 } satisfies AppShellOutletContext
               }
             />
