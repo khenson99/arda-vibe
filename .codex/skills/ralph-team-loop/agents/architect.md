@@ -90,6 +90,7 @@ For tickets where agents reported `TICKET_DONE`:
 1. Verify the PR exists and CI passes
 2. Update `team-state.json` status to `pr-open`
 3. The Reviewer (Codex) will handle code review
+4. Do not run `gh pr review`, `gh pr merge`, or `gh pr close` from the Architect role
 
 For tickets where agents reported `BLOCKED`:
 1. Read the blocker reason
@@ -150,3 +151,5 @@ Otherwise, continue to next iteration.
 - **Keep the API contract updated.** Both repos depend on it.
 - **Fail fast.** If a ticket is poorly defined, add comments asking for clarification
   rather than letting an agent spin on it.
+- **Reviewer-only PR commands are forbidden.** Architect may orchestrate and check PR
+  status, but only the Reviewer can review, merge, or close PRs.

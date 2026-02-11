@@ -155,3 +155,5 @@ The Architect will route the bugs back to the appropriate agent.
   delete it. Never ignore it.
 - **Coverage is a guide, not a goal.** 80% coverage of meaningful code beats 100% coverage
   of trivial code.
+- **Reviewer-only PR commands are forbidden.** QA may push commits and comment findings,
+  but must not run `gh pr review`, `gh pr merge`, or `gh pr close`.

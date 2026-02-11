@@ -78,10 +78,16 @@ Produce a compliance report:
 }
 ```
 
-**If status is "fail":**
-Post violations as a PR review comment requesting changes.
+If status is "fail":
+Post violations as a regular PR comment (`gh pr comment`), not a review action.
 
-**If status is "pass" or "warn" (warnings only):**
-Post a positive review noting any warnings for awareness.
+If status is "pass" or "warn" (warnings only):
+Post a regular PR comment (`gh pr comment`) noting pass/warnings.
+
+Do not run reviewer-only commands from this role:
+- `gh pr review`
+- `gh pr merge`
+- `gh pr close`
+Only the Reviewer agent can review, merge, or close PRs.
 
 Output: <promise>DESIGN_REVIEW_COMPLETE</promise>

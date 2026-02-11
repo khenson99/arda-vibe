@@ -118,6 +118,9 @@ gh pr create \
   --label "agent:backend"
 ```
 
+Do not run reviewer-only commands from this role: `gh pr review`, `gh pr merge`,
+or `gh pr close`.
+
 ### Step 8: Update State
 
 Append to `.ralph-team/progress.txt`:
@@ -172,3 +175,5 @@ If max iterations reached without completion:
   be validated.
 - **Don't break existing tests.** If your changes cause existing tests to fail, fix the
   breakage before committing.
+- **Reviewer-only PR commands are forbidden.** Backend Engineer may open/update PRs,
+  but only the Reviewer can review, merge, or close them.

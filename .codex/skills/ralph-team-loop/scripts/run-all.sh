@@ -139,6 +139,16 @@ run_reviewer() {
   fi
 }
 
+count_unreviewed_pr_open_tickets() {
+  jq '[.tickets | to_entries[]? | select((.value.status == "pr_open" or .value.status == "pr-open") and (.value.reviewed != true))] | length' \
+    .ralph-team/team-state.json 2>/dev/null || echo "0"
+}
+
+list_unreviewed_pr_open_tickets() {
+  jq -r '.tickets | to_entries[]? | select((.value.status == "pr_open" or .value.status == "pr-open") and (.value.reviewed != true)) | "#\(.key) (pr=\(.value.pr_number // "unknown"))"' \
+    .ralph-team/team-state.json 2>/dev/null || true
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Execute phases based on start point
 # ─────────────────────────────────────────────────────────────────────────────
@@ -179,8 +189,9 @@ while [[ $CYCLE -lt $CYCLES ]]; do
   # Check if everything is done
   OPEN_ISSUES=$(gh issue list --state open --json number --jq 'length' 2>/dev/null || echo "0")
   OPEN_PRS=$(gh pr list --state open --json number --jq 'length' 2>/dev/null || echo "0")
+  PENDING_REVIEW=$(count_unreviewed_pr_open_tickets)
 
-  if [[ "$OPEN_ISSUES" == "0" && "$OPEN_PRS" == "0" ]]; then
+  if [[ "$OPEN_ISSUES" == "0" && "$OPEN_PRS" == "0" && "$PENDING_REVIEW" == "0" ]]; then
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════════════╗"
     echo "║            🎉 Sprint Complete! All work done.                        ║"
@@ -198,8 +209,16 @@ while [[ $CYCLE -lt $CYCLES ]]; do
     exit 0
   fi
 
+  if [[ "$OPEN_ISSUES" == "0" && "$OPEN_PRS" == "0" && "$PENDING_REVIEW" != "0" ]]; then
+    echo ""
+    echo "❌ Guardrail failure: $PENDING_REVIEW ticket(s) are still marked pr-open without reviewer completion."
+    list_unreviewed_pr_open_tickets | sed 's/^/   - /'
+    echo "   Refusing to mark sprint complete because review was bypassed."
+    exit 1
+  fi
+
   echo ""
-  echo "   Remaining: $OPEN_ISSUES open issues, $OPEN_PRS open PRs"
+  echo "   Remaining: $OPEN_ISSUES open issues, $OPEN_PRS open PRs, $PENDING_REVIEW pending review handoff(s)"
   if [[ $CYCLE -lt $CYCLES ]]; then
     echo "   Starting next cycle..."
   fi

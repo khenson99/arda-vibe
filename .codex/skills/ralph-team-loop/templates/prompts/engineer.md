@@ -54,6 +54,12 @@ git push origin {{BRANCH_NAME}}
 gh pr create --title "{{PR_TITLE}}" --body "Closes #{{ISSUE_NUMBER}}\n\n{{PR_BODY}}"
 ```
 
+Do not run reviewer-only commands from this role:
+- `gh pr review`
+- `gh pr merge`
+- `gh pr close`
+Only the Reviewer agent can review, merge, or close PRs.
+
 ### Step 6: Complete
 If all acceptance criteria are met and tests pass:
 - Output: <promise>TICKET_DONE</promise>

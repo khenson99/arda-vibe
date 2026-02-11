@@ -149,10 +149,10 @@ Scan the diff for violations:
 
 ### Step 8: Report Findings
 
-If violations are found, add a review comment on the PR:
+If violations are found, add a PR comment (not a review action):
 
 ```bash
-gh pr review <pr-number> --request-changes --body "## Design System Review
+gh pr comment <pr-number> --body "## Design System Review
 
 ### ❌ Violations Found
 
@@ -174,8 +174,11 @@ gh pr review <pr-number> --request-changes --body "## Design System Review
 
 If no violations:
 ```bash
-gh pr review <pr-number> --approve --body "## Design System Review\n\n✅ All checks pass. Design tokens, components, and accessibility standards are properly followed."
+gh pr comment <pr-number> --body "## Design System Review\n\n✅ All checks pass. Design tokens, components, and accessibility standards are properly followed."
 ```
+
+Do not run reviewer-only commands from this role: `gh pr review`, `gh pr merge`,
+or `gh pr close`.
 
 ### Step 9: Create Fix Tickets (if needed)
 
@@ -209,10 +212,10 @@ If the PR passes all design system checks:
 <promise>TICKET_DONE</promise>
 ```
 
-If violations were found and changes requested:
+If blocking violations were found:
 ```
-<promise>CHANGES_REQUESTED</promise>
-Violations: [count]
+<promise>BLOCKED</promise>
+Reason: Design system violations found. See PR comment for details.
 ```
 
 ## Bootstrapping the Design System
@@ -236,3 +239,5 @@ Enforcer should bootstrap it by scanning the existing codebase:
 - **Evolve the design system.** If you discover patterns that should become tokens or
   components, propose them.
 - **Accessibility is non-negotiable.** Always flag accessibility issues as blocking.
+- **Reviewer-only PR commands are forbidden.** Design Enforcer can comment findings,
+  but only the Reviewer can review, merge, or close PRs.

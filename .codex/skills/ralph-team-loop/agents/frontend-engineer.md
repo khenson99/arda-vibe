@@ -121,6 +121,9 @@ gh pr create \
   --label "agent:frontend"
 ```
 
+Do not run reviewer-only commands from this role: `gh pr review`, `gh pr merge`,
+or `gh pr close`.
+
 ### Step 9: Update State
 
 Append to `.ralph-team/progress.txt`:
@@ -160,3 +163,5 @@ Reason: [what's missing]
 - **Responsive.** Unless explicitly told otherwise, components should work on mobile.
 - **Performance.** Avoid unnecessary re-renders. Use memoization where appropriate.
 - **Keep components small.** If a component exceeds ~150 lines, split it.
+- **Reviewer-only PR commands are forbidden.** Frontend Engineer may open/update PRs,
+  but only the Reviewer can review, merge, or close them.

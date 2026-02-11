@@ -14,6 +14,10 @@ set -euo pipefail
 MAX_ITERATIONS=20
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENTS_DIR="$SCRIPT_DIR/../agents"
+FORBIDDEN_PR_COMMAND_REGEX='(^|[[:space:]])gh[[:space:]]+pr[[:space:]]+(merge|close|review)([[:space:]]|$)'
+CLAUDE_MODEL="${CLAUDE_MODEL:-claude-opus-4-6}"
+CLAUDE_EFFORT="${CLAUDE_EFFORT:-high}"
+CLAUDE_PERMISSION_MODE="${CLAUDE_PERMISSION_MODE:-plan}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -33,6 +37,22 @@ DETECTED_STACK=$(jq -c '.detected_stack' .ralph-team/config.json)
 echo "🏗️  Starting Team Loop (Claude Code)"
 echo "   Repo type: $REPO_TYPE"
 echo "   Max iterations: $MAX_ITERATIONS"
+echo "   Claude model: $CLAUDE_MODEL (effort: $CLAUDE_EFFORT, mode: $CLAUDE_PERMISSION_MODE)"
+
+find_linked_open_prs_for_ticket() {
+  local ticket_number="$1"
+  gh pr list --state open --json number,title,body,headRefName --limit 200 2>/dev/null | \
+    jq --arg tn "$ticket_number" '
+      [
+        .[] |
+        select(
+          ((.body // "") | test("(?i)(closes|fixes|resolves)\\s+#" + $tn + "\\b")) or
+          ((.headRefName // "") | test("(^|[/_-])issue-" + $tn + "($|[/_-])")) or
+          ((.title // "") | test("#" + $tn + "\\b"))
+        )
+      ]
+    ' 2>/dev/null || echo "[]"
+}
 
 # ── Agent Sub-Loop ──────────────────────────────────────────────────────────
 # Runs a single agent on a single ticket in a Ralph sub-loop
@@ -93,20 +113,63 @@ $PROGRESS_TAIL
 5. If blocked, output <promise>BLOCKED</promise> with a reason
 6. Update .ralph-team/progress.txt with your learnings
 7. Update .ralph-team/agents/${AGENT_ROLE}.md with discovered patterns
+8. Do NOT run any reviewer-only PR commands: gh pr review, gh pr merge, or gh pr close
+9. Non-reviewer agents may open/update PRs, but only the Reviewer agent can approve, request changes, merge, or close PRs
 AGENT_PROMPT_EOF
     )
 
     # Run Claude Code
     local OUTPUT=""
-    OUTPUT=$(claude -p "$PROMPT" --dangerously-skip-permissions 2>&1) || true
+    OUTPUT=$(claude -p \
+      --model "$CLAUDE_MODEL" \
+      --permission-mode "$CLAUDE_PERMISSION_MODE" \
+      --effort "$CLAUDE_EFFORT" \
+      --dangerously-skip-permissions \
+      "$PROMPT" 2>&1) || true
+
+    # Enforce non-reviewer policy in wrapper
+    if echo "$OUTPUT" | grep -Eiq "$FORBIDDEN_PR_COMMAND_REGEX"; then
+      local POLICY_REASON="Policy violation: non-reviewer agents must not run gh pr review/merge/close."
+      echo "    🚫 $AGENT_ROLE violated PR policy on ticket #$TICKET_NUMBER"
+      echo "$POLICY_REASON"
+
+      jq --arg tn "$TICKET_NUMBER" --arg role "$AGENT_ROLE" --arg reason "$POLICY_REASON" \
+        '.tickets[$tn].status = "blocked" | .tickets[$tn].blocked_reason = $reason | .agents[$role].status = "idle" | .agents[$role].current_ticket = null' \
+        .ralph-team/team-state.json > /tmp/team-state-tmp.json && \
+        mv /tmp/team-state-tmp.json .ralph-team/team-state.json
+
+      echo "--- Guardrail Violation ---" >> .ralph-team/progress.txt
+      echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> .ralph-team/progress.txt
+      echo "Agent: $AGENT_ROLE" >> .ralph-team/progress.txt
+      echo "Ticket: #$TICKET_NUMBER" >> .ralph-team/progress.txt
+      echo "Reason: $POLICY_REASON" >> .ralph-team/progress.txt
+      echo "" >> .ralph-team/progress.txt
+
+      return 2
+    fi
 
     # Check for completion
     if echo "$OUTPUT" | grep -q "<promise>TICKET_DONE</promise>"; then
-      echo "    ✅ $AGENT_ROLE completed ticket #$TICKET_NUMBER (iteration $AGENT_ITERATION)"
+      local LINKED_OPEN_PRS=""
+      local LINKED_PR_COUNT=""
+      local PRIMARY_PR_NUM=""
+      LINKED_OPEN_PRS=$(find_linked_open_prs_for_ticket "$TICKET_NUMBER")
+      LINKED_PR_COUNT=$(echo "$LINKED_OPEN_PRS" | jq 'length' 2>/dev/null || echo "0")
+
+      if [[ "$LINKED_PR_COUNT" == "0" ]]; then
+        echo "    ⚠️  $AGENT_ROLE reported TICKET_DONE, but no open PR linked to ticket #$TICKET_NUMBER was found."
+        echo "    ... continuing agent loop; ticket cannot move to reviewer without an open linked PR."
+        echo "Guardrail: ticket #$TICKET_NUMBER marked done without open linked PR at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> .ralph-team/progress.txt
+        sleep 1
+        continue
+      fi
+
+      PRIMARY_PR_NUM=$(echo "$LINKED_OPEN_PRS" | jq -r '.[0].number // empty')
+      echo "    ✅ $AGENT_ROLE completed ticket #$TICKET_NUMBER with linked open PR #$PRIMARY_PR_NUM (iteration $AGENT_ITERATION)"
 
       # Update team state
-      jq --arg tn "$TICKET_NUMBER" --arg role "$AGENT_ROLE" \
-        '.tickets[$tn].status = "pr-open" | .agents[$role].status = "idle" | .agents[$role].current_ticket = null' \
+      jq --arg tn "$TICKET_NUMBER" --arg role "$AGENT_ROLE" --argjson pr "$PRIMARY_PR_NUM" --arg reviewed_at "" \
+        '.tickets[$tn].status = "pr-open" | .tickets[$tn].pr_number = $pr | .tickets[$tn].reviewed = false | .tickets[$tn].review_decision = null | .tickets[$tn].reviewed_at = $reviewed_at | .agents[$role].status = "idle" | .agents[$role].current_ticket = null' \
         .ralph-team/team-state.json > /tmp/team-state-tmp.json && \
         mv /tmp/team-state-tmp.json .ralph-team/team-state.json
 
@@ -193,7 +256,12 @@ If all remaining tickets are blocked: set sprint_blocked to true.
 ARCH_PROMPT_EOF
   )
 
-  ARCHITECT_OUTPUT=$(claude -p "$ARCHITECT_PROMPT" --dangerously-skip-permissions 2>&1) || true
+  ARCHITECT_OUTPUT=$(claude -p \
+    --model "$CLAUDE_MODEL" \
+    --permission-mode "$CLAUDE_PERMISSION_MODE" \
+    --effort "$CLAUDE_EFFORT" \
+    --dangerously-skip-permissions \
+    "$ARCHITECT_PROMPT" 2>&1) || true
 
   # Try to parse the Architect's JSON output
   ACTION_PLAN=$(echo "$ARCHITECT_OUTPUT" | grep -Eo '\{[^}]*("assignments"|"sprint_complete")[^}]*\}' | head -1 || echo "")

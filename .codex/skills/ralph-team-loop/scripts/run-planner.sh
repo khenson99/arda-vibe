@@ -13,6 +13,9 @@ set -euo pipefail
 
 PRD_PATH=""
 MAX_ITERATIONS=10
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.3-codex}"
+CODEX_REASONING_EFFORT="${CODEX_REASONING_EFFORT:-high}"
+CODEX_COLLABORATION_MODE="${CODEX_COLLABORATION_MODE:-plan}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -45,6 +48,7 @@ echo "📋 Starting Planner Loop (Codex)"
 echo "   PRD: $PRD_PATH"
 echo "   Max iterations: $MAX_ITERATIONS"
 echo "   Project: $PROJECT_URL"
+echo "   Codex model: $CODEX_MODEL (reasoning: $CODEX_REASONING_EFFORT, mode: $CODEX_COLLABORATION_MODE)"
 
 ITERATION=0
 
@@ -76,7 +80,7 @@ $(cat "$(dirname "$0")/../agents/planner.md")
 ## Instructions
 1. Read the PRD above
 2. Check which PRD items already have GitHub issues (to avoid duplicates)
-3. Create GitHub issues for any PRD items that don't have tickets yet
+3. Create GitHub issues for any PRD items that do not have tickets yet
 4. Apply appropriate labels (agent routing, priority, type, repo, status)
 5. Include clear acceptance criteria in each issue
 6. If ALL PRD items now have corresponding issues, output: <promise>PLANNING_COMPLETE</promise>
@@ -88,7 +92,12 @@ PROMPT_EOF
   )
 
   # Run Codex
-  OUTPUT=$(codex exec --yolo -p "$PROMPT" 2>&1) || true
+  OUTPUT=$(codex exec \
+    --dangerously-bypass-approvals-and-sandbox \
+    --model "$CODEX_MODEL" \
+    -c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\"" \
+    -c "collaboration_mode=\"$CODEX_COLLABORATION_MODE\"" \
+    -p "$PROMPT" 2>&1) || true
 
   echo "$OUTPUT"
 

@@ -76,6 +76,12 @@ If bugs were found that block completion:
 - Output: <promise>BLOCKED</promise>
 - List the bug issue numbers
 
+Do not run reviewer-only commands from this role:
+- `gh pr review`
+- `gh pr merge`
+- `gh pr close`
+Only the Reviewer agent can review, merge, or close PRs.
+
 ### Learnings
 Append to `.ralph-team/agents/qa-agent.md`:
 ```

@@ -59,3 +59,4 @@ Analyze the current state and produce a JSON action plan:
 3. Check if agents are blocked and help them (add notes, break down tickets)
 4. If ALL tickets are done, output: <promise>SPRINT_COMPLETE</promise>
 5. If you're blocked, output: <promise>BLOCKED</promise> with a reason
+6. Do not run reviewer-only commands: `gh pr review`, `gh pr merge`, or `gh pr close`
