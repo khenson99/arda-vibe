@@ -99,11 +99,15 @@ export function setupProxies(app: Express): void {
           log.error({ prefix: route.prefix, err: err.message }, 'Proxy error');
           if ('writeHead' in res && typeof res.writeHead === 'function') {
             const httpRes = res as ServerResponse;
-            httpRes.writeHead(502);
-            httpRes.end(JSON.stringify({
+            const payload = JSON.stringify({
               error: 'Service unavailable',
               service: route.prefix,
-            }));
+            });
+            httpRes.writeHead(502, {
+              'Content-Type': 'application/json; charset=utf-8',
+              'Content-Length': Buffer.byteLength(payload).toString(),
+            });
+            httpRes.end(payload);
           }
         },
       },

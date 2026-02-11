@@ -80,6 +80,39 @@ export function buildApiUrl(path: string): string {
   return `${API_BASE_URL}${normalizedPath}`;
 }
 
+function toObjectPayload(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+async function parseResponsePayload(response: Response): Promise<Record<string, unknown>> {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      const json = (await response.json()) as unknown;
+      return toObjectPayload(json);
+    } catch {
+      // Fall through to text parsing for malformed JSON responses.
+    }
+  }
+
+  const text = await response.text();
+  if (!text) return {};
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const asObject = toObjectPayload(parsed);
+    if (Object.keys(asObject).length > 0) return asObject;
+  } catch {
+    // Ignore parse errors and preserve raw text as message below.
+  }
+
+  return { message: text };
+}
+
 export async function apiRequest<T>(
   path: string,
   options: {
@@ -99,10 +132,7 @@ export async function apiRequest<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json")
-    ? ((await response.json()) as Record<string, unknown>)
-    : ({ message: await response.text() } as Record<string, unknown>);
+  const payload = await parseResponsePayload(response);
 
   if (!response.ok) {
     const message =
