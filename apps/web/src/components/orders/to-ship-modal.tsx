@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { TruckIcon, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { isUnauthorized, parseApiError, updateTransferOrderStatus } from "@/lib/api-client";
+import { isUnauthorized, parseApiError, updateTransferOrderStatus, shipTransferOrderLines } from "@/lib/api-client";
 import type { TransferOrder } from "@/types";
 
 // ─── Props ───────────────────────────────────────────────────────────
@@ -57,15 +57,20 @@ export function TOShipModal({
     }
   }, [open, transferOrder.lines]);
 
+  // Check if we're in picking status (where line quantities can be updated)
+  const isPickingStatus = transferOrder.status === "picking";
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Validate that at least one line has quantity > 0
-    const hasQuantity = Object.values(lineQuantities).some((qty) => qty > 0);
-    if (!hasQuantity) {
-      setError("At least one line item must have a shipped quantity greater than 0");
-      return;
+    // Validate that at least one line has quantity > 0 (only relevant when in picking status)
+    if (isPickingStatus) {
+      const hasQuantity = Object.values(lineQuantities).some((qty) => qty > 0);
+      if (!hasQuantity) {
+        setError("At least one line item must have a shipped quantity greater than 0");
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -77,12 +82,33 @@ export function TOShipModal({
         .filter(Boolean)
         .join(" | ");
 
-      // Transition to "shipped" or "in_transit" depending on backend logic
-      // For now, we'll use "in_transit" as that's a common next step
-      await updateTransferOrderStatus(token, transferOrder.id, {
-        status: "in_transit",
-        reason: notes || "Marked as shipped from UI",
-      });
+      if (isPickingStatus) {
+        // Build the lines payload with shipped quantities
+        const shipLines = transferOrder.lines
+          ?.map((line) => ({
+            lineId: line.id,
+            quantityShipped: (lineQuantities[line.id] ?? 0) + line.quantityShipped,
+          }))
+          .filter((l) => l.quantityShipped > 0) ?? [];
+
+        // Ship the lines with their quantities
+        // The backend will auto-transition to "shipped" if all lines are fully shipped
+        await shipTransferOrderLines(token, transferOrder.id, { lines: shipLines });
+
+        // If there are notes or tracking info, also update the status with that info
+        if (notes) {
+          await updateTransferOrderStatus(token, transferOrder.id, {
+            status: "in_transit",
+            reason: notes,
+          });
+        }
+      } else {
+        // Already shipped, just transition to in_transit
+        await updateTransferOrderStatus(token, transferOrder.id, {
+          status: "in_transit",
+          reason: notes || "Marked as in transit from UI",
+        });
+      }
 
       toast.success("Transfer order marked as shipped");
       onShipped();
@@ -135,9 +161,9 @@ export function TOShipModal({
             </CardContent>
           </Card>
 
-          {/* Line items with quantities */}
+          {/* Line items with quantities - only show editable quantities when in picking status */}
           <div className="space-y-2">
-            <Label>Shipped Quantities</Label>
+            <Label>{isPickingStatus ? "Shipped Quantities" : "Line Items"}</Label>
             <div className="space-y-2">
               {transferOrder.lines?.map((line) => {
                 const remaining = line.quantityRequested - line.quantityShipped;
@@ -148,24 +174,27 @@ export function TOShipModal({
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-sm truncate">{line.partName ?? line.partId}</p>
                           <p className="text-xs text-muted-foreground">
-                            Requested: {line.quantityRequested} | Already Shipped: {line.quantityShipped} | Remaining: {remaining}
+                            Requested: {line.quantityRequested} | Shipped: {line.quantityShipped}
+                            {isPickingStatus && ` | Remaining: ${remaining}`}
                           </p>
                         </div>
-                        <div className="w-24">
-                          <Input
-                            type="number"
-                            min={0}
-                            max={remaining}
-                            value={lineQuantities[line.id] ?? 0}
-                            onChange={(e) =>
-                              setLineQuantities((prev) => ({
-                                ...prev,
-                                [line.id]: parseInt(e.target.value, 10) || 0,
-                              }))
-                            }
-                            className="text-center"
-                          />
-                        </div>
+                        {isPickingStatus && (
+                          <div className="w-24">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={remaining}
+                              value={lineQuantities[line.id] ?? 0}
+                              onChange={(e) =>
+                                setLineQuantities((prev) => ({
+                                  ...prev,
+                                  [line.id]: parseInt(e.target.value, 10) || 0,
+                                }))
+                              }
+                              className="text-center"
+                            />
+                          </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>

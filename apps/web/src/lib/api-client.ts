@@ -1589,6 +1589,23 @@ export async function fetchTransferOrderTransitions(
   return apiRequest(`/api/orders/transfer-orders/${encodeURIComponent(id)}/transitions`, { token });
 }
 
+export async function shipTransferOrderLines(
+  token: string,
+  id: string,
+  input: {
+    lines: Array<{
+      lineId: string;
+      quantityShipped: number;
+    }>;
+  },
+): Promise<{ data: TransferOrder }> {
+  return apiRequest(`/api/orders/transfer-orders/${encodeURIComponent(id)}/ship`, {
+    method: "PATCH",
+    token,
+    body: input,
+  });
+}
+
 export async function fetchSourceRecommendations(
   token: string,
   params: { destinationFacilityId: string; partId: string; minQty?: number; limit?: number },
