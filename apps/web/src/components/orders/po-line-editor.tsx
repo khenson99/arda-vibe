@@ -170,6 +170,7 @@ export function POLineEditor({
                         size="sm"
                         onClick={() => onRemoveLine(idx)}
                         className="h-7 w-7 p-0"
+                        aria-label="Remove line item"
                       >
                         <X className="h-4 w-4" />
                       </Button>

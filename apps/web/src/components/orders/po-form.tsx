@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { POLineEditor } from "./po-line-editor";
+import { validatePOForm } from "./po-form-schema";
 import type { PurchaseOrder, POStatus, SupplierRecord, FacilityRecord } from "@/types";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -75,14 +76,14 @@ export function POForm({
   );
   const [currency, setCurrency] = React.useState(po?.currency || "USD");
   const [notes, setNotes] = React.useState(po?.notes || "");
-  const [internalNotes, setInternalNotes] = React.useState("");
+  const [internalNotes, setInternalNotes] = React.useState(po?.internalNotes || "");
   const [paymentTerms, setPaymentTerms] = React.useState(po?.paymentTerms || "");
   const [shippingTerms, setShippingTerms] = React.useState(po?.shippingTerms || "");
   const [lines, setLines] = React.useState<POLineInput[]>(
-    po?.lines?.map((line) => ({
+    po?.lines?.map((line, idx) => ({
       partId: line.partId,
       partName: line.partName,
-      lineNumber: Number(line.id.split("-").pop()) || 1,
+      lineNumber: idx + 1,
       quantityOrdered: line.quantityOrdered,
       unitCost: line.unitPrice || 0,
       notes: line.notes,
@@ -91,42 +92,30 @@ export function POForm({
   );
   const [validationErrors, setValidationErrors] = React.useState<Record<string, string>>({});
 
-  const validate = (): boolean => {
-    const errors: Record<string, string> = {};
-
-    if (!supplierId) errors.supplierId = "Supplier is required";
-    if (!facilityId) errors.facilityId = "Facility is required";
-    if (!expectedDeliveryDate) errors.expectedDeliveryDate = "Expected delivery date is required";
-    if (lines.length === 0) errors.lines = "At least one line item is required";
-
-    lines.forEach((line, idx) => {
-      if (!line.partId) errors[`line-${idx}-partId`] = "Part is required";
-      if (line.quantityOrdered <= 0) errors[`line-${idx}-quantity`] = "Quantity must be > 0";
-      if (line.unitCost < 0) errors[`line-${idx}-unitCost`] = "Unit cost cannot be negative";
-    });
-
-    setValidationErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
 
-    const data: POFormInput = {
+    const payload: POFormInput = {
       supplierId,
       facilityId,
       orderDate,
       expectedDeliveryDate,
       currency,
       notes: notes || null,
-      internalNotes: internalNotes || null,
+      internalNotes: mode === "create" ? (internalNotes || null) : undefined,
       paymentTerms: paymentTerms || null,
       shippingTerms: shippingTerms || null,
       lines,
     };
 
-    await onSubmit(data);
+    const result = validatePOForm(payload);
+    if (!result.success) {
+      setValidationErrors(result.errors);
+      return;
+    }
+
+    setValidationErrors({});
+    await onSubmit(payload);
   };
 
   const handleAddLine = (line: POLineInput) => {

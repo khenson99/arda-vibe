@@ -507,6 +507,7 @@ export interface PurchaseOrder {
   totalAmount: number | null;
   currency: string;
   notes: string | null;
+  internalNotes?: string | null;
   paymentTerms?: string | null;
   shippingTerms?: string | null;
   sentToEmail?: string | null;
