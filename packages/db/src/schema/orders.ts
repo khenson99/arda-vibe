@@ -85,6 +85,8 @@ export const purchaseOrders = ordersSchema.table(
     currency: varchar('currency', { length: 3 }).default('USD'),
     notes: text('notes'),
     internalNotes: text('internal_notes'),
+    paymentTerms: text('payment_terms'),
+    shippingTerms: text('shipping_terms'),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     sentToEmail: varchar('sent_to_email', { length: 255 }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
@@ -121,6 +123,9 @@ export const purchaseOrderLines = ordersSchema.table(
     unitCost: numeric('unit_cost', { precision: 12, scale: 4 }).notNull(),
     lineTotal: numeric('line_total', { precision: 12, scale: 2 }).notNull(),
     notes: text('notes'),
+    description: text('description'),
+    orderMethod: varchar('order_method', { length: 30 }),
+    sourceUrl: text('source_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -634,5 +639,41 @@ export const productionQueueEntriesRelations = relations(productionQueueEntries,
   workOrder: one(workOrders, {
     fields: [productionQueueEntries.workOrderId],
     references: [workOrders.id],
+  }),
+}));
+
+// ─── Lead Time History ──────────────────────────────────────────────
+export const leadTimeHistory = ordersSchema.table(
+  'lead_time_history',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    sourceFacilityId: uuid('source_facility_id').notNull(),
+    destinationFacilityId: uuid('destination_facility_id').notNull(),
+    partId: uuid('part_id').notNull(),
+    transferOrderId: uuid('transfer_order_id')
+      .references(() => transferOrders.id, { onDelete: 'set null' }),
+    shippedAt: timestamp('shipped_at', { withTimezone: true }).notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    leadTimeDays: numeric('lead_time_days', { precision: 6, scale: 2 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('lt_hist_tenant_idx').on(table.tenantId),
+    index('lt_hist_route_idx').on(
+      table.tenantId,
+      table.sourceFacilityId,
+      table.destinationFacilityId
+    ),
+    index('lt_hist_part_idx').on(table.partId),
+    index('lt_hist_to_idx').on(table.transferOrderId),
+  ]
+);
+
+// ─── Lead Time History Relations ────────────────────────────────────
+export const leadTimeHistoryRelations = relations(leadTimeHistory, ({ one }) => ({
+  transferOrder: one(transferOrders, {
+    fields: [leadTimeHistory.transferOrderId],
+    references: [transferOrders.id],
   }),
 }));

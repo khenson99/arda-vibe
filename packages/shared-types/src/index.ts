@@ -318,3 +318,79 @@ export interface WSEvent<T = unknown> {
   payload: T;
   timestamp: string;
 }
+
+// ─── Transfer Lifecycle ──────────────────────────────────────────────
+export const TRANSFER_VALID_TRANSITIONS: Record<TransferStatus, TransferStatus[]> = {
+  draft: ['requested', 'cancelled'],
+  requested: ['approved', 'cancelled'],
+  approved: ['picking', 'cancelled'],
+  picking: ['shipped', 'cancelled'],
+  shipped: ['in_transit', 'cancelled'],
+  in_transit: ['received', 'cancelled'],
+  received: ['closed'],
+  closed: [],
+  cancelled: [],
+};
+
+export interface TransferLifecycleEvent {
+  transferOrderId: string;
+  fromStatus: TransferStatus;
+  toStatus: TransferStatus;
+  userId: string;
+  reason?: string;
+  timestamp: string;
+}
+
+// ─── Inventory Ledger Types ─────────────────────────────────────────
+export type InventoryAdjustmentType = 'set' | 'increment' | 'decrement';
+
+export type InventoryField = 'qtyOnHand' | 'qtyReserved' | 'qtyInTransit';
+
+export interface InventoryLedgerEntry {
+  id: string;
+  tenantId: string;
+  facilityId: string;
+  partId: string;
+  qtyOnHand: number;
+  qtyReserved: number;
+  qtyInTransit: number;
+  reorderPoint: number;
+  reorderQty: number;
+  lastCountedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InventoryAdjustment {
+  facilityId: string;
+  partId: string;
+  field: InventoryField;
+  adjustmentType: InventoryAdjustmentType;
+  quantity: number;
+  source?: string;
+}
+
+// ─── Lead Time Types ────────────────────────────────────────────────
+export interface LeadTimeRecord {
+  id: string;
+  tenantId: string;
+  sourceFacilityId: string;
+  destinationFacilityId: string;
+  partId: string;
+  transferOrderId: string | null;
+  shippedAt: string;
+  receivedAt: string;
+  leadTimeDays: number;
+  createdAt: string;
+}
+
+// ─── Source Recommendation ──────────────────────────────────────────
+export interface SourceRecommendation {
+  facilityId: string;
+  facilityName: string;
+  facilityCode: string;
+  availableQty: number;
+  avgLeadTimeDays: number | null;
+  distanceKm: number | null;
+  score: number;
+}

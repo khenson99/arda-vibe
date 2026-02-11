@@ -6,6 +6,7 @@ import {
   timestamp,
   boolean,
   numeric,
+  integer,
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -69,14 +70,53 @@ export const storageLocations = locationsSchema.table(
   ]
 );
 
+// ─── Inventory Ledger (per-facility part stock levels) ───────────────
+export const inventoryLedger = locationsSchema.table(
+  'inventory_ledger',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    facilityId: uuid('facility_id')
+      .notNull()
+      .references(() => facilities.id, { onDelete: 'cascade' }),
+    partId: uuid('part_id').notNull(), // FK enforced at app layer (cross-schema)
+    qtyOnHand: integer('qty_on_hand').notNull().default(0),
+    qtyReserved: integer('qty_reserved').notNull().default(0),
+    qtyInTransit: integer('qty_in_transit').notNull().default(0),
+    reorderPoint: integer('reorder_point').notNull().default(0),
+    reorderQty: integer('reorder_qty').notNull().default(0),
+    lastCountedAt: timestamp('last_counted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('inv_ledger_tenant_facility_part_idx').on(
+      table.tenantId,
+      table.facilityId,
+      table.partId
+    ),
+    index('inv_ledger_tenant_idx').on(table.tenantId),
+    index('inv_ledger_facility_idx').on(table.facilityId),
+    index('inv_ledger_part_idx').on(table.partId),
+  ]
+);
+
 // ─── Relations ────────────────────────────────────────────────────────
 export const facilitiesRelations = relations(facilities, ({ many }) => ({
   storageLocations: many(storageLocations),
+  inventoryLedger: many(inventoryLedger),
 }));
 
 export const storageLocationsRelations = relations(storageLocations, ({ one }) => ({
   facility: one(facilities, {
     fields: [storageLocations.facilityId],
+    references: [facilities.id],
+  }),
+}));
+
+export const inventoryLedgerRelations = relations(inventoryLedger, ({ one }) => ({
+  facility: one(facilities, {
+    fields: [inventoryLedger.facilityId],
     references: [facilities.id],
   }),
 }));
