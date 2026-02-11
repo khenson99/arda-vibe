@@ -11,6 +11,7 @@ const log = createLogger('api-gateway');
 import { db } from '@arda/db';
 import { sql } from 'drizzle-orm';
 import { itemsCompatRouter } from './routes/items-compat.routes.js';
+import { kanbanCompatRouter } from './routes/kanban-compat.routes.js';
 import { setupProxies } from './routes/proxy.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { setupWebSocket } from './ws/socket-handler.js';
@@ -92,6 +93,7 @@ app.get('/health', async (_req, res) => {
 
 // ─── Service Proxies ──────────────────────────────────────────────────
 app.use('/api/items', express.json({ limit: '2mb' }), authMiddleware, itemsCompatRouter);
+app.use('/api/kanban/loops', express.json({ limit: '2mb' }), authMiddleware, kanbanCompatRouter);
 setupProxies(app);
 
 // ─── 404 Handler ──────────────────────────────────────────────────────
