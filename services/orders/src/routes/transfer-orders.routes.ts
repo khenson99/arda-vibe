@@ -289,6 +289,43 @@ transferOrdersRouter.get('/', async (req: AuthRequest, res, next) => {
   }
 });
 
+// ─── Source Recommendation ──────────────────────────────────────────────
+
+const sourceRecommendationSchema = z.object({
+  destinationFacilityId: z.string().uuid(),
+  partId: z.string().uuid(),
+  minQty: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().max(50).optional(),
+});
+
+// GET /recommendations/source - Get ranked source facilities for a part
+// NOTE: This route MUST be registered before /:id routes to avoid matching "recommendations" as an id param
+transferOrdersRouter.get('/recommendations/source', async (req: AuthRequest, res, next) => {
+  try {
+    const params = sourceRecommendationSchema.parse(req.query);
+    const tenantId = req.user!.tenantId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const recommendations = await recommendSources({
+      tenantId,
+      destinationFacilityId: params.destinationFacilityId,
+      partId: params.partId,
+      minQty: params.minQty,
+      limit: params.limit,
+    });
+
+    res.json({ data: recommendations });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
 // GET /:id - Get transfer order detail with lines
 transferOrdersRouter.get('/:id', async (req: AuthRequest, res, next) => {
   try {
