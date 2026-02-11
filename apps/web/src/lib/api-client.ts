@@ -1534,7 +1534,7 @@ export async function fetchInventoryByFacility(
   if (params?.page) qs.set("page", String(params.page));
   if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return apiRequest(`/api/inventory/facility/${encodeURIComponent(facilityId)}${suffix}`, { token });
+  return apiRequest(`/api/orders/inventory/facilities/${encodeURIComponent(facilityId)}/inventory${suffix}`, { token });
 }
 
 /* ── Receiving ────────────────────────────────────────────────── */
