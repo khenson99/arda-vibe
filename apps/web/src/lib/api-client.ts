@@ -1481,7 +1481,7 @@ export async function fetchSourceRecommendations(
   qs.set("partId", params.partId);
   if (params.minQty != null) qs.set("minQty", String(params.minQty));
   if (params.limit != null) qs.set("limit", String(params.limit));
-  return apiRequest(`/api/inventory/source-recommendations?${qs.toString()}`, { token });
+  return apiRequest(`/api/orders/transfer-orders/recommendations/source?${qs.toString()}`, { token });
 }
 
 export async function fetchInventoryByFacility(

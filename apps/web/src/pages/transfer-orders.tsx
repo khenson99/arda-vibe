@@ -621,7 +621,7 @@ function NewTransferView({
                     >
                       <span className="font-medium">{rec.facilityName}</span>
                       <span className="text-muted-foreground">
-                        {rec.qtyAvailable} avail
+                        {rec.availableQty} avail
                         {rec.avgLeadTimeDays != null && ` · ${rec.avgLeadTimeDays}d lead`}
                         {rec.distanceKm != null && ` · ${Math.round(rec.distanceKm)}km`}
                       </span>

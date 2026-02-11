@@ -601,7 +601,8 @@ export interface TransferOrderLine {
 export interface SourceRecommendation {
   facilityId: string;
   facilityName: string;
-  qtyAvailable: number;
+  facilityCode: string;
+  availableQty: number;
   avgLeadTimeDays: number | null;
   distanceKm: number | null;
   score: number;
