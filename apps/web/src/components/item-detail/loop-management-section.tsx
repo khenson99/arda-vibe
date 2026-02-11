@@ -1,30 +1,33 @@
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Badge, Button, Input } from "@/components/ui";
 import {
-  fetchLoops,
   updateLoopParameters,
+  updateItemRecord,
+  normalizeOptionalString,
+  toItemsInputPayload,
   isUnauthorized,
   parseApiError,
 } from "@/lib/api-client";
-import { partMatchesLinkId } from "@/lib/part-linking";
-import type { KanbanLoop, PartRecord } from "@/types";
+import { fetchLoopsForPart } from "@/lib/kanban-loops";
+import type { AuthSession, KanbanLoop, PartRecord } from "@/types";
 import { LOOP_META } from "@/types";
 
 interface LoopManagementSectionProps {
   part: PartRecord;
-  token: string;
+  session: AuthSession;
   onUnauthorized: () => void;
   onSaved: () => Promise<void>;
 }
 
 export function LoopManagementSection({
   part,
-  token,
+  session,
   onUnauthorized,
   onSaved,
 }: LoopManagementSectionProps) {
+  const token = session.tokens.accessToken;
   const [loops, setLoops] = React.useState<KanbanLoop[]>([]);
   const [isLoadingLoops, setIsLoadingLoops] = React.useState(false);
   const [savingLoopId, setSavingLoopId] = React.useState<string | null>(null);
@@ -42,8 +45,7 @@ export function LoopManagementSection({
 
     setIsLoadingLoops(true);
     try {
-      const result = await fetchLoops(token, { page: 1, pageSize: 200 });
-      const matchingLoops = result.data.filter((loop) => partMatchesLinkId(part, loop.partId));
+      const matchingLoops = await fetchLoopsForPart(token, part);
       setLoops(matchingLoops);
       setLoopEdits(
         matchingLoops.reduce(
@@ -74,6 +76,64 @@ export function LoopManagementSection({
   React.useEffect(() => {
     void loadLoops();
   }, [loadLoops]);
+
+  const handleProvisionFirstCard = React.useCallback(async () => {
+    if (!part.eId) {
+      toast.error("This item cannot auto-provision a loop yet. Refresh and try again.");
+      return;
+    }
+
+    const author = normalizeOptionalString(session.user.email) || session.user.id;
+    setSavingLoopId("provisioning");
+    try {
+      await updateItemRecord(token, {
+        entityId: part.eId,
+        tenantId: session.user.tenantId,
+        author,
+        payload: toItemsInputPayload(part),
+        provisionDefaults: true,
+      });
+      toast.success("Created default loop and first card for this item.");
+      await loadLoops();
+      await onSaved();
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        onUnauthorized();
+        return;
+      }
+      toast.error(parseApiError(error));
+    } finally {
+      setSavingLoopId(null);
+    }
+  }, [loadLoops, onSaved, onUnauthorized, part, session.user.email, session.user.id, session.user.tenantId, token]);
+
+  const handleAddCard = React.useCallback(
+    async (loop: KanbanLoop) => {
+      const reason = loopReason.trim() || "Added card from item detail view";
+      const nextCardCount = Math.max(1, loop.numberOfCards + 1);
+      setSavingLoopId(loop.id);
+      try {
+        await updateLoopParameters(token, loop.id, {
+          numberOfCards: nextCardCount,
+          minQuantity: loop.minQuantity,
+          orderQuantity: loop.orderQuantity,
+          reason,
+        });
+        toast.success(`Added card #${nextCardCount} to ${LOOP_META[loop.loopType].label} loop.`);
+        await loadLoops();
+        await onSaved();
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          onUnauthorized();
+          return;
+        }
+        toast.error(parseApiError(error));
+      } finally {
+        setSavingLoopId(null);
+      }
+    },
+    [loadLoops, loopReason, onSaved, onUnauthorized, token],
+  );
 
   const handleSaveLoop = React.useCallback(
     async (loop: KanbanLoop) => {
@@ -143,8 +203,16 @@ export function LoopManagementSection({
       )}
 
       {!isLoadingLoops && loops.length === 0 && (
-        <div className="rounded-md border border-border p-3 text-xs text-muted-foreground">
-          No loops found for this item yet.
+        <div className="space-y-3 rounded-md border border-border p-3 text-xs text-muted-foreground">
+          <p>No loops found for this item yet.</p>
+          <Button
+            size="sm"
+            onClick={() => void handleProvisionFirstCard()}
+            disabled={savingLoopId === "provisioning"}
+          >
+            {savingLoopId === "provisioning" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Provision loop + first card
+          </Button>
         </div>
       )}
 
@@ -158,14 +226,29 @@ export function LoopManagementSection({
                   <Badge variant="secondary">{LOOP_META[loop.loopType].label}</Badge>
                   <span className="text-xs text-muted-foreground">{loop.id.slice(0, 8)}...</span>
                 </div>
-                <Button
-                  size="sm"
-                  disabled={!loopEdit || savingLoopId === loop.id}
-                  onClick={() => void handleSaveLoop(loop)}
-                >
-                  {savingLoopId === loop.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Save loop
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={savingLoopId === loop.id}
+                    onClick={() => void handleAddCard(loop)}
+                  >
+                    {savingLoopId === loop.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
+                    Add card
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={!loopEdit || savingLoopId === loop.id}
+                    onClick={() => void handleSaveLoop(loop)}
+                  >
+                    {savingLoopId === loop.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Save loop
+                  </Button>
+                </div>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">

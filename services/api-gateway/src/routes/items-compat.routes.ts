@@ -28,6 +28,11 @@ const upsertItemSchema = z.object({
     glCode: z.string().trim().optional().nullable(),
     itemSubtype: z.string().trim().optional().nullable(),
   }),
+  metadata: z
+    .object({
+      provisionDefaults: z.coerce.boolean().optional(),
+    })
+    .optional(),
 });
 
 const querySchema = z.object({
@@ -337,6 +342,97 @@ async function getOrCreateDefaultSupplierId(
   throw error;
 }
 
+function isUniqueViolationError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === '23505'
+  );
+}
+
+function isServiceUnavailableStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+async function createDefaultLoopWithCardLocally(input: {
+  tenantId: string;
+  partId: string;
+  facilityId: string;
+  primarySupplierId: string;
+  minQuantity: number;
+  orderQuantity: number;
+  changedByUserId?: string | null;
+}): Promise<boolean> {
+  try {
+    await db.transaction(async (tx) => {
+      const [loop] = await tx
+        .insert(schema.kanbanLoops)
+        .values({
+          tenantId: input.tenantId,
+          partId: input.partId,
+          facilityId: input.facilityId,
+          loopType: 'procurement',
+          cardMode: 'single',
+          numberOfCards: 1,
+          minQuantity: input.minQuantity,
+          orderQuantity: input.orderQuantity,
+          primarySupplierId: input.primarySupplierId,
+          notes: 'Auto-created from item upsert (gateway fallback)',
+        })
+        .returning({ id: schema.kanbanLoops.id });
+
+      if (!loop) {
+        throw new Error('Loop creation fallback did not return a loop id');
+      }
+
+      await tx.insert(schema.kanbanCards).values({
+        tenantId: input.tenantId,
+        loopId: loop.id,
+        cardNumber: 1,
+        currentStage: 'created',
+        currentStageEnteredAt: new Date(),
+      });
+
+      await tx.insert(schema.kanbanParameterHistory).values({
+        tenantId: input.tenantId,
+        loopId: loop.id,
+        changeType: 'manual',
+        newMinQuantity: input.minQuantity,
+        newOrderQuantity: input.orderQuantity,
+        newNumberOfCards: 1,
+        reason: 'Initial loop creation (gateway fallback)',
+        changedByUserId: input.changedByUserId ?? null,
+      });
+    });
+
+    return true;
+  } catch (error) {
+    if (isUniqueViolationError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function parseErrorMessageFromResponse(response: Response): Promise<string> {
+  const bodyText = await response.text();
+  let message = bodyText?.trim() || `Loop create failed (${response.status})`;
+  if (bodyText?.trim()) {
+    try {
+      const parsed = JSON.parse(bodyText) as Record<string, unknown>;
+      if (typeof parsed.error === 'string' && parsed.error.trim()) {
+        message = parsed.error.trim();
+      } else if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        message = parsed.message.trim();
+      }
+    } catch {
+      // Preserve raw text when upstream does not return JSON.
+    }
+  }
+  return message;
+}
+
 async function ensureDefaultLoopWithCard(input: {
   token: string;
   tenantId: string;
@@ -344,6 +440,7 @@ async function ensureDefaultLoopWithCard(input: {
   minQty?: number | null;
   orderQty?: number | null;
   preferredSupplierName?: string | null;
+  changedByUserId?: string | null;
 }): Promise<boolean> {
   const existingLoop = await db.query.kanbanLoops.findFirst({
     where: and(
@@ -362,30 +459,53 @@ async function ensureDefaultLoopWithCard(input: {
   const minQuantity = toPositiveInt(input.minQty, 1);
   const orderQuantity = toPositiveInt(input.orderQty, minQuantity);
 
-  const response = await fetch(`${serviceUrls.kanban}/loops`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${input.token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  let response: Response;
+  try {
+    response = await fetch(`${serviceUrls.kanban}/loops`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        partId: input.partId,
+        facilityId,
+        loopType: 'procurement',
+        cardMode: 'single',
+        numberOfCards: 1,
+        minQuantity,
+        orderQuantity,
+        primarySupplierId,
+        notes: 'Auto-created from item upsert',
+      }),
+    });
+  } catch {
+    return createDefaultLoopWithCardLocally({
+      tenantId: input.tenantId,
       partId: input.partId,
       facilityId,
-      loopType: 'procurement',
-      cardMode: 'single',
-      numberOfCards: 1,
+      primarySupplierId,
       minQuantity,
       orderQuantity,
-      primarySupplierId,
-      notes: 'Auto-created from item upsert',
-    }),
-  });
+      changedByUserId: input.changedByUserId,
+    });
+  }
 
   if (response.ok) return true;
   if (response.status === 409) return false;
+  if (isServiceUnavailableStatus(response.status)) {
+    return createDefaultLoopWithCardLocally({
+      tenantId: input.tenantId,
+      partId: input.partId,
+      facilityId,
+      primarySupplierId,
+      minQuantity,
+      orderQuantity,
+      changedByUserId: input.changedByUserId,
+    });
+  }
 
-  const bodyText = await response.text();
-  const message = bodyText?.trim() || `Loop create failed (${response.status})`;
+  const message = await parseErrorMessageFromResponse(response);
   const error = new Error(message) as HttpLikeError;
   error.status = response.status;
   throw error;
@@ -442,9 +562,11 @@ itemsCompatRouter.put('/item/:entityId', async (req: AuthRequest, res, next) => 
         });
 
     let cardEnsured = false;
-    // Auto-bootstrap loops/cards only when a new catalog part is created.
-    // Existing item updates (like notes edits) should be fast and side-effect free.
-    if (isNewPart) {
+    // Auto-bootstrap loops/cards when creating a new part, or when explicitly requested
+    // by UI flows that need to provision a first card for an existing item.
+    const shouldProvisionDefaults =
+      isNewPart || input.metadata?.provisionDefaults === true;
+    if (shouldProvisionDefaults) {
       try {
         cardEnsured = await ensureDefaultLoopWithCard({
           token,
@@ -453,6 +575,7 @@ itemsCompatRouter.put('/item/:entityId', async (req: AuthRequest, res, next) => 
           minQty: input.payload.minQty,
           orderQty: input.payload.orderQty,
           preferredSupplierName: input.payload.primarySupplier,
+          changedByUserId: req.user?.sub ?? null,
         });
       } catch (loopError) {
         // Item creation should still succeed even when loop bootstrap is unavailable.

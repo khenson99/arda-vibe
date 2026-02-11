@@ -55,10 +55,36 @@ export class ApiError extends Error {
 
 export function parseApiError(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.status === 502 && error.details?.service === "/api/kanban") {
+      return "Kanban service is unavailable. Please try again in a moment.";
+    }
     return error.message;
   }
 
   if (error instanceof Error) {
+    const raw = error.message.trim();
+    if (raw.startsWith("{") && raw.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const parsedService = typeof parsed.service === "string" ? parsed.service : null;
+        const parsedError =
+          typeof parsed.error === "string"
+            ? parsed.error
+            : typeof parsed.message === "string"
+              ? parsed.message
+              : null;
+
+        if (parsedService === "/api/kanban") {
+          return "Kanban service is unavailable. Please try again in a moment.";
+        }
+
+        if (parsedError) {
+          return parsedError;
+        }
+      } catch {
+        // Fall through to raw message.
+      }
+    }
     return error.message;
   }
 
@@ -635,14 +661,19 @@ export async function updateItemRecord(
     tenantId: string;
     author: string;
     payload: ItemsServiceInputPayload;
+    provisionDefaults?: boolean;
   },
 ): Promise<void> {
-  const { entityId, tenantId, author, payload } = input;
+  const { entityId, tenantId, author, payload, provisionDefaults } = input;
 
-  const requestBody: DataAuthorityCreateRequest<ItemsServiceInputPayload, { tenantId: string }> = {
+  const requestBody: DataAuthorityCreateRequest<
+    ItemsServiceInputPayload,
+    { tenantId: string; provisionDefaults?: boolean }
+  > = {
     payload,
     metadata: {
       tenantId,
+      ...(provisionDefaults ? { provisionDefaults: true } : {}),
     },
     effectiveAt: Date.now(),
     author,
@@ -1193,7 +1224,11 @@ export async function fetchCardQR(
   token: string,
   cardId: string,
 ): Promise<{ qrDataUrl: string }> {
-  return apiRequest(`/api/kanban/cards/${encodeURIComponent(cardId)}/qr`, { token });
+  const response = await apiRequest<{ qrDataUrl?: string; qrCode?: string }>(
+    `/api/kanban/cards/${encodeURIComponent(cardId)}/qr?format=data_url`,
+    { token },
+  );
+  return { qrDataUrl: response.qrDataUrl ?? response.qrCode ?? "" };
 }
 
 /* ── Purchase Orders ──────────────────────────────────────────── */

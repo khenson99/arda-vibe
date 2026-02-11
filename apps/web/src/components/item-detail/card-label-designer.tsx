@@ -9,6 +9,7 @@ import {
   isUnauthorized,
   parseApiError,
 } from "@/lib/api-client";
+import { fetchLoopsForPart } from "@/lib/kanban-loops";
 import type { KanbanCard, PartRecord } from "@/types";
 import { CARD_STAGE_META, LOOP_META } from "@/types";
 import type { LoopType } from "@/types";
@@ -33,6 +34,7 @@ export function CardLabelDesigner({
 }: CardLabelDesignerProps) {
   const [cards, setCards] = React.useState<KanbanCard[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [selectedCard, setSelectedCard] = React.useState<KanbanCard | null>(
     null,
   );
@@ -45,10 +47,31 @@ export function CardLabelDesigner({
     let cancelled = false;
     async function load() {
       setIsLoading(true);
+      setLoadError(null);
       try {
-        const result = await fetchCards(token, { pageSize: 200 });
+        const loops = await fetchLoopsForPart(token, part);
         if (cancelled) return;
-        const partCards = result.data.filter((c) => c.partId === part.id);
+
+        if (loops.length === 0) {
+          setCards([]);
+          setSelectedCard(null);
+          return;
+        }
+
+        const partCards: KanbanCard[] = [];
+        for (const loop of loops) {
+          let page = 1;
+          let totalPages = 1;
+          while (page <= totalPages) {
+            const result = await fetchCards(token, { loopId: loop.id, page, pageSize: 100 });
+            if (cancelled) return;
+            partCards.push(...result.data);
+            totalPages = Math.max(1, result.pagination.totalPages || 1);
+            page += 1;
+          }
+        }
+
+        if (cancelled) return;
         setCards(partCards);
         setSelectedCard((current) => {
           if (partCards.length === 0) return null;
@@ -62,7 +85,9 @@ export function CardLabelDesigner({
           onUnauthorized();
           return;
         }
-        toast.error(parseApiError(error));
+        const message = parseApiError(error);
+        setLoadError(message);
+        toast.error(message);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -121,6 +146,17 @@ export function CardLabelDesigner({
         <div className="flex items-center justify-center rounded-md border border-border p-8 text-xs text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           Loading cards...
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Card Label Preview</h3>
+        <div className="rounded-md border border-border p-6 text-center text-xs text-muted-foreground">
+          Unable to load card preview: {loadError}
         </div>
       </div>
     );

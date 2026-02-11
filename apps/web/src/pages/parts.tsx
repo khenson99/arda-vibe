@@ -28,7 +28,6 @@ import type { AppShellOutletContext } from "@/layouts/app-shell";
 import {
   createPrintJob,
   createPurchaseOrderFromCards,
-  fetchLoops,
   isUnauthorized,
   normalizeOptionalString,
   parseApiError,
@@ -36,6 +35,7 @@ import {
   updateLoopParameters,
   updateItemRecord,
 } from "@/lib/api-client";
+import { fetchLoopsForPart } from "@/lib/kanban-loops";
 import {
   formatDateTime,
   formatMoney,
@@ -715,8 +715,7 @@ function QuickActions({
   const handleCreateCard = React.useCallback(async () => {
     setCreateCardState("loading");
     try {
-      const loopsResult = await fetchLoops(session.tokens.accessToken, { page: 1, pageSize: 200 });
-      const partLoops = loopsResult.data.filter((loop) => partMatchesLinkId(part, loop.partId));
+      const partLoops = await fetchLoopsForPart(session.tokens.accessToken, part);
       if (partLoops.length === 0) {
         if (!part.eId) {
           setCreateCardState("idle");
@@ -730,6 +729,7 @@ function QuickActions({
           tenantId: session.user.tenantId,
           author,
           payload: toItemsInputPayload(part),
+          provisionDefaults: true,
         });
 
         setCreateCardState("done");

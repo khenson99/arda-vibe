@@ -106,7 +106,7 @@ export function ItemDetailPanel({
       {!isCreateMode && activeTab === "loops" && part && (
         <LoopManagementSection
           part={part}
-          token={session.tokens.accessToken}
+          session={session}
           onUnauthorized={onUnauthorized}
           onSaved={onSaved}
         />
