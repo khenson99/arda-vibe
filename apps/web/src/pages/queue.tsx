@@ -1,31 +1,20 @@
-import * as React from "react";
-import {
-  ArrowUpDown,
-  ChevronDown,
-  Filter,
-  Loader2,
-  Printer,
-  RefreshCw,
-  Search,
-  ShoppingCart,
-} from "lucide-react";
-import { toast } from "sonner";
-import { Badge, Button, Card, CardContent, Input, Skeleton } from "@/components/ui";
-import { StageProgress } from "@/components/stage-progress";
-import { ErrorBanner } from "@/components/error-banner";
-import { NextActionBanner } from "@/components/next-action-banner";
-import { useWorkspaceData } from "@/hooks/use-workspace-data";
-import {
-  createPrintJob,
-  createPurchaseOrderFromCards,
-  parseApiError,
-} from "@/lib/api-client";
-import { formatRelativeTime, formatStatus, queueAgingHours } from "@/lib/formatters";
-import { getPartLinkIds, normalizePartLinkId } from "@/lib/part-linking";
-import { cn } from "@/lib/utils";
-import type { AuthSession, PartRecord, QueueCard, QueueByLoop } from "@/types";
-import { LOOP_ORDER, LOOP_META } from "@/types";
-import type { LoopType } from "@/types";
+import * as React from 'react';
+import { ChevronDown, Loader2, Printer, ShoppingCart } from 'lucide-react';
+import { useOutletContext } from 'react-router-dom';
+import { toast } from 'sonner';
+import { Badge, Button, Skeleton } from '@/components/ui';
+import { StageProgress } from '@/components/stage-progress';
+import { ErrorBanner } from '@/components/error-banner';
+import { NextActionBanner } from '@/components/next-action-banner';
+import { useWorkspaceData } from '@/hooks/use-workspace-data';
+import type { AppShellOutletContext, HeaderOption } from '@/layouts/app-shell';
+import { createPrintJob, createPurchaseOrderFromCards, parseApiError } from '@/lib/api-client';
+import { formatRelativeTime, formatStatus, queueAgingHours } from '@/lib/formatters';
+import { getPartLinkIds, normalizePartLinkId } from '@/lib/part-linking';
+import { cn } from '@/lib/utils';
+import type { AuthSession, PartRecord, QueueCard, QueueByLoop } from '@/types';
+import { LOOP_ORDER, LOOP_META } from '@/types';
+import type { LoopType } from '@/types';
 
 /* ── Expanded card detail panel ─────────────────────────────────────── */
 
@@ -45,7 +34,7 @@ function ExpandedCardPanel({
     setIsPrinting(true);
     try {
       await createPrintJob(session.tokens.accessToken, { cardIds: [card.id] });
-      toast.success("Print job queued");
+      toast.success('Print job queued');
     } catch (err) {
       toast.error(parseApiError(err));
     } finally {
@@ -56,10 +45,9 @@ function ExpandedCardPanel({
   const handleCreateOrder = React.useCallback(async () => {
     setIsOrdering(true);
     try {
-      const result = await createPurchaseOrderFromCards(
-        session.tokens.accessToken,
-        { cardIds: [card.id] },
-      );
+      const result = await createPurchaseOrderFromCards(session.tokens.accessToken, {
+        cardIds: [card.id],
+      });
       toast.success(`Purchase order ${result.poNumber} created`);
     } catch (err) {
       toast.error(parseApiError(err));
@@ -86,15 +74,11 @@ function ExpandedCardPanel({
             </div>
             <div className="name-value-pair">
               <span className="name-value-pair-label">Supplier:</span>
-              <span className="name-value-pair-value truncate">
-                {part.primarySupplier || "—"}
-              </span>
+              <span className="name-value-pair-value truncate">{part.primarySupplier || '—'}</span>
             </div>
             <div className="name-value-pair">
               <span className="name-value-pair-label">Location:</span>
-              <span className="name-value-pair-value truncate">
-                {part.location || "—"}
-              </span>
+              <span className="name-value-pair-value truncate">{part.location || '—'}</span>
             </div>
             <div className="name-value-pair">
               <span className="name-value-pair-label">Method:</span>
@@ -161,8 +145,8 @@ const QueueCardItem = React.memo(function QueueCardItem({
   return (
     <article
       className={cn(
-        "card-order-item transition-shadow",
-        isExpanded && "ring-1 ring-[hsl(var(--link)/0.3)] shadow-md",
+        'card-order-item transition-shadow',
+        isExpanded && 'ring-1 ring-[hsl(var(--link)/0.3)] shadow-md',
       )}
     >
       {/* Clickable header */}
@@ -171,7 +155,7 @@ const QueueCardItem = React.memo(function QueueCardItem({
         className="flex w-full items-start justify-between gap-2 text-left"
         onClick={() => setIsExpanded((prev) => !prev)}
         aria-expanded={isExpanded}
-        aria-label={`${isExpanded ? "Collapse" : "Expand"} card #${card.cardNumber}`}
+        aria-label={`${isExpanded ? 'Collapse' : 'Expand'} card #${card.cardNumber}`}
       >
         <div className="min-w-0 space-y-1">
           <p className="text-sm font-semibold">
@@ -180,11 +164,11 @@ const QueueCardItem = React.memo(function QueueCardItem({
           <p className="truncate text-xs text-muted-foreground">{partName}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <Badge variant={highRisk ? "warning" : "secondary"}>{ageHours}h</Badge>
+          <Badge variant={highRisk ? 'warning' : 'secondary'}>{ageHours}h</Badge>
           <ChevronDown
             className={cn(
-              "h-4 w-4 text-muted-foreground transition-transform duration-200",
-              isExpanded && "rotate-180",
+              'h-4 w-4 text-muted-foreground transition-transform duration-200',
+              isExpanded && 'rotate-180',
             )}
           />
         </div>
@@ -193,15 +177,15 @@ const QueueCardItem = React.memo(function QueueCardItem({
       {/* Summary row (always visible) */}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         <span>
-          <span className="text-muted-foreground">Qty:</span>{" "}
+          <span className="text-muted-foreground">Qty:</span>{' '}
           <span className="font-semibold">{card.orderQuantity}</span>
         </span>
         <span>
-          <span className="text-muted-foreground">Min:</span>{" "}
+          <span className="text-muted-foreground">Min:</span>{' '}
           <span className="font-semibold">{card.minQuantity}</span>
         </span>
         <span>
-          <span className="text-muted-foreground">Stage:</span>{" "}
+          <span className="text-muted-foreground">Stage:</span>{' '}
           <Badge variant="accent" className="ml-0.5 text-[10px]">
             {formatStatus(card.currentStage)}
           </Badge>
@@ -212,16 +196,14 @@ const QueueCardItem = React.memo(function QueueCardItem({
       </div>
 
       {/* Expandable detail panel */}
-      {isExpanded && (
-        <ExpandedCardPanel card={card} part={part} session={session} />
-      )}
+      {isExpanded && <ExpandedCardPanel card={card} part={part} session={session} />}
     </article>
   );
 });
 
 /* ── Sort helpers ───────────────────────────────────────────────────── */
 
-type QueueSortKey = "age" | "cardNumber" | "stage" | "quantity";
+type QueueSortKey = 'age' | 'cardNumber' | 'stage' | 'quantity';
 
 const STAGE_ORDER: Record<string, number> = {
   created: 0,
@@ -235,19 +217,28 @@ const STAGE_ORDER: Record<string, number> = {
 function makeSortFn(sortKey: QueueSortKey) {
   return (a: QueueCard, b: QueueCard): number => {
     switch (sortKey) {
-      case "age":
-        return new Date(a.currentStageEnteredAt).getTime() - new Date(b.currentStageEnteredAt).getTime();
-      case "cardNumber":
+      case 'age':
+        return (
+          new Date(a.currentStageEnteredAt).getTime() - new Date(b.currentStageEnteredAt).getTime()
+        );
+      case 'cardNumber':
         return a.cardNumber - b.cardNumber;
-      case "stage":
+      case 'stage':
         return (STAGE_ORDER[a.currentStage] ?? 99) - (STAGE_ORDER[b.currentStage] ?? 99);
-      case "quantity":
+      case 'quantity':
         return (b.orderQuantity ?? 0) - (a.orderQuantity ?? 0);
       default:
         return 0;
     }
   };
 }
+
+const QUEUE_SORT_OPTIONS: HeaderOption[] = [
+  { value: 'age', label: 'Oldest first' },
+  { value: 'cardNumber', label: 'Card #' },
+  { value: 'stage', label: 'Stage' },
+  { value: 'quantity', label: 'Qty (high→low)' },
+];
 
 /* ── Queue route ────────────────────────────────────────────────────── */
 
@@ -258,12 +249,62 @@ export function QueueRoute({
   session: AuthSession;
   onUnauthorized: () => void;
 }) {
+  const { setQueueHeaderControls } = useOutletContext<AppShellOutletContext>();
   const { isLoading, isRefreshing, error, queueSummary, queueByLoop, parts, refreshQueueOnly } =
     useWorkspaceData(session.tokens.accessToken, onUnauthorized);
 
-  const [activeLoopFilter, setActiveLoopFilter] = React.useState<LoopType | "all">("all");
-  const [searchTerm, setSearchTerm] = React.useState("");
-  const [sortKey, setSortKey] = React.useState<QueueSortKey>("age");
+  const [activeLoopFilter, setActiveLoopFilter] = React.useState<LoopType | 'all'>('all');
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [sortKey, setSortKey] = React.useState<QueueSortKey>('age');
+  const queueScopeOptions = React.useMemo<HeaderOption[]>(
+    () => [
+      { value: 'all', label: 'All loops' },
+      ...LOOP_ORDER.map((loopType) => ({
+        value: loopType,
+        label: LOOP_META[loopType].label,
+      })),
+    ],
+    [],
+  );
+  const handleScopeChange = React.useCallback((nextScope: string) => {
+    setActiveLoopFilter(nextScope as LoopType | 'all');
+  }, []);
+  const handleSortChange = React.useCallback((nextSortKey: string) => {
+    setSortKey(nextSortKey as QueueSortKey);
+  }, []);
+  const handleRefresh = React.useCallback(() => {
+    void refreshQueueOnly();
+  }, [refreshQueueOnly]);
+
+  React.useEffect(() => {
+    setQueueHeaderControls({
+      query: searchTerm,
+      onQueryChange: setSearchTerm,
+      queryPlaceholder: 'Find by card number, part name, or loop',
+      scope: activeLoopFilter,
+      onScopeChange: handleScopeChange,
+      scopeOptions: queueScopeOptions,
+      sortKey,
+      onSortKeyChange: handleSortChange,
+      sortOptions: QUEUE_SORT_OPTIONS,
+      onRefresh: handleRefresh,
+      isRefreshing,
+    });
+
+    return () => {
+      setQueueHeaderControls(null);
+    };
+  }, [
+    setQueueHeaderControls,
+    searchTerm,
+    activeLoopFilter,
+    handleScopeChange,
+    queueScopeOptions,
+    sortKey,
+    handleSortChange,
+    handleRefresh,
+    isRefreshing,
+  ]);
 
   // Build part lookup by ID so expanded cards can show rich part data
   const partById = React.useMemo(() => {
@@ -286,7 +327,7 @@ export function QueueRoute({
     [partById],
   );
 
-  const loopsToRender = activeLoopFilter === "all" ? LOOP_ORDER : [activeLoopFilter];
+  const loopsToRender = activeLoopFilter === 'all' ? LOOP_ORDER : [activeLoopFilter];
 
   const filteredQueue = React.useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -296,7 +337,7 @@ export function QueueRoute({
 
       // Also search against the resolved part name
       const part = resolvePartByCardPartId(card.partId);
-      const partName = part?.name?.toLowerCase() ?? "";
+      const partName = part?.name?.toLowerCase() ?? '';
 
       return (
         card.id.toLowerCase().includes(normalizedSearch) ||
@@ -319,9 +360,6 @@ export function QueueRoute({
   if (isLoading) {
     return (
       <div className="space-y-5">
-        {/* Filter bar skeleton */}
-        <Skeleton className="h-14 w-full rounded-xl" />
-
         {/* Three loop columns skeleton */}
         <div className="grid gap-4 xl:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -342,60 +380,6 @@ export function QueueRoute({
       {error && <ErrorBanner message={error} onRetry={refreshQueueOnly} />}
 
       <NextActionBanner queueSummary={queueSummary} queueByLoop={queueByLoop} />
-
-      <Card className="border-[hsl(var(--arda-blue)/0.22)] bg-[hsl(var(--arda-blue)/0.06)]">
-        <CardContent className="flex flex-wrap items-center gap-3 p-4">
-          <div className="relative min-w-[220px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="bg-background pl-9"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Find by card number, part name, or loop"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setActiveLoopFilter("all")}
-              className={cn(activeLoopFilter === "all" && "border-primary text-primary")}
-            >
-              <Filter className="h-4 w-4" />
-              All loops
-            </Button>
-            {LOOP_ORDER.map((loopType) => (
-              <Button
-                key={loopType}
-                variant="outline"
-                size="sm"
-                onClick={() => setActiveLoopFilter(loopType)}
-                className={cn(
-                  activeLoopFilter === loopType && "border-primary text-primary",
-                )}
-              >
-                {LOOP_META[loopType].label}
-              </Button>
-            ))}
-            <Button variant="accent" size="sm" onClick={() => void refreshQueueOnly()}>
-              {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Refresh
-            </Button>
-
-            <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-              <ArrowUpDown className="h-3.5 w-3.5" />
-              <select
-                className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                value={sortKey}
-                onChange={(e) => setSortKey(e.target.value as QueueSortKey)}
-              >
-                <option value="age">Oldest first</option>
-                <option value="cardNumber">Card #</option>
-                <option value="stage">Stage</option>
-                <option value="quantity">Qty (high→low)</option>
-              </select>
-            </label>
-          </div>
-        </CardContent>
-      </Card>
 
       <div className="grid gap-4 xl:grid-cols-3">
         {loopsToRender.map((loopType) => {
