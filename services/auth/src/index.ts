@@ -8,6 +8,7 @@ import { db } from '@arda/db';
 import { sql } from 'drizzle-orm';
 import { authRouter, handleGoogleLinkCallback } from './routes/auth.routes.js';
 import { tenantRouter } from './routes/tenant.routes.js';
+import { usersRouter } from './routes/users.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 const app = express();
@@ -49,6 +50,8 @@ app.get('/auth/google/link/callback', handleGoogleLinkCallback);
 app.use('/auth', authRouter);
 app.use('/api/auth', authRouter);
 app.use('/tenants', tenantRouter);
+app.use('/users', usersRouter);
+app.use('/api/users', usersRouter);
 
 // ─── Error Handler ────────────────────────────────────────────────────
 app.use(errorHandler);
