@@ -17,6 +17,7 @@ import { LoopsRoute } from "@/pages/loops";
 import { OrderHistoryRoute } from "@/pages/order-history";
 import { ReceivingRoute } from "@/pages/receiving";
 import { PODetailRoute } from "@/pages/orders/po-detail";
+import { POFormPage } from "@/pages/orders/po-form-page";
 import { WODetailRoute } from "@/pages/orders/wo-detail";
 import { TODetailRoute } from "@/pages/orders/to-detail";
 import { ProfilePage } from "@/pages/profile";
@@ -136,6 +137,8 @@ function App() {
           <Route path="parts" element={<ErrorBoundary><PartsRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="queue" element={<ErrorBoundary><QueueRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="orders" element={<ErrorBoundary><OrderHistoryRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
+          <Route path="orders/po/new" element={<ErrorBoundary><POFormPage session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
+          <Route path="orders/po/:id/edit" element={<ErrorBoundary><POFormPage session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="orders/po/:id" element={<ErrorBoundary><PODetailRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="orders/wo/:id" element={<ErrorBoundary><WODetailRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="orders/to/:id" element={<ErrorBoundary><TODetailRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />

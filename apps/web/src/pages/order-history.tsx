@@ -5,8 +5,9 @@ import {
   OrderTable,
   OrderDetailDrawer,
 } from "@/components/order-history";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Plus } from "lucide-react";
 import { Button } from "@/components/ui";
+import { useNavigate } from "react-router-dom";
 
 interface Props {
   session: AuthSession;
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function OrderHistoryRoute({ session, onUnauthorized }: Props) {
+  const navigate = useNavigate();
   const {
     activeTab,
     changeTab,
@@ -44,11 +46,23 @@ export function OrderHistoryRoute({ session, onUnauthorized }: Props) {
   return (
     <div className="space-y-4 p-4">
       {/* Page header */}
-      <div>
-        <h1 className="text-lg font-semibold text-foreground">Order History</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Track purchase orders, work orders, and transfer orders across your supply chain.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-foreground">Order History</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Track purchase orders, work orders, and transfer orders across your supply chain.
+          </p>
+        </div>
+        {activeTab === "purchase" && (
+          <Button
+            size="sm"
+            onClick={() => navigate("/orders/po/new")}
+            className="text-xs"
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Create PO
+          </Button>
+        )}
       </div>
 
       {/* Filters */}

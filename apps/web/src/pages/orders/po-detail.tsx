@@ -12,6 +12,7 @@ import {
   POTimelineSkeleton,
   POReceiving,
 } from "@/components/orders/po-timeline";
+import { POApprovalModal } from "@/components/orders/po-approval-modal";
 import {
   Button,
   Card,
@@ -23,7 +24,7 @@ import {
 } from "@/components/ui";
 import { ArrowLeft, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { parseApiError } from "@/lib/api-client";
+import { parseApiError, updatePurchaseOrderStatus } from "@/lib/api-client";
 
 /* ── Props ─────────────────────────────────────────────────── */
 
@@ -42,6 +43,7 @@ export function PODetailRoute({ session, onUnauthorized }: Props) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<DetailTab>("lines");
+  const [approvalModalOpen, setApprovalModalOpen] = React.useState(false);
 
   const {
     po,
@@ -62,8 +64,19 @@ export function PODetailRoute({ session, onUnauthorized }: Props) {
     navigate("/orders");
   }, [navigate]);
 
+  const handleEdit = React.useCallback(() => {
+    if (!id) return;
+    navigate(`/orders/po/${id}/edit`);
+  }, [id, navigate]);
+
   const handleStatusChange = React.useCallback(
     async (status: POStatus) => {
+      // If transitioning to approved, show approval modal
+      if (status === "approved" && po?.status === "pending_approval") {
+        setApprovalModalOpen(true);
+        return;
+      }
+
       try {
         const cancelReason =
           status === "cancelled" ? "Cancelled from PO detail page" : undefined;
@@ -80,7 +93,45 @@ export function PODetailRoute({ session, onUnauthorized }: Props) {
         toast.error(parseApiError(err));
       }
     },
-    [updateStatus],
+    [updateStatus, po?.status],
+  );
+
+  const handleApprove = React.useCallback(
+    async (poId: string, notes?: string) => {
+      try {
+        await updatePurchaseOrderStatus(session.tokens.accessToken, poId, {
+          status: "approved",
+          notes,
+        });
+        toast.success("Purchase order approved");
+        refresh();
+      } catch (err) {
+        if (parseApiError(err).includes("unauthorized")) {
+          onUnauthorized();
+        }
+        throw err;
+      }
+    },
+    [session.tokens.accessToken, refresh, onUnauthorized],
+  );
+
+  const handleReject = React.useCallback(
+    async (poId: string, reason: string) => {
+      try {
+        await updatePurchaseOrderStatus(session.tokens.accessToken, poId, {
+          status: "draft",
+          cancelReason: reason,
+        });
+        toast.success("Purchase order rejected");
+        refresh();
+      } catch (err) {
+        if (parseApiError(err).includes("unauthorized")) {
+          onUnauthorized();
+        }
+        throw err;
+      }
+    },
+    [session.tokens.accessToken, refresh, onUnauthorized],
   );
 
   const handlePrint = React.useCallback(() => {
@@ -148,6 +199,7 @@ export function PODetailRoute({ session, onUnauthorized }: Props) {
       {/* Header */}
       <POHeader
         po={po}
+        onEdit={handleEdit}
         onPrint={handlePrint}
         onStatusChange={handleStatusChange}
         statusUpdating={statusUpdating}
@@ -194,6 +246,16 @@ export function PODetailRoute({ session, onUnauthorized }: Props) {
           </TabsContent>
         )}
       </Tabs>
+
+      {/* Approval Modal */}
+      <POApprovalModal
+        open={approvalModalOpen}
+        onOpenChange={setApprovalModalOpen}
+        po={po}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        loading={statusUpdating}
+      />
     </div>
   );
 }
