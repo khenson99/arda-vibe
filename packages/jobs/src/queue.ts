@@ -5,16 +5,25 @@
  * sensible retry defaults, and structured logging.
  */
 
-import { Queue, Worker, type Processor, type ConnectionOptions } from 'bullmq';
+import { Queue, Worker, type Processor } from 'bullmq';
 import type { CreateQueueOptions, CreateWorkerOptions, JobEnvelope } from './types.js';
 
 /** Default Redis URL when not provided */
 const DEFAULT_REDIS_URL = 'redis://localhost:6379';
 
+/** Single-node Redis connection options returned by parseRedisUrl. */
+export interface RedisConnectionOptions {
+  host: string;
+  port: number;
+  password: string | undefined;
+  username: string | undefined;
+  db: number;
+}
+
 /**
- * Parse a Redis URL into BullMQ ConnectionOptions.
+ * Parse a Redis URL into single-node Redis connection options.
  */
-export function parseRedisUrl(url: string): ConnectionOptions {
+export function parseRedisUrl(url: string): RedisConnectionOptions {
   const parsed = new URL(url);
   return {
     host: parsed.hostname,

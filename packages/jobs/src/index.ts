@@ -7,6 +7,7 @@
 
 // Queue and worker factories
 export { createQueue, createWorker, buildJobEnvelope, parseRedisUrl } from './queue.js';
+export type { RedisConnectionOptions } from './queue.js';
 
 // Dead letter queue
 export { createDLQ, moveToDeadLetterQueue, listDLQEntries, replayFromDLQ } from './dlq.js';
