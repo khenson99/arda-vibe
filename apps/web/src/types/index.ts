@@ -373,12 +373,12 @@ export const CARD_STAGE_META: Record<
   CardStage,
   { label: string; color: string; bgClass: string; textClass: string }
 > = {
-  created: { label: "Created", color: "#6b7280", bgClass: "bg-gray-100", textClass: "text-gray-700" },
-  triggered: { label: "Triggered", color: "#f59e0b", bgClass: "bg-amber-50", textClass: "text-amber-700" },
-  ordered: { label: "Ordered", color: "#3b82f6", bgClass: "bg-blue-50", textClass: "text-blue-700" },
-  in_transit: { label: "In Transit", color: "#8b5cf6", bgClass: "bg-violet-50", textClass: "text-violet-700" },
-  received: { label: "Received", color: "#10b981", bgClass: "bg-emerald-50", textClass: "text-emerald-700" },
-  restocked: { label: "Restocked", color: "#059669", bgClass: "bg-green-50", textClass: "text-green-700" },
+  created: { label: "Created", color: "hsl(var(--muted-foreground))", bgClass: "bg-muted", textClass: "text-muted-foreground" },
+  triggered: { label: "Triggered", color: "hsl(var(--arda-warning))", bgClass: "bg-[hsl(var(--arda-warning-light))]", textClass: "text-[hsl(var(--arda-warning))]" },
+  ordered: { label: "Ordered", color: "hsl(var(--accent))", bgClass: "bg-accent/10", textClass: "text-[hsl(var(--accent))]" },
+  in_transit: { label: "In Transit", color: "hsl(var(--secondary-foreground))", bgClass: "bg-secondary", textClass: "text-secondary-foreground" },
+  received: { label: "Received", color: "hsl(var(--arda-success))", bgClass: "bg-[hsl(var(--arda-success-light))]", textClass: "text-[hsl(var(--arda-success))]" },
+  restocked: { label: "Restocked", color: "hsl(var(--arda-success))", bgClass: "bg-[hsl(var(--arda-success-light))]", textClass: "text-[hsl(var(--arda-success))]" },
 };
 
 /* ── Kanban loop & card models ───────────────────────────────── */
@@ -555,20 +555,31 @@ export interface WorkOrder {
 
 /* ── Transfer Order ──────────────────────────────────────────── */
 
-export type TOStatus = "draft" | "approved" | "in_transit" | "received" | "cancelled";
+export type TOStatus =
+  | "draft"
+  | "requested"
+  | "approved"
+  | "picking"
+  | "shipped"
+  | "in_transit"
+  | "received"
+  | "closed"
+  | "cancelled";
 
 export interface TransferOrder {
   id: string;
   tenantId: string;
   toNumber: string;
   status: TOStatus;
-  fromFacilityId: string;
-  toFacilityId: string;
-  fromFacilityName?: string;
-  toFacilityName?: string;
+  sourceFacilityId: string;
+  destinationFacilityId: string;
+  sourceFacilityName?: string;
+  destinationFacilityName?: string;
   notes: string | null;
-  shippedAt: string | null;
-  receivedAt: string | null;
+  requestedDate: string | null;
+  shippedDate: string | null;
+  receivedDate: string | null;
+  createdBy: string | null;
   createdAt: string;
   updatedAt: string;
   lines?: TransferOrderLine[];
@@ -579,7 +590,8 @@ export interface TransferOrderLine {
   transferOrderId: string;
   partId: string;
   partName?: string;
-  quantityOrdered: number;
+  quantityRequested: number;
+  quantityShipped: number;
   quantityReceived: number;
   notes: string | null;
 }
@@ -589,7 +601,8 @@ export interface TransferOrderLine {
 export interface SourceRecommendation {
   facilityId: string;
   facilityName: string;
-  qtyAvailable: number;
+  facilityCode: string;
+  availableQty: number;
   avgLeadTimeDays: number | null;
   distanceKm: number | null;
   score: number;

@@ -340,6 +340,21 @@ export interface InventoryUpdatedEvent {
   timestamp: string;
 }
 
+// ─── Scan Conflict Events ─────────────────────────────────────────
+export interface ScanConflictDetectedEvent {
+  type: 'scan.conflict_detected';
+  tenantId: string;
+  payload: {
+    cardId: string;
+    scannedByUserId?: string;
+    currentStage: string;
+    resolution: string;
+    idempotencyKey?: string;
+    scannedAt?: string;
+    timestamp: string;
+  };
+}
+
 // Re-export security events
 export {
   type SecurityEvent,
@@ -387,7 +402,8 @@ export type ArdaEvent =
   | AutomationShoppingListItemAddedEvent
   | AutomationCardStageChangedEvent
   | AutomationEscalatedEvent
-  | InventoryUpdatedEvent;
+  | InventoryUpdatedEvent
+  | ScanConflictDetectedEvent;
 
 // ─── Event Channel Names ────────────────────────────────────────────
 const CHANNEL_PREFIX = 'arda:events';

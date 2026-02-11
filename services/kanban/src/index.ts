@@ -14,6 +14,7 @@ import { velocityRouter } from './routes/velocity.routes.js';
 import { printJobsRouter } from './routes/print-jobs.routes.js';
 import { lifecycleRouter } from './routes/lifecycle.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { initScanDedupeManager, getScanDedupeManager } from './services/card-lifecycle.service.js';
 
 const app = express();
 
@@ -58,11 +59,28 @@ app.use(errorHandler);
 const PORT = config.PORT || config.KANBAN_SERVICE_PORT;
 const server = app.listen(PORT, () => {
   log.info({ port: PORT }, 'Kanban service started');
+
+  // Initialize scan deduplication manager (non-blocking)
+  if (config.REDIS_URL) {
+    try {
+      initScanDedupeManager(config.REDIS_URL);
+    } catch (err) {
+      log.warn({ err }, 'Failed to initialize ScanDedupeManager — dedupe disabled');
+    }
+  }
 });
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────
-function shutdown(signal: string) {
+async function shutdown(signal: string) {
   log.info({ signal }, 'Shutting down gracefully');
+
+  // Shutdown dedupe manager (closes Redis connection)
+  try {
+    await getScanDedupeManager()?.shutdown();
+  } catch (err) {
+    log.warn({ err }, 'Error shutting down ScanDedupeManager');
+  }
+
   server.close(() => {
     log.info('HTTP server closed');
     process.exit(0);

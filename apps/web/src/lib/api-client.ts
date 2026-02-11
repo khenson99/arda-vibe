@@ -1237,44 +1237,6 @@ export async function fetchCard(token: string, cardId: string): Promise<KanbanCa
   return apiRequest(`/api/kanban/cards/${encodeURIComponent(cardId)}`, { token });
 }
 
-export interface KanbanCardPrintDetail {
-  id: string;
-  cardNumber: number;
-  currentStage: CardStage;
-  loopId?: string;
-  partId?: string | null;
-  partName?: string | null;
-  loopType?: LoopType | null;
-  facilityName?: string | null;
-  minQuantity?: number | null;
-  orderQuantity?: number | null;
-  qrCode?: string | null;
-  scanUrl?: string | null;
-  loop?: {
-    loopType?: LoopType | null;
-    numberOfCards?: number | null;
-    partNumber?: string | null;
-    partName?: string | null;
-    partDescription?: string | null;
-    facilityName?: string | null;
-    storageLocationName?: string | null;
-    primarySupplierName?: string | null;
-    sourceFacilityName?: string | null;
-    orderQuantity?: number | null;
-    minQuantity?: number | null;
-    statedLeadTimeDays?: number | null;
-    safetyStockDays?: number | null;
-    notes?: string | null;
-  } | null;
-}
-
-export async function fetchCardPrintDetail(
-  token: string,
-  cardId: string,
-): Promise<KanbanCardPrintDetail> {
-  return apiRequest(`/api/kanban/cards/${encodeURIComponent(cardId)}`, { token });
-}
-
 export async function transitionCard(
   token: string,
   cardId: string,
@@ -1330,10 +1292,65 @@ export async function fetchPurchaseOrder(
   return apiRequest(`/api/orders/purchase-orders/${encodeURIComponent(poId)}`, { token });
 }
 
+export async function createPurchaseOrder(
+  token: string,
+  input: {
+    supplierId: string;
+    facilityId: string;
+    orderDate?: string;
+    expectedDeliveryDate: string;
+    currency?: string;
+    notes?: string | null;
+    internalNotes?: string | null;
+    paymentTerms?: string | null;
+    shippingTerms?: string | null;
+    lines: Array<{
+      partId: string;
+      kanbanCardId?: string | null;
+      lineNumber: number;
+      quantityOrdered: number;
+      unitCost: number;
+      notes?: string | null;
+    }>;
+  },
+): Promise<PurchaseOrder> {
+  const response = await apiRequest<{ data: PurchaseOrder }>(
+    "/api/orders/purchase-orders",
+    {
+      method: "POST",
+      token,
+      body: input,
+    }
+  );
+  return response.data;
+}
+
+export async function updatePurchaseOrder(
+  token: string,
+  poId: string,
+  input: {
+    expectedDeliveryDate?: string;
+    paymentTerms?: string | null;
+    shippingTerms?: string | null;
+    notes?: string | null;
+    internalNotes?: string | null;
+  },
+): Promise<PurchaseOrder> {
+  const response = await apiRequest<{ data: PurchaseOrder }>(
+    `/api/orders/purchase-orders/${encodeURIComponent(poId)}`,
+    {
+      method: "PATCH",
+      token,
+      body: input,
+    }
+  );
+  return response.data;
+}
+
 export async function updatePurchaseOrderStatus(
   token: string,
   poId: string,
-  input: { status: POStatus; notes?: string },
+  input: { status: POStatus; notes?: string; cancelReason?: string },
 ): Promise<PurchaseOrder> {
   return apiRequest(`/api/orders/purchase-orders/${encodeURIComponent(poId)}/status`, {
     method: "PATCH",
@@ -1457,12 +1474,7 @@ export async function fetchTransferOrderTransitions(
 
 export async function fetchSourceRecommendations(
   token: string,
-  params: {
-    destinationFacilityId: string;
-    partId: string;
-    minQty?: number;
-    limit?: number;
-  },
+  params: { destinationFacilityId: string; partId: string; minQty?: number; limit?: number },
 ): Promise<{ data: SourceRecommendation[] }> {
   const qs = new URLSearchParams();
   qs.set("destinationFacilityId", params.destinationFacilityId);
@@ -1471,8 +1483,6 @@ export async function fetchSourceRecommendations(
   if (params.limit != null) qs.set("limit", String(params.limit));
   return apiRequest(`/api/orders/transfer-orders/recommendations/source?${qs.toString()}`, { token });
 }
-
-/* ── Inventory Ledger ────────────────────────────────────────── */
 
 export async function fetchInventoryByFacility(
   token: string,
@@ -1483,18 +1493,7 @@ export async function fetchInventoryByFacility(
   if (params?.page) qs.set("page", String(params.page));
   if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return apiRequest(`/api/orders/inventory/facilities/${encodeURIComponent(facilityId)}/inventory${suffix}`, { token });
-}
-
-export async function fetchInventoryEntry(
-  token: string,
-  facilityId: string,
-  partId: string,
-): Promise<{ data: InventoryLedgerEntry }> {
-  return apiRequest(
-    `/api/orders/inventory/facilities/${encodeURIComponent(facilityId)}/inventory/${encodeURIComponent(partId)}`,
-    { token },
-  );
+  return apiRequest(`/api/inventory/facility/${encodeURIComponent(facilityId)}${suffix}`, { token });
 }
 
 /* ── Receiving ────────────────────────────────────────────────── */

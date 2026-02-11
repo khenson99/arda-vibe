@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { triggerCardByScan } from '../services/card-lifecycle.service.js';
+import { z } from 'zod';
+import { triggerCardByScan, replayScans } from '../services/card-lifecycle.service.js';
 import { config } from '@arda/config';
 import { authMiddleware, type AuthRequest } from '@arda/auth-utils';
 
@@ -62,6 +63,53 @@ scanRouter.post('/:cardId/trigger', authMiddleware, async (req: AuthRequest, res
       loopType: result.loopType,
       partId: result.partId,
       message: result.message,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Zod Schemas for Replay Validation ───────────────────────────────
+const replayItemSchema = z.object({
+  cardId: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  scannedAt: z.string().min(1),
+  location: z.object({
+    lat: z.number().optional(),
+    lng: z.number().optional(),
+  }).optional(),
+});
+
+const replayBodySchema = z.object({
+  scans: z.array(replayItemSchema).min(1).max(50),
+});
+
+// ─── POST /scan/replay — Batch replay of offline-queued scans ────────
+// The PWA queues scans while offline and replays them when back online.
+// This endpoint processes up to 50 scans sequentially, isolating failures.
+scanRouter.post('/replay', authMiddleware, async (req: AuthRequest, res, next) => {
+  try {
+    const parsed = replayBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const { scans } = parsed.data;
+    const results = await replayScans(scans, req.user!.tenantId, req.user!.sub);
+
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.length - succeeded;
+
+    res.json({
+      total: results.length,
+      succeeded,
+      failed,
+      results,
     });
   } catch (err) {
     next(err);

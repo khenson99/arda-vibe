@@ -78,14 +78,14 @@ function toToUnified(to: TransferOrder): UnifiedOrder {
     type: "transfer",
     status: to.status,
     sourceName:
-      to.fromFacilityName && to.toFacilityName
-        ? `${to.fromFacilityName} → ${to.toFacilityName}`
-        : to.fromFacilityName ?? to.toFacilityName ?? null,
+      to.sourceFacilityName && to.destinationFacilityName
+        ? `${to.sourceFacilityName} → ${to.destinationFacilityName}`
+        : to.sourceFacilityName ?? to.destinationFacilityName ?? null,
     totalAmount: null,
     currency: "USD",
     createdAt: to.createdAt,
     updatedAt: to.updatedAt,
-    expectedDate: to.shippedAt,
+    expectedDate: to.shippedDate,
   };
 }
 

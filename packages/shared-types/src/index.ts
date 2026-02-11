@@ -394,3 +394,44 @@ export interface SourceRecommendation {
   distanceKm: number | null;
   score: number;
 }
+
+// ─── Scan Dedupe / Conflict / Replay Types ─────────────────────────
+export interface ScanDedupeResult {
+  allowed: boolean;
+  existingStatus?: 'pending' | 'completed' | 'failed' | 'unknown';
+  cachedResult?: unknown;
+  wasReplay: boolean;
+}
+
+export type ScanConflictResolution =
+  | 'already_triggered'
+  | 'stage_advanced'
+  | 'card_inactive'
+  | 'ok';
+
+export interface ScanReplayItem {
+  cardId: string;
+  idempotencyKey: string;
+  scannedAt: string;
+  location?: { lat?: number; lng?: number };
+}
+
+export interface ScanReplayResult {
+  cardId: string;
+  idempotencyKey: string;
+  success: boolean;
+  error?: string;
+  errorCode?: string;
+  card?: unknown;
+  loopType?: string;
+  partId?: string;
+  message?: string;
+  wasReplay: boolean;
+}
+
+export interface BatchReplayResponse {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: ScanReplayResult[];
+}

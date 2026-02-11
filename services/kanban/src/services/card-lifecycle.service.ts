@@ -1,9 +1,17 @@
 import { eq, and, sql, desc, asc } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
-import { getEventBus } from '@arda/events';
-import { config } from '@arda/config';
+import { getEventBus, type ScanConflictDetectedEvent } from '@arda/events';
+import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
-import type { CardStage, UserRole, LoopType } from '@arda/shared-types';
+import { ScanDedupeManager, ScanDuplicateError } from './scan-dedupe-manager.js';
+import type {
+  CardStage,
+  UserRole,
+  LoopType,
+  ScanConflictResolution,
+  ScanReplayItem,
+  ScanReplayResult,
+} from '@arda/shared-types';
 
 const {
   kanbanCards,
@@ -11,6 +19,23 @@ const {
   cardStageTransitions,
   kanbanParameterHistory,
 } = schema;
+
+const log = createLogger('card-lifecycle');
+
+// ─── Scan Dedupe Singleton ──────────────────────────────────────────
+let scanDedupeManager: ScanDedupeManager | null = null;
+
+export function initScanDedupeManager(redisUrl: string): ScanDedupeManager {
+  if (!scanDedupeManager) {
+    scanDedupeManager = new ScanDedupeManager(redisUrl);
+    log.info('ScanDedupeManager initialized');
+  }
+  return scanDedupeManager;
+}
+
+export function getScanDedupeManager(): ScanDedupeManager | null {
+  return scanDedupeManager;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // LIFECYCLE ORCHESTRATOR — Enhanced Transition Engine
@@ -427,6 +452,11 @@ export async function transitionCard(input: {
 // This is the primary entry point when a user scans a QR code.
 // It transitions the card from 'created' to 'triggered' and adds the
 // part to the appropriate queue.
+//
+// Enhanced with:
+//   - Redis-backed idempotency (ScanDedupeManager) for fast duplicate rejection
+//   - Conflict detection with granular resolution codes
+//   - Event emission for conflict visibility
 export async function triggerCardByScan(input: {
   cardId: string;
   scannedByUserId?: string;
@@ -442,6 +472,25 @@ export async function triggerCardByScan(input: {
 }> {
   const { cardId, scannedByUserId, tenantId, location, idempotencyKey, scannedAt } = input;
 
+  // ── Dedupe Fast-Path ──
+  // If the caller provides an idempotency key and the dedupe manager is active,
+  // check Redis before hitting the database. This rejects duplicate scans in ~1ms.
+  if (idempotencyKey && scanDedupeManager) {
+    const dedupeResult = await scanDedupeManager.checkAndClaim(
+      cardId,
+      idempotencyKey,
+      tenantId ?? 'unknown',
+    );
+
+    if (!dedupeResult.allowed) {
+      throw new ScanDuplicateError(
+        cardId,
+        idempotencyKey,
+        dedupeResult.existingStatus ?? 'unknown',
+      );
+    }
+  }
+
   // Fetch the card (no tenant context — this is a public scan)
   const card = await db.query.kanbanCards.findFirst({
     where: eq(kanbanCards.id, cardId),
@@ -451,24 +500,56 @@ export async function triggerCardByScan(input: {
   });
 
   if (!card) {
+    if (idempotencyKey && scanDedupeManager) {
+      await scanDedupeManager.markFailed(cardId, idempotencyKey, 'CARD_NOT_FOUND');
+    }
     throw new AppError(404, 'Card not found. This QR code may be invalid.', 'CARD_NOT_FOUND');
   }
 
   if (tenantId && card.tenantId !== tenantId) {
+    if (idempotencyKey && scanDedupeManager) {
+      await scanDedupeManager.markFailed(cardId, idempotencyKey, 'TENANT_MISMATCH');
+    }
     throw new AppError(403, 'Card does not belong to your tenant.', 'TENANT_MISMATCH');
   }
 
-  if (!card.isActive) {
-    throw new AppError(400, 'This card has been deactivated.', 'CARD_INACTIVE');
-  }
+  // ── Conflict Detection ──
+  // Replace simple stage check with granular conflict resolution
+  const conflict = detectScanConflict(card.currentStage as CardStage, card.isActive);
 
-  // Fast path for normal scans: card must still be in created stage.
-  // Idempotent replays with the same key are handled through transitionCard below.
-  if (card.currentStage !== 'created' && !idempotencyKey) {
+  if (conflict !== 'ok') {
+    if (idempotencyKey && scanDedupeManager) {
+      await scanDedupeManager.markFailed(cardId, idempotencyKey, `SCAN_CONFLICT:${conflict}`);
+    }
+
+    // Emit conflict event for observability
+    try {
+      const eventBus = getEventBus(config.REDIS_URL);
+      await eventBus.publish({
+        type: 'scan.conflict_detected',
+        tenantId: card.tenantId,
+        payload: {
+          cardId,
+          scannedByUserId,
+          currentStage: card.currentStage,
+          resolution: conflict,
+          idempotencyKey,
+          scannedAt: scannedAt ?? new Date().toISOString(),
+          timestamp: new Date().toISOString(),
+        },
+      } as ScanConflictDetectedEvent);
+    } catch {
+      log.warn({ cardId, conflict }, 'Failed to publish scan conflict event');
+    }
+
+    if (conflict === 'card_inactive') {
+      throw new AppError(400, 'This card has been deactivated.', 'CARD_INACTIVE');
+    }
+
     throw new AppError(
-      400,
-      `This card is already in the "${card.currentStage}" stage. It can only be scanned when in the "created" stage.`,
-      'CARD_ALREADY_TRIGGERED'
+      409,
+      `Scan conflict: card is in "${card.currentStage}" stage (resolution: ${conflict})`,
+      'SCAN_CONFLICT',
     );
   }
 
@@ -490,7 +571,22 @@ export async function triggerCardByScan(input: {
         scanTimestamp: scannedAt ?? new Date().toISOString(),
       },
     });
+
+    // Mark dedupe as completed with the transition result
+    if (idempotencyKey && scanDedupeManager) {
+      await scanDedupeManager.markCompleted(cardId, idempotencyKey, {
+        cardId: result.card.id,
+        loopType: card.loop.loopType,
+        partId: card.loop.partId,
+      });
+    }
   } catch (err) {
+    // Mark dedupe as failed so retries are possible
+    if (idempotencyKey && scanDedupeManager) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      await scanDedupeManager.markFailed(cardId, idempotencyKey, errMsg);
+    }
+
     if (
       err instanceof AppError
       && err.code === 'INVALID_TRANSITION'
@@ -520,6 +616,78 @@ export async function triggerCardByScan(input: {
     partId: card.loop.partId,
     message: `Card triggered. Part added to ${queueType}.`,
   };
+}
+
+// ─── Scan Conflict Detection (pure function) ─────────────────────────
+// Determines whether a scan should proceed based on the card's current
+// stage and active status. Returns a resolution code.
+export function detectScanConflict(
+  currentStage: CardStage,
+  isActive: boolean,
+): ScanConflictResolution {
+  if (!isActive) return 'card_inactive';
+  if (currentStage === 'created') return 'ok';
+  if (currentStage === 'triggered') return 'already_triggered';
+  return 'stage_advanced';
+}
+
+// ─── Batch Replay for Offline Scans ──────────────────────────────────
+// Processes an array of queued scans sequentially. Each scan is isolated:
+// one failure does not block the rest.
+export async function replayScans(
+  items: ScanReplayItem[],
+  tenantId: string,
+  userId?: string,
+): Promise<ScanReplayResult[]> {
+  const results: ScanReplayResult[] = [];
+
+  for (const item of items) {
+    try {
+      const triggerResult = await triggerCardByScan({
+        cardId: item.cardId,
+        scannedByUserId: userId,
+        tenantId,
+        location: item.location,
+        idempotencyKey: item.idempotencyKey,
+        scannedAt: item.scannedAt,
+      });
+
+      results.push({
+        cardId: item.cardId,
+        idempotencyKey: item.idempotencyKey,
+        success: true,
+        card: triggerResult.card,
+        loopType: triggerResult.loopType,
+        partId: triggerResult.partId,
+        message: triggerResult.message,
+        wasReplay: true,
+      });
+    } catch (err) {
+      let errorCode = 'UNKNOWN_ERROR';
+      let errorMessage = 'An unexpected error occurred';
+
+      if (err instanceof ScanDuplicateError) {
+        errorCode = 'SCAN_DUPLICATE';
+        errorMessage = err.message;
+      } else if (err instanceof AppError) {
+        errorCode = err.code ?? 'APP_ERROR';
+        errorMessage = err.message;
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+
+      results.push({
+        cardId: item.cardId,
+        idempotencyKey: item.idempotencyKey,
+        success: false,
+        error: errorMessage,
+        errorCode,
+        wasReplay: true,
+      });
+    }
+  }
+
+  return results;
 }
 
 // ─── Get Card History (All Transitions for a Card) ────────────────────

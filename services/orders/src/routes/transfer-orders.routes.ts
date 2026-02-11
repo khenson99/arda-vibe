@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
+import type { Database } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
 import { getEventBus } from '@arda/events';
 import { config } from '@arda/config';
@@ -41,7 +42,7 @@ function getRequestAuditContext(req: AuthRequest): RequestAuditContext {
 }
 
 async function writeTransferOrderStatusAudit(
-  tx: any,
+  tx: Database,
   input: {
     tenantId: string;
     transferOrderId: string;
@@ -71,7 +72,7 @@ async function writeTransferOrderStatusAudit(
 }
 
 async function writeTransferOrderCreateAudit(
-  tx: any,
+  tx: Database,
   input: {
     tenantId: string;
     transferOrderId: string;
@@ -103,7 +104,7 @@ async function writeTransferOrderCreateAudit(
 }
 
 async function writeTransferOrderLinesShippedAudit(
-  tx: any,
+  tx: Database,
   input: {
     tenantId: string;
     transferOrderId: string;
@@ -148,7 +149,7 @@ async function writeTransferOrderLinesShippedAudit(
 }
 
 async function writeTransferOrderLinesReceivedAudit(
-  tx: any,
+  tx: Database,
   input: {
     tenantId: string;
     transferOrderId: string;
@@ -278,7 +279,7 @@ transferOrdersRouter.get('/', async (req: AuthRequest, res, next) => {
         page,
         limit,
         total: count,
-        pages: Math.ceil(count / limit),
+        totalPages: Math.ceil(count / limit),
       },
     });
   } catch (error) {
@@ -355,10 +356,7 @@ transferOrdersRouter.get('/:id', async (req: AuthRequest, res, next) => {
         )
       );
 
-    res.json({
-      ...order,
-      lines,
-    });
+    res.json({ data: { ...order, lines } });
   } catch (error) {
     next(error);
   }
@@ -480,10 +478,7 @@ transferOrdersRouter.get('/:id/transitions', async (req: AuthRequest, res, next)
       userRole
     );
 
-    res.json({
-      currentStatus: order.status,
-      validTransitions: validNextStatuses,
-    });
+    res.json({ data: { currentStatus: order.status, validTransitions: validNextStatuses } });
   } catch (error) {
     next(error);
   }
@@ -502,96 +497,98 @@ transferOrdersRouter.patch('/:id/status', async (req: AuthRequest, res, next) =>
       throw new AppError(401, 'Unauthorized');
     }
 
-    const [order] = await db
-      .select()
-      .from(transferOrders)
-      .where(and(eq(transferOrders.id, id), eq(transferOrders.tenantId, tenantId)));
+    const { updatedOrder, lines } = await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(transferOrders)
+        .where(and(eq(transferOrders.id, id), eq(transferOrders.tenantId, tenantId)))
+        .for('update');
 
-    if (!order) {
-      throw new AppError(404, 'Transfer order not found');
-    }
+      if (!order) {
+        throw new AppError(404, 'Transfer order not found');
+      }
 
-    // Validate transition using the lifecycle service (role + reason checks)
-    const transition = validateTransferTransition({
-      currentStatus: order.status as TransferStatus,
-      targetStatus: newStatus as TransferStatus,
-      userRole,
-      reason,
-    });
+      // Validate transition using the lifecycle service (role + reason checks)
+      const transition = validateTransferTransition({
+        currentStatus: order.status as TransferStatus,
+        targetStatus: newStatus as TransferStatus,
+        userRole,
+        reason,
+      });
 
-    if (!transition.valid) {
-      throw new AppError(400, transition.error!);
-    }
+      if (!transition.valid) {
+        throw new AppError(400, transition.error!);
+      }
 
-    const updateData: Record<string, any> = {
-      status: newStatus,
-      updatedAt: new Date(),
-      // Spread auto-populated fields (e.g. requestedDate, shippedDate, receivedDate)
-      ...transition.autoFields,
-    };
+      const updateData: Record<string, any> = {
+        status: newStatus,
+        updatedAt: new Date(),
+        // Spread auto-populated fields (e.g. requestedDate, shippedDate, receivedDate)
+        ...transition.autoFields,
+      };
 
-    // If cancelling, store the reason in notes
-    if (newStatus === 'cancelled' && reason) {
-      updateData.notes = order.notes
-        ? `${order.notes}\n[Cancelled] ${reason}`
-        : `[Cancelled] ${reason}`;
-    }
+      // If cancelling, store the reason in notes
+      if (newStatus === 'cancelled' && reason) {
+        updateData.notes = order.notes
+          ? `${order.notes}\n[Cancelled] ${reason}`
+          : `[Cancelled] ${reason}`;
+      }
 
-    const [updatedOrder] = await db
-      .update(transferOrders)
-      .set(updateData)
-      .where(
-        and(
-          eq(transferOrders.id, id),
-          eq(transferOrders.tenantId, tenantId),
+      const [updated] = await tx
+        .update(transferOrders)
+        .set(updateData)
+        .where(
+          and(
+            eq(transferOrders.id, id),
+            eq(transferOrders.tenantId, tenantId),
+          )
         )
-      )
-      .returning();
+        .returning();
 
-    await writeTransferOrderStatusAudit(db, {
-      tenantId,
-      transferOrderId: id,
-      transferOrderNumber: order.toNumber,
-      fromStatus: order.status,
-      toStatus: newStatus,
-      context: auditContext,
-      metadata: {
-        source: 'transfer_orders.status',
-        ...(reason && { reason }),
-      },
-    });
-
-    // Publish order.status_changed event
-    try {
-      const eventBus = getEventBus(config.REDIS_URL);
-      await eventBus.publish({
-        type: 'order.status_changed',
+      await writeTransferOrderStatusAudit(tx, {
         tenantId,
-        orderType: 'transfer_order',
-        orderId: id,
-        orderNumber: order.toNumber,
+        transferOrderId: id,
+        transferOrderNumber: order.toNumber,
         fromStatus: order.status,
         toStatus: newStatus,
-        timestamp: new Date().toISOString(),
+        context: auditContext,
+        metadata: {
+          source: 'transfer_orders.status',
+          ...(reason && { reason }),
+        },
       });
-    } catch {
-      console.error(`[transfer-orders] Failed to publish order.status_changed event for ${order.toNumber}`);
-    }
 
-    const lines = await db
-      .select()
-      .from(transferOrderLines)
-      .where(
-        and(
-          eq(transferOrderLines.transferOrderId, id),
-          eq(transferOrderLines.tenantId, tenantId),
-        )
-      );
+      // Publish order.status_changed event
+      try {
+        const eventBus = getEventBus(config.REDIS_URL);
+        await eventBus.publish({
+          type: 'order.status_changed',
+          tenantId,
+          orderType: 'transfer_order',
+          orderId: id,
+          orderNumber: order.toNumber,
+          fromStatus: order.status,
+          toStatus: newStatus,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        console.error(`[transfer-orders] Failed to publish order.status_changed event for ${order.toNumber}`);
+      }
 
-    res.json({
-      ...updatedOrder,
-      lines,
+      const orderLines = await tx
+        .select()
+        .from(transferOrderLines)
+        .where(
+          and(
+            eq(transferOrderLines.transferOrderId, id),
+            eq(transferOrderLines.tenantId, tenantId),
+          )
+        );
+
+      return { updatedOrder: updated, lines: orderLines };
     });
+
+    res.json({ data: { ...updatedOrder, lines } });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return next(new AppError(400, 'Invalid request body'));
