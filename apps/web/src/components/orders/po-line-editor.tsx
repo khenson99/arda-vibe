@@ -204,6 +204,7 @@ export function POLineEditor({
               <Popover open={partPopoverOpen} onOpenChange={setPartPopoverOpen}>
                 <PopoverTrigger asChild>
                   <Button
+                    id="new-line-part"
                     variant="outline"
                     role="combobox"
                     className={cn("w-full justify-between", !newLine.partId && "text-muted-foreground")}

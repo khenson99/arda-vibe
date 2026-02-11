@@ -105,7 +105,7 @@ export function POForm({
       internalNotes: mode === "create" ? (internalNotes || null) : undefined,
       paymentTerms: paymentTerms || null,
       shippingTerms: shippingTerms || null,
-      lines,
+      lines: lines.map((line, idx) => ({ ...line, lineNumber: idx + 1 })),
     };
 
     const result = validatePOForm(payload);
