@@ -70,11 +70,6 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
     onFocusSearch: () => setCommandPaletteOpen(true),
   });
 
-  React.useEffect(() => {
-    setQueueHeaderControls(null);
-    setPageHeaderActions(null);
-  }, [location.pathname]);
-
   const navItems = React.useMemo(
     () => [
       { to: '/', label: 'Dashboard', icon: Activity, section: 'kanban' as const },
