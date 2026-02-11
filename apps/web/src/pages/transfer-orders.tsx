@@ -129,7 +129,7 @@ function QueueView({
               "rounded-full px-3 py-1 text-xs font-medium border transition-colors",
               statusFilter === s
                 ? "bg-primary text-white border-primary"
-                : "bg-white text-muted-foreground border-border hover:bg-muted/50",
+                : "bg-background text-muted-foreground border-border hover:bg-muted/50",
             )}
           >
             {STATUS_LABELS[s]}
@@ -146,7 +146,7 @@ function QueueView({
         </div>
       ) : ordersError ? (
         <Card className="rounded-xl">
-          <CardContent className="py-8 text-center text-sm text-red-600">{ordersError}</CardContent>
+          <CardContent className="py-8 text-center text-sm text-destructive">{ordersError}</CardContent>
         </Card>
       ) : orders.length === 0 ? (
         <Card className="rounded-xl">
@@ -269,7 +269,7 @@ function DetailView({
           <ArrowLeft className="mr-1.5 h-4 w-4" /> Back
         </Button>
         <Card className="rounded-xl">
-          <CardContent className="py-8 text-center text-sm text-red-600">{detailError}</CardContent>
+          <CardContent className="py-8 text-center text-sm text-destructive">{detailError}</CardContent>
         </Card>
       </div>
     );
@@ -347,16 +347,16 @@ function DetailView({
                 </thead>
                 <tbody className="divide-y divide-border">
                   {order.lines.map((line: TransferOrderLine) => (
-                    <tr key={line.id} className="hover:bg-muted/30">
+                    <tr key={line.id} className="hover:bg-muted/50">
                       <td className="px-3 py-2 font-medium">{line.partName ?? line.partId}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{line.quantityRequested}</td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         <span
                           className={cn(
                             line.quantityShipped >= line.quantityRequested
-                              ? "text-emerald-600"
+                              ? "text-[hsl(var(--arda-success))]"
                               : line.quantityShipped > 0
-                                ? "text-amber-600"
+                                ? "text-[hsl(var(--arda-warning))]"
                                 : "text-muted-foreground",
                           )}
                         >
@@ -367,9 +367,9 @@ function DetailView({
                         <span
                           className={cn(
                             line.quantityReceived >= line.quantityRequested
-                              ? "text-emerald-600"
+                              ? "text-[hsl(var(--arda-success))]"
                               : line.quantityReceived > 0
-                                ? "text-amber-600"
+                                ? "text-[hsl(var(--arda-warning))]"
                                 : "text-muted-foreground",
                           )}
                         >
@@ -557,7 +557,7 @@ function NewTransferView({
                 <Skeleton className="h-9 w-full" />
               ) : (
                 <select
-                  className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                   value={destinationId}
                   onChange={(e) => {
                     setDestinationId(e.target.value);
@@ -582,7 +582,7 @@ function NewTransferView({
                 <Skeleton className="h-9 w-full" />
               ) : (
                 <select
-                  className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                   value={sourceId}
                   onChange={(e) => setSourceId(e.target.value)}
                   disabled={!destinationId}
@@ -600,7 +600,7 @@ function NewTransferView({
 
           {/* Source recommendations */}
           {destinationId && sourceRecommendations.length > 0 && (
-            <div className="rounded-lg border border-border p-3 bg-blue-50/30">
+            <div className="rounded-lg border border-border p-3 bg-accent/5">
               <p className="text-xs font-semibold text-muted-foreground mb-2">
                 Recommended Sources
               </p>
@@ -663,7 +663,7 @@ function NewTransferView({
                   <Skeleton className="h-9 w-full" />
                 ) : (
                   <select
-                    className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                     value={line.partId}
                     onChange={(e) => updateLine(idx, "partId", e.target.value)}
                   >
@@ -699,7 +699,7 @@ function NewTransferView({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-red-500 hover:text-red-700"
+                  className="text-destructive hover:text-destructive/80"
                   onClick={() => removeLine(idx)}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -712,7 +712,7 @@ function NewTransferView({
 
       {/* Error */}
       {createError && (
-        <p className="text-sm text-red-600 px-1">{createError}</p>
+        <p className="text-sm text-destructive px-1">{createError}</p>
       )}
 
       {/* Submit */}

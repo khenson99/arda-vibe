@@ -113,16 +113,16 @@ function PurchaseOrderLines({ po }: { po: PurchaseOrder }) {
         </thead>
         <tbody className="divide-y divide-border">
           {po.lines.map((line) => (
-            <tr key={line.id} className="hover:bg-muted/30">
+            <tr key={line.id} className="hover:bg-muted/50">
               <td className="px-3 py-2 font-medium">{line.partName ?? line.partId}</td>
               <td className="px-3 py-2 text-right tabular-nums">{line.quantityOrdered}</td>
               <td className="px-3 py-2 text-right tabular-nums">
                 <span
                   className={cn(
                     line.quantityReceived >= line.quantityOrdered
-                      ? "text-emerald-600"
+                      ? "text-[hsl(var(--arda-success))]"
                       : line.quantityReceived > 0
-                        ? "text-amber-600"
+                        ? "text-[hsl(var(--arda-warning))]"
                         : "text-muted-foreground",
                   )}
                 >
@@ -168,16 +168,16 @@ function TransferOrderLines({ to }: { to: TransferOrder }) {
         </thead>
         <tbody className="divide-y divide-border">
           {to.lines.map((line) => (
-            <tr key={line.id} className="hover:bg-muted/30">
+            <tr key={line.id} className="hover:bg-muted/50">
               <td className="px-3 py-2 font-medium">{line.partName ?? line.partId}</td>
               <td className="px-3 py-2 text-right tabular-nums">{line.quantityRequested}</td>
               <td className="px-3 py-2 text-right tabular-nums">
                 <span
                   className={cn(
                     line.quantityReceived >= line.quantityRequested
-                      ? "text-emerald-600"
+                      ? "text-[hsl(var(--arda-success))]"
                       : line.quantityReceived > 0
-                        ? "text-amber-600"
+                        ? "text-[hsl(var(--arda-warning))]"
                         : "text-muted-foreground",
                   )}
                 >
@@ -235,12 +235,12 @@ function ReceiptsList({ receipts }: { receipts: Receipt[] }) {
                 {receipt.lines.map((line) => (
                   <div key={line.id} className="flex items-center gap-2">
                     <span>{line.partName ?? line.partId}</span>
-                    <span className="text-emerald-600">+{line.quantityAccepted}</span>
+                    <span className="text-[hsl(var(--arda-success))]">+{line.quantityAccepted}</span>
                     {line.quantityDamaged > 0 && (
-                      <span className="text-amber-600">dmg: {line.quantityDamaged}</span>
+                      <span className="text-[hsl(var(--arda-warning))]">dmg: {line.quantityDamaged}</span>
                     )}
                     {line.quantityRejected > 0 && (
-                      <span className="text-red-600">rej: {line.quantityRejected}</span>
+                      <span className="text-destructive">rej: {line.quantityRejected}</span>
                     )}
                   </div>
                 ))}
@@ -328,7 +328,7 @@ function StatusTimeline({ order, detail }: { order: UnifiedOrder; detail: Purcha
           <div key={i} className="flex items-start gap-3 pb-3 last:pb-0">
             <div className="flex flex-col items-center">
               {item.completed ? (
-                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                <CheckCircle2 className="h-4 w-4 text-[hsl(var(--arda-success))] shrink-0" />
               ) : item.active ? (
                 <CircleDot className="h-4 w-4 text-[hsl(var(--link))] shrink-0" />
               ) : (
