@@ -114,6 +114,7 @@ vi.mock('@arda/db', () => ({
 
 import { notificationsRouter } from './notifications.routes.js';
 import express from 'express';
+import request from 'supertest';
 
 const app = express();
 app.use(express.json());
@@ -169,7 +170,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .get('/notifications?types=po_created,stockout_warning')
         .expect(200);
@@ -197,7 +197,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .get('/notifications?startDate=2026-01-10T00:00:00Z')
         .expect(200);
@@ -222,7 +221,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .get('/notifications?endDate=2026-01-10T00:00:00Z')
         .expect(200);
@@ -247,7 +245,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .get('/notifications?priority=high')
         .expect(200);
@@ -272,7 +269,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .get('/notifications')
         .expect(200);
@@ -301,7 +297,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .patch('/notifications/notif-1/unread')
         .expect(200);
@@ -318,7 +313,6 @@ describe('notifications.routes', () => {
     it('returns 404 for non-existent notification', async () => {
       testState.notifications = [];
 
-      const request = require('supertest');
       await request(app)
         .patch('/notifications/notif-999/unread')
         .expect(404);
@@ -343,7 +337,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .patch('/notifications/notif-1/read')
         .expect(200);
@@ -370,7 +363,6 @@ describe('notifications.routes', () => {
         },
       ];
 
-      const request = require('supertest');
       const response = await request(app)
         .get('/notifications/unread-count')
         .expect(200);
