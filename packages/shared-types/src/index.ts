@@ -555,3 +555,138 @@ export interface BatchReplayResponse {
   failed: number;
   results: ScanReplayResult[];
 }
+
+// ─── Analytics Types ─────────────────────────────────────────────────
+
+// KPI Name Enum
+export type KPIName =
+  | 'inventory_turns'
+  | 'fill_rate'
+  | 'stockout_frequency'
+  | 'cycle_time'
+  | 'supplier_otd';
+
+// Threshold State Enum
+export type ThresholdState = 'normal' | 'warning' | 'critical';
+
+// Time Granularity
+export type TimeGranularity = 'hour' | 'day' | 'week' | 'month';
+
+// KPI Snapshot Response DTO
+export interface KPISnapshot {
+  id: string;
+  tenantId: string;
+  facilityId: string | null;
+  kpiName: KPIName;
+  value: number;
+  unit: string | null;
+  timeGranularity: TimeGranularity;
+  snapshotStart: string;
+  snapshotEnd: string;
+  metadata?: KPISnapshotMetadata;
+  createdAt: string;
+}
+
+export interface KPISnapshotMetadata {
+  sampleSize?: number;
+  calculationMethod?: string;
+  aggregationType?: 'sum' | 'avg' | 'median' | 'max' | 'min' | 'count';
+  confidence?: number;
+  drilldownAvailable?: boolean;
+  notes?: string;
+  [key: string]: unknown;
+}
+
+// KPI Trend Point (for charts)
+export interface KPITrendPoint {
+  timestamp: string;
+  value: number;
+  state?: ThresholdState;
+}
+
+// KPI Trend Response
+export interface KPITrendResponse {
+  kpiName: KPIName;
+  facilityId: string | null;
+  timeGranularity: TimeGranularity;
+  points: KPITrendPoint[];
+  summary?: {
+    current: number;
+    previous: number;
+    change: number;
+    changePercent: number;
+    trend: 'up' | 'down' | 'flat';
+  };
+}
+
+// KPI Drilldown Row (generic structure for KPI detail views)
+export interface KPIDrilldownRow {
+  entityId: string; // e.g., partId, loopId, supplierId
+  entityType: string; // e.g., 'part', 'loop', 'supplier'
+  entityLabel: string; // display name
+  value: number; // KPI value for this entity
+  state?: ThresholdState;
+  metadata?: Record<string, unknown>;
+}
+
+// KPI Drilldown Response
+export interface KPIDrilldownResponse {
+  kpiName: KPIName;
+  facilityId: string | null;
+  rows: KPIDrilldownRow[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+// Export Request Types
+export type ExportFormat = 'csv' | 'pdf';
+
+export interface AnalyticsExportRequest {
+  kpiNames?: KPIName[];
+  facilityIds?: string[];
+  dateFrom: string;
+  dateTo: string;
+  format: ExportFormat;
+  timeGranularity?: TimeGranularity;
+  includeDrilldown?: boolean;
+}
+
+export interface AnalyticsExportResponse {
+  exportId: string;
+  status: 'pending' | 'processing' | 'ready' | 'failed';
+  format: ExportFormat;
+  downloadUrl?: string;
+  createdAt: string;
+  completedAt?: string;
+  errorMessage?: string;
+}
+
+// Dashboard Query
+export interface AnalyticsDashboardQuery {
+  facilityIds?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  kpiNames?: KPIName[];
+  timeGranularity?: TimeGranularity;
+}
+
+// Dashboard Response (all KPIs for a view)
+export interface AnalyticsDashboardResponse {
+  kpis: {
+    name: KPIName;
+    current: number;
+    previous: number;
+    change: number;
+    changePercent: number;
+    state: ThresholdState;
+    unit: string;
+    trend: KPITrendPoint[];
+  }[];
+  facilityId: string | null;
+  dateFrom: string;
+  dateTo: string;
+}

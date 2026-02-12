@@ -43,6 +43,13 @@
       "when": 1770856668245,
       "tag": "0005_transfer_priority_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1739335200000,
+      "tag": "0006_analytics_kpi_snapshots",
+      "breakpoints": true
     }
   ]
 }

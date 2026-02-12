@@ -50,4 +50,22 @@ export interface TenantSettings {
   webhookUrl?: string;
   webhookSecret?: string;
   webhookEvents?: string[];
+  kpiThresholds?: KPIThresholdsConfig;
+}
+
+export interface KPIThresholdsConfig {
+  inventoryTurns?: KPIThreshold;
+  fillRate?: KPIThreshold;
+  stockoutFrequency?: KPIThreshold;
+  cycleTime?: KPIThreshold;
+  supplierOTD?: KPIThreshold;
+}
+
+export interface KPIThreshold {
+  enabled: boolean;
+  warningMin?: number; // yellow if below this
+  warningMax?: number; // yellow if above this
+  criticalMin?: number; // red if below this
+  criticalMax?: number; // red if above this
+  unit?: string; // e.g., 'days', 'percentage', 'ratio'
 }

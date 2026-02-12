@@ -11,3 +11,4 @@ export * from './orders.js';
 export * from './notifications.js';
 export * from './billing.js';
 export * from './audit.js';
+export * from './analytics.js';
