@@ -17,6 +17,19 @@
  */
 
 import { describe, expect, it } from 'vitest';
+
+vi.mock('@arda/config', () => ({
+  config: {
+    SMTP_HOST: 'localhost',
+    SMTP_PORT: 1025,
+    SMTP_USER: '',
+    SMTP_PASS: '',
+    EMAIL_FROM: 'noreply@arda.cards',
+    REDIS_URL: 'redis://localhost:6379',
+  },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
+
 import {
   scoreQueueItems,
   consolidateBySupplier,

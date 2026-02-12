@@ -64,6 +64,7 @@ vi.mock('@arda/config', () => ({
     SMTP_PASS: '',
     EMAIL_FROM: 'noreply@arda.cards',
   },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock('@arda/events', () => ({

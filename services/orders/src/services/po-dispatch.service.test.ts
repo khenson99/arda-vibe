@@ -1,4 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@arda/config', () => ({
+  config: {
+    SMTP_HOST: 'localhost',
+    SMTP_PORT: 1025,
+    SMTP_USER: '',
+    SMTP_PASS: '',
+    EMAIL_FROM: 'noreply@arda.cards',
+  },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
+
 import {
   buildPdfContent,
   ConsoleEmailAdapter,

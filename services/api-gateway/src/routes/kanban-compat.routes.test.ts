@@ -85,23 +85,29 @@ const dbMock = vi.hoisted(() => ({
       findFirst: vi.fn(async () => state.loop),
     },
   },
-  select: vi.fn((selection: Record<string, unknown>) => ({
-    from: vi.fn((table: { __table?: string }) => ({
-      where: vi.fn(() => ({
-        execute: vi.fn(async () => {
-          const tableName = table.__table ?? '';
-          if (tableName === 'parts') return state.partRows;
-          if (tableName === 'facilities') return state.facilityRows;
-          if (tableName === 'suppliers') return state.supplierRows;
-          if (tableName === 'kanbanLoops') return [state.loop];
-          if (tableName === 'kanbanCards') return state.loop.cards as Row[];
-          if (tableName === 'kanbanParameterHistory') return state.loop.parameterHistory as Row[];
-          if ('count' in selection) return [{ count: 1 }];
-          return [];
-        }),
-      })),
-    })),
-  })),
+  select: vi.fn((selection: Record<string, unknown>) => {
+    const runQuery = async (table: { __table?: string }) => {
+      const tableName = table.__table ?? '';
+      if (tableName === 'parts') return state.partRows;
+      if (tableName === 'facilities') return state.facilityRows;
+      if (tableName === 'suppliers') return state.supplierRows;
+      if (tableName === 'kanbanLoops') return [state.loop];
+      if (tableName === 'kanbanCards') return state.loop.cards as Row[];
+      if (tableName === 'kanbanParameterHistory') return state.loop.parameterHistory as Row[];
+      if ('count' in selection) return [{ count: 1 }];
+      return [];
+    };
+
+    return {
+      from: vi.fn((table: { __table?: string }) => {
+        const builder: Record<string, unknown> = {};
+        (builder as { where: (condition?: unknown) => unknown }).where = vi.fn(() => builder);
+        (builder as { orderBy: (order?: unknown) => unknown }).orderBy = vi.fn(() => builder);
+        (builder as { execute: () => Promise<unknown[]> }).execute = vi.fn(() => runQuery(table));
+        return builder;
+      }),
+    };
+  }),
 }));
 
 const fetchMock = vi.fn<typeof fetch>();

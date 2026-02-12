@@ -77,6 +77,7 @@ vi.mock('@arda/events', () => ({
 
 vi.mock('@arda/config', () => ({
   config: { REDIS_URL: 'redis://localhost:6379' },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock('../services/order-number.service.js', () => ({
@@ -241,4 +242,3 @@ describe('queue risk scan endpoint', () => {
     expect(publishMock).not.toHaveBeenCalled();
   });
 });
-

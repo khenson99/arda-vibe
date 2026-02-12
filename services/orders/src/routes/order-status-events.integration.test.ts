@@ -53,6 +53,7 @@ const { dbMock, resetDbMockCalls } = vi.hoisted(() => {
     builder.orderBy = () => builder;
     builder.innerJoin = () => builder;
     builder.groupBy = () => builder;
+    builder.for = () => builder;
     builder.execute = async () => result;
     builder.then = (
       resolve: (value: unknown) => unknown,
@@ -87,12 +88,14 @@ const { dbMock, resetDbMockCalls } = vi.hoisted(() => {
         }
       },
     })),
+    transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(dbMock)),
   };
 
   const resetDbMockCalls = () => {
     dbMock.select.mockClear();
     dbMock.update.mockClear();
     dbMock.insert.mockClear();
+    dbMock.transaction.mockClear();
   };
 
   return { dbMock, resetDbMockCalls };
@@ -117,6 +120,7 @@ vi.mock('@arda/events', () => ({
 
 vi.mock('@arda/config', () => ({
   config: { REDIS_URL: 'redis://localhost:6379' },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock('../services/order-number.service.js', () => ({
@@ -136,6 +140,7 @@ function createTestApp() {
     (req as any).user = {
       tenantId: 'tenant-1',
       sub: 'user-1',
+      role: 'procurement_manager',
     };
     next();
   });
@@ -298,13 +303,13 @@ describe('status endpoints publish order.status_changed', () => {
     const response = await patchJson(app, '/to/to-1/status', { status: 'picking' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(
+    expect(response.body.data).toEqual(
       expect.objectContaining({
         id: 'to-1',
         status: 'picking',
       })
     );
-    expect(response.body.lines).toHaveLength(1);
+    expect(response.body.data.lines).toHaveLength(1);
 
     expect(publishMock).toHaveBeenCalledTimes(1);
     expect(publishMock).toHaveBeenCalledWith(
