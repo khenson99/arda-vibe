@@ -2,6 +2,11 @@ import { db, schema } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@arda/config';
 import crypto from 'crypto';
+import {
+  AuthAuditAction,
+  writeAuthAuditEntry,
+  type AuthAuditContext,
+} from './auth-audit.js';
 
 const log = createLogger('auth:integration');
 
@@ -64,7 +69,7 @@ function generateApiKey(): { key: string; keyHash: string; keyPrefix: string } {
  * Create a new API key for the tenant.
  * Returns the full key (only shown once) and metadata.
  */
-export async function createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
+export async function createApiKey(input: CreateApiKeyInput, auditCtx?: AuthAuditContext): Promise<CreateApiKeyResult> {
   const { tenantId, userId, name, permissions = [], expiresInDays } = input;
 
   const { key, keyHash, keyPrefix } = generateApiKey();
@@ -87,6 +92,18 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<CreateApiK
     .returning();
 
   log.info({ apiKeyId: apiKey.id, keyPrefix, name }, 'API key created');
+
+  // Audit: API key created
+  await writeAuthAuditEntry(db, {
+    tenantId,
+    action: AuthAuditAction.API_KEY_CREATED,
+    entityType: 'api_key',
+    entityId: apiKey.id,
+    userId,
+    newState: { name, keyPrefix, permissions, expiresAt },
+    ipAddress: auditCtx?.ipAddress,
+    userAgent: auditCtx?.userAgent,
+  });
 
   return {
     id: apiKey.id,
@@ -127,7 +144,12 @@ export async function listApiKeys(tenantId: string): Promise<ApiKeyInfo[]> {
 /**
  * Revoke (deactivate) an API key.
  */
-export async function revokeApiKey(apiKeyId: string, tenantId: string): Promise<void> {
+export async function revokeApiKey(
+  apiKeyId: string,
+  tenantId: string,
+  revokedBy?: string,
+  auditCtx?: AuthAuditContext,
+): Promise<void> {
   const [updated] = await db
     .update(schema.apiKeys)
     .set({ isActive: false, updatedAt: new Date() })
@@ -139,6 +161,20 @@ export async function revokeApiKey(apiKeyId: string, tenantId: string): Promise<
   }
 
   log.info({ apiKeyId, keyPrefix: updated.keyPrefix }, 'API key revoked');
+
+  // Audit: API key revoked
+  await writeAuthAuditEntry(db, {
+    tenantId,
+    action: AuthAuditAction.API_KEY_REVOKED,
+    entityType: 'api_key',
+    entityId: apiKeyId,
+    userId: revokedBy ?? null,
+    previousState: { isActive: true, keyPrefix: updated.keyPrefix },
+    newState: { isActive: false, keyPrefix: updated.keyPrefix },
+    metadata: { keyPrefix: updated.keyPrefix },
+    ipAddress: auditCtx?.ipAddress,
+    userAgent: auditCtx?.userAgent,
+  });
 }
 
 // ─── Delete API Key ───────────────────────────────────────────────────
