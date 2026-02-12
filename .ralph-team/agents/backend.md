@@ -106,6 +106,13 @@ patterns, gotchas, and conventions.
 - 'PENDING' hash_chain value = legacy insert that bypassed writeAuditEntry (temporary during migration)
 - `auditContextMiddleware` (in `@arda/auth-utils`) extracts IP/UA and attaches `req.auditContext`
 - Middleware order: authMiddleware → auditContextMiddleware → tenantContext → routes
+- When refactoring to writeAuditEntry, ALL test files mocking @arda/db must include writeAuditEntry/writeAuditEntries
+- Tests asserting audit behavior: use hoisted mock that pushes to testState.insertedAuditRows
+- Tests not asserting audit: simple no-op mock: `writeAuditEntry: vi.fn(async () => ({...}))`
+- System-initiated audit: `userId: null`, `metadata: { systemActor: '<service_name>' }`
+- FR-07 actions: work_order.rework, inventory.adjusted, inventory.ledger_updated
+- Route helper functions (e.g. writeWorkOrderStatusAudit) also need refactoring — easy to miss in grep
+- Drizzle insert chain `.values(...).returning({col}).execute()`: .returning() returns a builder, not an array
 
 ### Express Routes
 - Register routers in service index.ts with `app.use(prefix, router)`

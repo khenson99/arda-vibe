@@ -177,3 +177,31 @@ Learnings:
   - writeAuditEntry accepts DbOrTransaction — pass tx in transactional contexts, db for standalone calls
   - State-transition audit entries: capture previousState before mutation, newState after, both as JSON snapshots
   - System-initiated actions: userId: null, metadata.systemActor: 'automation-engine' (or similar)
+
+--- Backend Agent Iteration 5 | Issue #253 ---
+Timestamp: 2026-02-12T23:50:00Z
+Status: completed
+Changes:
+  Remaining source files refactored (inline audit writes → writeAuditEntry):
+  - services/orders/src/services/capacity-scheduler.service.ts (3 audit calls)
+  - services/orders/src/services/completion-posting.service.ts (2 audit calls)
+  - services/orders/src/services/routing-engine.service.ts (2 audit calls)
+  - services/orders/src/services/production-exception.service.ts (3 audit calls, renamed scrap_rework → work_order.rework)
+  - services/orders/src/services/material-consumption.service.ts (1 audit call)
+  - services/orders/src/services/exception-automation.service.ts (3 audit calls, all system-initiated)
+  - services/orders/src/services/inventory-ledger.service.ts (2 new FR-07 actions: inventory.adjusted, inventory.ledger_updated)
+  - services/orders/src/routes/work-orders.routes.ts (4 helper functions)
+  - services/orders/src/routes/transfer-orders.routes.ts (4 helper functions)
+  - services/orders/src/routes/work-centers.routes.ts (1 helper function)
+  Test files updated (9 existing + 1 new):
+  - 9 existing test files: added writeAuditEntry/writeAuditEntries to @arda/db mocks
+  - services/orders/src/services/audit-refactor-remaining.integration.test.ts (new — 8 tests)
+Tests: 462 total passing (8 new + all existing), TypeScript clean. Only pre-existing perf test failure (needs DB).
+Learnings:
+  - Route files also had inline audit writes in helper functions (writeWorkOrderStatusAudit, etc.) — easy to miss
+  - exception-automation.service.ts: all 3 audit calls are system-initiated (userId: null, systemActor: 'exception_automation')
+  - production-exception.service.ts: renamed production_exception.scrap_rework → work_order.rework per FR-07
+  - inventory-ledger.service.ts: needed 2 new actions (inventory.adjusted in adjustQuantity, inventory.ledger_updated in batchAdjust)
+  - Test mock pattern for .returning().execute() chain: mock returning() to return object with execute() method
+  - Drizzle insert chain: .values(...).returning({col}).execute() — the returning returns a builder, not a result
+  - Zero inline db.insert(auditLog) / tx.insert(schema.auditLog) remain in non-test files after this iteration
