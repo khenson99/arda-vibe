@@ -132,7 +132,7 @@ export function startAutomationWorker(redisUrl: string): {
         throw err;
       }
     },
-    { redisUrl, concurrency: 5 },
+    { redisUrl, concurrency: 10 },
   );
 
   worker.on('completed', (job) => {

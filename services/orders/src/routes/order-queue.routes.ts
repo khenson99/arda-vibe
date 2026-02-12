@@ -465,31 +465,71 @@ export async function runQueueRiskScanForTenant(
   const lookbackStart = new Date(now);
   lookbackStart.setUTCDate(lookbackStart.getUTCDate() - input.lookbackDays);
 
-  const triggeredCards = await db
-    .select({
-      cardId: kanbanCards.id,
-      loopId: kanbanCards.loopId,
-      currentStageEnteredAt: kanbanCards.currentStageEnteredAt,
-      loopType: kanbanLoops.loopType,
-      partId: kanbanLoops.partId,
-      facilityId: kanbanLoops.facilityId,
-      minQuantity: kanbanLoops.minQuantity,
-      orderQuantity: kanbanLoops.orderQuantity,
-      statedLeadTimeDays: kanbanLoops.statedLeadTimeDays,
-      safetyStockDays: kanbanLoops.safetyStockDays,
-    })
-    .from(kanbanCards)
-    .innerJoin(kanbanLoops, eq(kanbanCards.loopId, kanbanLoops.id))
-    .where(
-      and(
-        eq(kanbanCards.tenantId, input.tenantId),
-        eq(kanbanCards.currentStage, 'triggered'),
-        eq(kanbanCards.isActive, true),
-        eq(kanbanLoops.isActive, true)
-      )
-    )
-    .orderBy(asc(kanbanCards.currentStageEnteredAt))
-    .execute();
+  // Single CTE query: merge triggered-cards fetch with trigger-counts aggregation
+  // to eliminate a sequential round-trip to the database.
+  const riskScanRows = await db.execute(
+    sql`WITH triggered AS (
+          SELECT
+            kc.id AS card_id,
+            kc.loop_id,
+            kc.current_stage_entered_at,
+            kl.loop_type,
+            kl.part_id,
+            kl.facility_id,
+            kl.min_quantity,
+            kl.order_quantity,
+            kl.stated_lead_time_days,
+            kl.safety_stock_days
+          FROM kanban.kanban_cards kc
+          INNER JOIN kanban.kanban_loops kl ON kc.loop_id = kl.id
+          WHERE kc.tenant_id = ${input.tenantId}
+            AND kc.current_stage = 'triggered'
+            AND kc.is_active = true
+            AND kl.is_active = true
+          ORDER BY kc.current_stage_entered_at ASC
+        ),
+        trigger_counts AS (
+          SELECT
+            cst.loop_id,
+            CAST(COUNT(*) AS INTEGER) AS trigger_count
+          FROM kanban.card_stage_transitions cst
+          WHERE cst.tenant_id = ${input.tenantId}
+            AND cst.loop_id IN (SELECT DISTINCT loop_id FROM triggered)
+            AND cst.to_stage = 'triggered'
+            AND cst.transitioned_at >= ${lookbackStart}
+          GROUP BY cst.loop_id
+        )
+        SELECT
+          t.*,
+          COALESCE(tc.trigger_count, 0) AS trigger_count
+        FROM triggered t
+        LEFT JOIN trigger_counts tc ON t.loop_id = tc.loop_id`
+  ) as unknown as Array<{
+    card_id: string;
+    loop_id: string;
+    current_stage_entered_at: Date;
+    loop_type: 'procurement' | 'production' | 'transfer';
+    part_id: string;
+    facility_id: string;
+    min_quantity: number;
+    order_quantity: number;
+    stated_lead_time_days: number | null;
+    safety_stock_days: string | null;
+    trigger_count: number;
+  }>;
+
+  const triggeredCards = riskScanRows.map((row) => ({
+    cardId: row.card_id,
+    loopId: row.loop_id,
+    currentStageEnteredAt: row.current_stage_entered_at,
+    loopType: row.loop_type,
+    partId: row.part_id,
+    facilityId: row.facility_id,
+    minQuantity: row.min_quantity,
+    orderQuantity: row.order_quantity,
+    statedLeadTimeDays: row.stated_lead_time_days,
+    safetyStockDays: row.safety_stock_days,
+  }));
 
   if (triggeredCards.length === 0) {
     return {
@@ -503,26 +543,9 @@ export async function runQueueRiskScanForTenant(
     };
   }
 
-  const uniqueLoopIds = Array.from(new Set(triggeredCards.map((row) => row.loopId)));
-
-  const triggerCountsByLoop = await db
-    .select({
-      loopId: cardStageTransitions.loopId,
-      triggerCount: sql<number>`CAST(COUNT(*) AS INTEGER)`,
-    })
-    .from(cardStageTransitions)
-    .where(
-      and(
-        eq(cardStageTransitions.tenantId, input.tenantId),
-        inArray(cardStageTransitions.loopId, uniqueLoopIds),
-        eq(cardStageTransitions.toStage, 'triggered'),
-        sql`${cardStageTransitions.transitionedAt} >= ${lookbackStart}`
-      )
-    )
-    .groupBy(cardStageTransitions.loopId)
-    .execute();
-
-  const triggerCountMap = new Map(triggerCountsByLoop.map((row) => [row.loopId, row.triggerCount]));
+  const triggerCountMap = new Map(
+    riskScanRows.map((row) => [row.loop_id, Number(row.trigger_count)])
+  );
 
   let risks = triggeredCards
     .map((card) =>
@@ -755,19 +778,6 @@ orderQueueRouter.get('/', async (req: AuthRequest, res, next) => {
         orderQuantity: kanbanLoops.orderQuantity,
         minQuantity: kanbanLoops.minQuantity,
         numberOfCards: kanbanLoops.numberOfCards,
-        draftPurchaseOrderId: sql<string | null>`
-          (
-            select pol.purchase_order_id
-            from orders.purchase_order_lines pol
-            inner join orders.purchase_orders po on po.id = pol.purchase_order_id
-            where pol.tenant_id = ${tenantId}
-              and po.tenant_id = ${tenantId}
-              and pol.kanban_card_id = ${kanbanCards.id}
-              and po.status = 'draft'
-            order by po.created_at desc
-            limit 1
-          )
-        `.as('draftPurchaseOrderId'),
       })
       .from(kanbanCards)
       .innerJoin(kanbanLoops, eq(kanbanCards.loopId, kanbanLoops.id))
@@ -791,7 +801,34 @@ orderQueueRouter.get('/', async (req: AuthRequest, res, next) => {
       .where(and(...conditions))
       .orderBy(asc(kanbanCards.currentStageEnteredAt));
 
-    const cards = await query.execute();
+    const baseCards = await query.execute();
+
+    // Pre-compute draft PO lookup in a single query instead of per-row correlated subquery.
+    // Uses DISTINCT ON to pick the latest draft PO per card efficiently.
+    const cardIds = baseCards.map((c) => c.id);
+    let draftPoMap = new Map<string, string>();
+    if (cardIds.length > 0) {
+      const draftPos = await db.execute(
+        sql`SELECT DISTINCT ON (pol.kanban_card_id)
+              pol.kanban_card_id,
+              pol.purchase_order_id
+            FROM orders.purchase_order_lines pol
+            INNER JOIN orders.purchase_orders po ON po.id = pol.purchase_order_id
+            WHERE pol.tenant_id = ${tenantId}
+              AND po.tenant_id = ${tenantId}
+              AND pol.kanban_card_id = ANY(${cardIds})
+              AND po.status = 'draft'
+            ORDER BY pol.kanban_card_id, po.created_at DESC`
+      ) as unknown as Array<{ kanban_card_id: string; purchase_order_id: string }>;
+      draftPoMap = new Map(
+        draftPos.map((row) => [row.kanban_card_id, row.purchase_order_id])
+      );
+    }
+
+    const cards = baseCards.map((card) => ({
+      ...card,
+      draftPurchaseOrderId: draftPoMap.get(card.id) ?? null,
+    }));
 
     // Group by loop type for response
     const grouped = cards.reduce(

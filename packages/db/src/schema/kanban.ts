@@ -121,6 +121,7 @@ export const kanbanCards = kanbanSchema.table(
     index('kanban_cards_loop_idx').on(table.loopId),
     index('kanban_cards_stage_idx').on(table.tenantId, table.currentStage),
     uniqueIndex('kanban_cards_loop_number_idx').on(table.loopId, table.cardNumber),
+    index('kanban_cards_queue_idx').on(table.tenantId, table.currentStage, table.isActive),
   ]
 );
 
@@ -153,6 +154,7 @@ export const cardStageTransitions = kanbanSchema.table(
     index('card_transitions_loop_idx').on(table.loopId),
     index('card_transitions_time_idx').on(table.transitionedAt),
     index('card_transitions_cycle_idx').on(table.cardId, table.cycleNumber),
+    index('card_transitions_risk_scan_idx').on(table.tenantId, table.loopId, table.toStage, table.transitionedAt),
   ]
 );
 

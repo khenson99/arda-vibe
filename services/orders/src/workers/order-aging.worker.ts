@@ -318,7 +318,7 @@ export function startOrderAgingWorker(redisUrl: string): {
         throw err;
       }
     },
-    { redisUrl, concurrency: 2 },
+    { redisUrl, concurrency: 3 },
   );
 
   worker.on('completed', (job) => {

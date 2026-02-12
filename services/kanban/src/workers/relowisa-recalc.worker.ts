@@ -284,7 +284,7 @@ export function startReloWisaRecalcWorker(redisUrl: string): {
         throw err;
       }
     },
-    { redisUrl, concurrency: 2 },
+    { redisUrl, concurrency: 3 },
   );
 
   worker.on('completed', (job) => {

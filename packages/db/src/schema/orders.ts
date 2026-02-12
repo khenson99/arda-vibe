@@ -134,6 +134,7 @@ export const purchaseOrderLines = ordersSchema.table(
     index('po_lines_po_idx').on(table.purchaseOrderId),
     index('po_lines_part_idx').on(table.partId),
     index('po_lines_card_idx').on(table.kanbanCardId),
+    index('po_lines_card_tenant_idx').on(table.tenantId, table.kanbanCardId),
   ]
 );
 
