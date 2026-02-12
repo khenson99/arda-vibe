@@ -10,8 +10,27 @@ import {
 /* ── Grouped cards type ─────────────────────────────────────── */
 
 export type GroupedCards = Record<CardStage, KanbanCard[]>;
+export type GroupedCardsByItem = Record<
+  CardStage,
+  Array<{
+    itemKey: string;
+    itemLabel: string;
+    cards: KanbanCard[];
+  }>
+>;
 
 function emptyGrouped(): GroupedCards {
+  return {
+    created: [],
+    triggered: [],
+    ordered: [],
+    in_transit: [],
+    received: [],
+    restocked: [],
+  };
+}
+
+function emptyGroupedByItem(): GroupedCardsByItem {
   return {
     created: [],
     triggered: [],
@@ -32,6 +51,35 @@ function groupCards(cards: KanbanCard[]): GroupedCards {
   return grouped;
 }
 
+function groupCardsByItem(cards: KanbanCard[]): GroupedCardsByItem {
+  const grouped = emptyGroupedByItem();
+
+  for (const stage of Object.keys(grouped) as CardStage[]) {
+    const cardsInStage = cards.filter((card) => card.currentStage === stage);
+    const byItem = new Map<string, { itemKey: string; itemLabel: string; cards: KanbanCard[] }>();
+
+    for (const card of cardsInStage) {
+      const itemLabel = card.partName?.trim() || card.partNumber?.trim() || card.partId || "Unassigned item";
+      const itemKey = `${card.partNumber ?? ""}|${card.partName ?? ""}|${card.partId ?? card.id}`;
+      const existing = byItem.get(itemKey);
+      if (existing) {
+        existing.cards.push(card);
+      } else {
+        byItem.set(itemKey, { itemKey, itemLabel, cards: [card] });
+      }
+    }
+
+    grouped[stage] = Array.from(byItem.values())
+      .map((group) => ({
+        ...group,
+        cards: [...group.cards].sort((a, b) => a.cardNumber - b.cardNumber),
+      }))
+      .sort((a, b) => a.itemLabel.localeCompare(b.itemLabel));
+  }
+
+  return grouped;
+}
+
 /* ── Hook return type ───────────────────────────────────────── */
 
 export interface UseKanbanBoardReturn {
@@ -40,6 +88,7 @@ export interface UseKanbanBoardReturn {
   error: string | null;
   allCards: KanbanCard[];
   grouped: GroupedCards;
+  groupedByItem: GroupedCardsByItem;
   moveCard: (cardId: string, toStage: CardStage) => Promise<boolean>;
   refresh: () => Promise<void>;
 }
@@ -63,6 +112,7 @@ export function useKanbanBoard(
   const [allCards, setAllCards] = React.useState<KanbanCard[]>([]);
 
   const grouped = React.useMemo(() => groupCards(allCards), [allCards]);
+  const groupedByItem = React.useMemo(() => groupCardsByItem(allCards), [allCards]);
 
   /* ── Fetch all cards ─────────────────────────────────────── */
 
@@ -155,6 +205,7 @@ export function useKanbanBoard(
     error,
     allCards,
     grouped,
+    groupedByItem,
     moveCard,
     refresh,
   };

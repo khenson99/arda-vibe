@@ -123,8 +123,8 @@ describe('Scan Service - Transition Matrix', () => {
       expect(isValidTransition('received', 'restocked')).toBe(true);
     });
 
-    it('allows restocked -> created (loop restart)', () => {
-      expect(isValidTransition('restocked', 'created')).toBe(true);
+    it('allows restocked -> triggered (loop restart)', () => {
+      expect(isValidTransition('restocked', 'triggered')).toBe(true);
     });
 
     it('rejects created -> ordered (skip triggered)', () => {
@@ -176,8 +176,8 @@ describe('Scan Service - Transition Rules', () => {
       expect(isMethodAllowed('received', 'restocked', 'qr_scan')).toBe(true);
     });
 
-    it('does not allow qr_scan for restocked -> created', () => {
-      expect(isMethodAllowed('restocked', 'created', 'qr_scan')).toBe(false);
+    it('does not allow qr_scan for restocked -> triggered', () => {
+      expect(isMethodAllowed('restocked', 'triggered', 'qr_scan')).toBe(false);
     });
   });
 

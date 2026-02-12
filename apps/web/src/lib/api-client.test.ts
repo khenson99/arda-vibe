@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiRequest, ApiError } from "@/lib/api-client";
+import {
+  apiRequest,
+  ApiError,
+  createProcurementDrafts,
+  fetchLoopCardSummary,
+} from "@/lib/api-client";
 
 describe("apiRequest", () => {
   afterEach(() => {
@@ -46,5 +51,73 @@ describe("apiRequest", () => {
 
     const payload = await apiRequest<{ data: Array<{ id: string }> }>("/api/kanban/loops");
     expect(payload.data).toEqual([{ id: "loop-1" }]);
+  });
+
+  it("normalizes lifecycle card summary stageCounts into byStage", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          loopId: "loop-1",
+          totalCards: 4,
+          stageCounts: { created: 1, triggered: 2, ordered: 1 },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+
+    const summary = await fetchLoopCardSummary("token", "loop-1");
+    expect(summary).toEqual({
+      loopId: "loop-1",
+      totalCards: 4,
+      byStage: { created: 1, triggered: 2, ordered: 1 },
+    });
+  });
+
+  it("retries create-drafts against compatibility alias when primary route returns 404", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response("<pre>Cannot POST /queue/procurement/create-drafts</pre>", {
+          status: 404,
+          headers: { "content-type": "text/html" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              supplierId: "sup-1",
+              recipientEmail: "buyer@example.com",
+              drafts: [],
+              totalDrafts: 0,
+              totalCards: 0,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      );
+
+    const result = await createProcurementDrafts("token", {
+      supplierId: "sup-1",
+      lines: [
+        {
+          cardId: "8d1117ff-ef99-44af-87f9-d2228cdf67d8",
+          quantityOrdered: 1,
+          orderMethod: "purchase_order",
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/orders/queue/procurement/create-drafts");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/orders/queue/create-drafts");
+    expect(result.supplierId).toBe("sup-1");
   });
 });

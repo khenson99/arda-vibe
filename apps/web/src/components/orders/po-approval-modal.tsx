@@ -6,7 +6,7 @@
  */
 
 import * as React from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { SidePanel } from "@/components/ui/side-panel";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -89,16 +89,14 @@ export function POApprovalModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Review Purchase Order</DialogTitle>
-          <DialogDescription>
-            Review the details below and approve or reject this purchase order.
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <SidePanel
+      open={open}
+      onClose={() => onOpenChange(false)}
+      title="Review Purchase Order"
+      subtitle="Review details and approve or reject this purchase order"
+      width="wide"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4 p-4">
           {/* Error message */}
           {error && (
             <div className="rounded-md border border-[hsl(var(--arda-error))] bg-[hsl(var(--arda-error-light))] px-4 py-3 text-sm text-[hsl(var(--arda-error))]">
@@ -253,8 +251,7 @@ export function POApprovalModal({
               </Button>
             </div>
           )}
-        </form>
-      </DialogContent>
-    </Dialog>
+      </form>
+    </SidePanel>
   );
 }

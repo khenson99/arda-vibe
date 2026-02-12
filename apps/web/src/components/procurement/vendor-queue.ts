@@ -9,6 +9,7 @@ export interface VendorQueueLine {
   card: QueueCard;
   part: PartRecord | undefined;
   partName: string;
+  suggestedUnitPrice: number;
   orderMethod: ProcurementOrderMethod | null;
   orderMethodLabel: string;
   orderMethodError: string | null;
@@ -18,8 +19,12 @@ export interface VendorQueueLine {
 export interface VendorQueueGroup {
   supplierId: string | null;
   supplierName: string;
+  supplierRecipient: string | null;
+  supplierRecipientEmail: string | null;
   supplierContactEmail: string | null;
   supplierContactPhone: string | null;
+  supplierPaymentTerms: string | null;
+  supplierShippingTerms: string | null;
   lines: VendorQueueLine[];
   methods: ProcurementOrderMethod[];
   facilityCounts: Record<string, number>;
@@ -58,7 +63,7 @@ export function buildVendorQueueGroups(input: {
     const partId = normalizePartLinkId(card.partId) ?? card.partId;
     const part = partById.get(partId);
 
-    const candidateOrderMethod = part ? (part.orderMechanism ?? 'purchase_order') : null;
+    const candidateOrderMethod = part?.orderMechanism ?? 'purchase_order';
     let orderMethod: ProcurementOrderMethod | null = null;
     let orderMethodError: string | null = null;
     try {
@@ -76,8 +81,12 @@ export function buildVendorQueueGroups(input: {
       {
         supplierId: card.primarySupplierId ?? null,
         supplierName: card.supplierName ?? "Unassigned vendor",
+        supplierRecipient: card.supplierRecipient ?? null,
+        supplierRecipientEmail: card.supplierRecipientEmail ?? null,
         supplierContactEmail: card.supplierContactEmail ?? null,
         supplierContactPhone: card.supplierContactPhone ?? null,
+        supplierPaymentTerms: card.supplierPaymentTerms ?? null,
+        supplierShippingTerms: card.supplierShippingTerms ?? null,
         lines: [],
         methods: [],
         facilityCounts: {},
@@ -98,10 +107,19 @@ export function buildVendorQueueGroups(input: {
       group.draftPurchaseOrderIds.push(card.draftPurchaseOrderId);
     }
 
+    const supplierUnitCost = Number(card.supplierUnitCost);
+    const partUnitPrice = Number(part?.unitPrice ?? null);
+    const suggestedUnitPrice = Number.isFinite(supplierUnitCost)
+      ? supplierUnitCost
+      : Number.isFinite(partUnitPrice)
+        ? partUnitPrice
+        : 0;
+
     group.lines.push({
       card,
       part,
       partName: part?.name ?? `Part ${card.partId}`,
+      suggestedUnitPrice,
       orderMethod,
       orderMethodLabel,
       orderMethodError,

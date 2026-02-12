@@ -32,7 +32,7 @@ function StageDistribution({ summary }: { summary?: LoopCardSummary | null }) {
     <TooltipProvider delayDuration={200}>
       <div className="flex items-center gap-0.5">
         {CARD_STAGES.map((stage) => {
-          const count = summary.byStage[stage] ?? 0;
+          const count = summary.byStage?.[stage] ?? 0;
           if (count === 0) return null;
 
           return Array.from({ length: count }).map((_, i) => (

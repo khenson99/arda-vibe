@@ -10,11 +10,7 @@ import * as React from "react";
 import {
   Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
+  SidePanel,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
@@ -214,25 +210,14 @@ export function ModuleDialog() {
   );
 
   return (
-    <Dialog
+    <SidePanel
       open={isOpen}
-      onOpenChange={(open) => {
-        if (!open) dispatch({ type: "CLOSE_MODULE" });
-      }}
+      onClose={() => dispatch({ type: "CLOSE_MODULE" })}
+      title={meta?.title ?? "Import Module"}
+      subtitle={meta?.description}
+      width={meta?.wide ? "wide" : "default"}
     >
-      <DialogContent
-        className={cn(
-          "max-h-[90vh] overflow-y-auto",
-          meta?.wide ? "max-w-5xl" : "max-w-3xl",
-        )}
-      >
-        {meta && (
-          <DialogHeader>
-            <DialogTitle>{meta.title}</DialogTitle>
-            <DialogDescription>{meta.description}</DialogDescription>
-          </DialogHeader>
-        )}
-
+      <div className="p-4">
         <div className="mt-2">{activeModule && <ModuleRenderer module={activeModule} />}</div>
 
         {workflow && (
@@ -321,8 +306,8 @@ export function ModuleDialog() {
             )}
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </SidePanel>
   );
 }
 

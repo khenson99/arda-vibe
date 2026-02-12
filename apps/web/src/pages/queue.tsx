@@ -63,7 +63,7 @@ function mapGroupToExecutionSession(group: VendorQueueGroup, poIds: string[]): V
   return {
     supplierId: group.supplierId ?? "",
     supplierName: group.supplierName,
-    recipientEmail: group.supplierContactEmail,
+    recipientEmail: group.supplierRecipientEmail ?? group.supplierContactEmail,
     poIds,
     cardIds: group.lines.map((line) => line.card.id),
     methods,

@@ -100,4 +100,21 @@ describe("buildVendorQueueGroups", () => {
     expect(groups[0].hasUnknownMethods).toBe(false);
     expect(groups[0].lines[0].orderMethod).toBe("purchase_order");
   });
+
+  it("prefers supplier unit cost over part unit price for suggested line price", () => {
+    const groups = buildVendorQueueGroups({
+      cards: [
+        makeCard({
+          id: "card-price",
+          partId: "part-price",
+          primarySupplierId: "sup-price",
+          supplierName: "Pricing Vendor",
+          supplierUnitCost: "7.25",
+        }),
+      ],
+      parts: [makePart({ id: "part-price", unitPrice: "9.50" })],
+    });
+
+    expect(groups[0].lines[0].suggestedUnitPrice).toBe(7.25);
+  });
 });

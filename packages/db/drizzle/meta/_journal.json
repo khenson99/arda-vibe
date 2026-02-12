@@ -36,6 +36,13 @@
       "when": 1770937200000,
       "tag": "0004_lean_pull_flow",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1771023600000,
+      "tag": "0005_supplier_order_terms",
+      "breakpoints": true
     }
   ]
 }

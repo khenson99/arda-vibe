@@ -127,8 +127,11 @@ export const suppliers = catalogSchema.table(
     country: varchar('country', { length: 100 }).default('US'),
     website: text('website'),
     notes: text('notes'),
+    recipient: varchar('recipient', { length: 255 }),
+    recipientEmail: varchar('recipient_email', { length: 255 }),
     statedLeadTimeDays: integer('stated_lead_time_days'), // supplier-provided lead time
     paymentTerms: varchar('payment_terms', { length: 100 }), // "Net 30", "2/10 Net 30"
+    shippingTerms: varchar('shipping_terms', { length: 100 }),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

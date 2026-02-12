@@ -56,14 +56,14 @@ export function getScanDedupeManager(): ScanDedupeManager | null {
 
 // ─── Transition Matrix ───────────────────────────────────────────────
 // Maps each stage to its allowed next stages. This is the source of truth
-// for the Kanban flow: CREATED → TRIGGERED → ORDERED → IN_TRANSIT → RECEIVED → RESTOCKED → CREATED
+// for the Kanban flow: CREATED → TRIGGERED → ORDERED → IN_TRANSIT → RECEIVED → RESTOCKED → TRIGGERED
 export const VALID_TRANSITIONS: Record<string, string[]> = {
   created: ['triggered'],
   triggered: ['ordered'],
   ordered: ['in_transit', 'received'], // in_transit can be skipped for local procurement
   in_transit: ['received'],
   received: ['restocked'],
-  restocked: ['created'], // loop restart (new cycle)
+  restocked: ['triggered'], // loop restart (created is pre-circulation only)
 };
 
 // Alias for enhanced API consumers
@@ -137,11 +137,11 @@ export const TRANSITION_RULES: TransitionRule[] = [
   },
   {
     from: 'restocked',
-    to: 'created',
+    to: 'triggered',
     allowedRoles: ['tenant_admin', 'inventory_manager'],
     allowedLoopTypes: ['procurement', 'production', 'transfer'],
     allowedMethods: ['manual', 'system'],
-    description: 'Reset card for new cycle',
+    description: 'Restart card for the next cycle',
   },
 ];
 
@@ -339,8 +339,8 @@ export async function transitionCard(input: {
       if (linkedOrderType === 'transfer_order') updateData.linkedTransferOrderId = linkedOrderId;
     }
 
-    // If completing a cycle (restocked → created), increment the cycle counter
-    if (currentStage === 'restocked' && toStage === 'created') {
+    // If completing a cycle (restocked → triggered), increment the cycle counter
+    if (currentStage === 'restocked' && toStage === 'triggered') {
       updateData.completedCycles = sql`${kanbanCards.completedCycles} + 1`;
       updateData.linkedPurchaseOrderId = null;
       updateData.linkedWorkOrderId = null;
@@ -408,7 +408,7 @@ export async function transitionCard(input: {
     }
 
     // Cycle complete event
-    if (currentStage === 'restocked' && toStage === 'created') {
+    if (currentStage === 'restocked' && toStage === 'triggered') {
       const [cycleStartTransition] = await db
         .select({ transitionedAt: cardStageTransitions.transitionedAt })
         .from(cardStageTransitions)

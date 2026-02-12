@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { eq, and, sql, inArray, asc } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
@@ -21,6 +21,8 @@ const {
   cardStageTransitions,
   auditLog,
   suppliers,
+  supplierParts,
+  parts,
   purchaseOrders,
   purchaseOrderLines,
   workOrders,
@@ -590,6 +592,7 @@ const procurementOrderMethodSchema = z.enum([
 
 const createProcurementDraftSchema = z.object({
   supplierId: z.string().uuid(),
+  recipient: z.string().max(255).optional().nullable(),
   recipientEmail: z.string().email().optional().nullable(),
   paymentTerms: z.string().max(500).optional().nullable(),
   shippingTerms: z.string().max(500).optional().nullable(),
@@ -600,6 +603,7 @@ const createProcurementDraftSchema = z.object({
       z.object({
         cardId: z.string().uuid(),
         quantityOrdered: z.number().int().positive(),
+        unitPrice: z.number().nonnegative().optional().nullable(),
         description: z.string().max(2000).optional().nullable(),
         orderMethod: procurementOrderMethodSchema,
         sourceUrl: z.string().url().optional().nullable(),
@@ -739,8 +743,14 @@ orderQueueRouter.get('/', async (req: AuthRequest, res, next) => {
         facilityId: kanbanLoops.facilityId,
         primarySupplierId: kanbanLoops.primarySupplierId,
         supplierName: suppliers.name,
+        supplierRecipient: suppliers.recipient,
+        supplierRecipientEmail: suppliers.recipientEmail,
         supplierContactEmail: suppliers.contactEmail,
         supplierContactPhone: suppliers.contactPhone,
+        supplierPaymentTerms: suppliers.paymentTerms,
+        supplierShippingTerms: suppliers.shippingTerms,
+        supplierUnitCost: supplierParts.unitCost,
+        partUnitPrice: parts.unitPrice,
         sourceFacilityId: kanbanLoops.sourceFacilityId,
         orderQuantity: kanbanLoops.orderQuantity,
         minQuantity: kanbanLoops.minQuantity,
@@ -762,8 +772,21 @@ orderQueueRouter.get('/', async (req: AuthRequest, res, next) => {
       .from(kanbanCards)
       .innerJoin(kanbanLoops, eq(kanbanCards.loopId, kanbanLoops.id))
       .leftJoin(
+        parts,
+        and(eq(parts.id, kanbanLoops.partId), eq(parts.tenantId, tenantId))
+      )
+      .leftJoin(
         suppliers,
         and(eq(suppliers.id, kanbanLoops.primarySupplierId), eq(suppliers.tenantId, tenantId))
+      )
+      .leftJoin(
+        supplierParts,
+        and(
+          eq(supplierParts.partId, kanbanLoops.partId),
+          eq(supplierParts.supplierId, kanbanLoops.primarySupplierId),
+          eq(supplierParts.tenantId, tenantId),
+          eq(supplierParts.isActive, true)
+        )
       )
       .where(and(...conditions))
       .orderBy(asc(kanbanCards.currentStageEnteredAt));
@@ -884,8 +907,7 @@ orderQueueRouter.get('/risk-scan', async (req: AuthRequest, res, next) => {
   }
 });
 
-// POST /procurement/create-drafts - Create procurement draft purchase orders grouped by facility
-orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res, next) => {
+async function createProcurementDraftsHandler(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const tenantId = req.user?.tenantId;
     const auditContext = getRequestAuditContext(req);
@@ -919,14 +941,33 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
         facilityId: kanbanLoops.facilityId,
         primarySupplierId: kanbanLoops.primarySupplierId,
         supplierName: suppliers.name,
+        supplierRecipient: suppliers.recipient,
+        supplierRecipientEmail: suppliers.recipientEmail,
         supplierContactEmail: suppliers.contactEmail,
         supplierContactPhone: suppliers.contactPhone,
+        supplierPaymentTerms: suppliers.paymentTerms,
+        supplierShippingTerms: suppliers.shippingTerms,
+        supplierUnitCost: supplierParts.unitCost,
+        partUnitPrice: parts.unitPrice,
       })
       .from(kanbanCards)
       .innerJoin(kanbanLoops, eq(kanbanCards.loopId, kanbanLoops.id))
       .leftJoin(
+        parts,
+        and(eq(parts.id, kanbanLoops.partId), eq(parts.tenantId, tenantId))
+      )
+      .leftJoin(
         suppliers,
         and(eq(suppliers.id, kanbanLoops.primarySupplierId), eq(suppliers.tenantId, tenantId))
+      )
+      .leftJoin(
+        supplierParts,
+        and(
+          eq(supplierParts.partId, kanbanLoops.partId),
+          eq(supplierParts.supplierId, kanbanLoops.primarySupplierId),
+          eq(supplierParts.tenantId, tenantId),
+          eq(supplierParts.isActive, true)
+        )
       )
       .where(and(eq(kanbanCards.tenantId, tenantId), inArray(kanbanCards.id, cardIds)))
       .execute();
@@ -987,9 +1028,12 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
       });
     }
 
+    const supplierRecipient = cards[0]?.supplierRecipient?.trim() || null;
+    const supplierRecipientEmail = cards[0]?.supplierRecipientEmail?.trim() || null;
     const supplierContactEmail = cards[0]?.supplierContactEmail?.trim() || null;
     const supplierContactPhone = cards[0]?.supplierContactPhone?.trim() || null;
-    const recipientEmail = validatedData.recipientEmail?.trim() || supplierContactEmail;
+    const recipient = validatedData.recipient?.trim() || supplierRecipient;
+    const recipientEmail = validatedData.recipientEmail?.trim() || supplierRecipientEmail || supplierContactEmail;
     const thirdPartyInstructions = validatedData.thirdPartyInstructions?.trim() || null;
 
     const methodValidationErrors = validateProcurementDraftMethods({
@@ -1012,8 +1056,9 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
     }
 
     const notes = validatedData.notes?.trim() || null;
-    const paymentTerms = validatedData.paymentTerms?.trim() || null;
-    const shippingTerms = validatedData.shippingTerms?.trim() || null;
+    const paymentTerms = validatedData.paymentTerms?.trim() || cards[0]?.supplierPaymentTerms?.trim() || null;
+    const shippingTerms = validatedData.shippingTerms?.trim() || cards[0]?.supplierShippingTerms?.trim() || null;
+    const cardById = new Map(cards.map((card) => [card.id, card]));
 
     const result = await db.transaction(async (tx) => {
       const cardsByFacility = new Map<string, typeof cards>();
@@ -1028,6 +1073,7 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
         poNumber: string;
         facilityId: string;
         cardIds: string[];
+        lineTotalAmount: number;
       }> = [];
 
       for (const [facilityId, facilityCards] of cardsByFacility.entries()) {
@@ -1048,29 +1094,44 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
           .returning({ id: purchaseOrders.id })
           .execute();
 
+        const lineValues = facilityCards.map((card, index) => {
+          const line = lineByCardId.get(card.id)!;
+          const explicitUnitPrice = line.unitPrice != null ? Number(line.unitPrice) : NaN;
+          const supplierCost = Number(card.supplierUnitCost);
+          const partPrice = Number(card.partUnitPrice);
+          const resolvedUnitPrice = Number.isFinite(explicitUnitPrice)
+            ? explicitUnitPrice
+            : Number.isFinite(supplierCost)
+              ? supplierCost
+              : Number.isFinite(partPrice)
+                ? partPrice
+                : 0;
+          const normalizedUnitPrice = Math.max(0, roundTo(resolvedUnitPrice, 4));
+          const lineTotalAmount = Math.max(0, roundTo(normalizedUnitPrice * line.quantityOrdered, 4));
+
+          return {
+            tenantId,
+            purchaseOrderId: createdPO.id,
+            partId: card.partId,
+            kanbanCardId: card.id,
+            lineNumber: index + 1,
+            quantityOrdered: line.quantityOrdered,
+            quantityReceived: 0,
+            unitCost: normalizedUnitPrice.toFixed(4),
+            lineTotal: lineTotalAmount.toFixed(4),
+            notes: line.notes?.trim() || notes,
+            description: line.description?.trim() || null,
+            orderMethod: line.orderMethod,
+            sourceUrl: line.sourceUrl?.trim() || null,
+          };
+        });
+
         await tx
           .insert(purchaseOrderLines)
-          .values(
-            facilityCards.map((card, index) => {
-              const line = lineByCardId.get(card.id)!;
-              return {
-                tenantId,
-                purchaseOrderId: createdPO.id,
-                partId: card.partId,
-                kanbanCardId: card.id,
-                lineNumber: index + 1,
-                quantityOrdered: line.quantityOrdered,
-                quantityReceived: 0,
-                unitCost: '0',
-                lineTotal: '0',
-                notes: line.notes?.trim() || notes,
-                description: line.description?.trim() || null,
-                orderMethod: line.orderMethod,
-                sourceUrl: line.sourceUrl?.trim() || null,
-              };
-            })
-          )
+          .values(lineValues)
           .execute();
+
+        const lineTotalAmount = lineValues.reduce((sum, line) => sum + Number(line.lineTotal), 0);
 
         await writeOrderQueueAudit(tx, {
           tenantId,
@@ -1097,6 +1158,7 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
           poNumber,
           facilityId,
           cardIds: facilityCards.map((card) => card.id),
+          lineTotalAmount: roundTo(lineTotalAmount, 4),
         });
       }
 
@@ -1120,10 +1182,20 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
       message: `Created ${result.drafts.length} procurement draft purchase order(s)`,
       data: {
         supplierId: validatedData.supplierId,
+        recipient,
         recipientEmail,
         drafts: result.drafts,
         totalDrafts: result.drafts.length,
         totalCards: cardIds.length,
+        totalAmount: roundTo(result.drafts.reduce((sum, draft) => sum + draft.lineTotalAmount, 0), 4),
+        pricingSource: {
+          defaultOrder: ['line.unitPrice', 'supplier_parts.unit_cost', 'parts.unit_price', 'fallback_zero'],
+          cardIds: cardIds.map((cardId) => ({
+            cardId,
+            supplierUnitCost: cardById.get(cardId)?.supplierUnitCost ?? null,
+            partUnitPrice: cardById.get(cardId)?.partUnitPrice ?? null,
+          })),
+        },
       },
     });
   } catch (error) {
@@ -1132,10 +1204,14 @@ orderQueueRouter.post('/procurement/create-drafts', async (req: AuthRequest, res
     }
     next(error);
   }
-});
+}
 
-// POST /procurement/verify - Mark drafts as sent and transition cards triggered->ordered
-orderQueueRouter.post('/procurement/verify', async (req: AuthRequest, res, next) => {
+// POST /procurement/create-drafts - Create procurement draft purchase orders grouped by facility
+orderQueueRouter.post('/procurement/create-drafts', createProcurementDraftsHandler);
+// Compatibility alias: /queue/create-drafts
+orderQueueRouter.post('/create-drafts', createProcurementDraftsHandler);
+
+async function verifyProcurementDraftsHandler(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const tenantId = req.user?.tenantId;
     const auditContext = getRequestAuditContext(req);
@@ -1351,7 +1427,12 @@ orderQueueRouter.post('/procurement/verify', async (req: AuthRequest, res, next)
     }
     next(error);
   }
-});
+}
+
+// POST /procurement/verify - Mark drafts as sent and transition cards triggered->ordered
+orderQueueRouter.post('/procurement/verify', verifyProcurementDraftsHandler);
+// Compatibility alias: /queue/verify
+orderQueueRouter.post('/verify', verifyProcurementDraftsHandler);
 
 // POST /create-po - Create Purchase Order from triggered cards
 orderQueueRouter.post('/create-po', async (req: AuthRequest, res, next) => {

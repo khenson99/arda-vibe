@@ -1,14 +1,10 @@
 import { useState } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
   Button,
   Badge,
   Skeleton,
   Separator,
+  SidePanel,
 } from "@/components/ui";
 import { OrderStatusBadge, OrderTypeBadge } from "./order-status-badge";
 import { cn } from "@/lib/utils";
@@ -440,28 +436,22 @@ export function OrderDetailDrawer({
   const isTO = order.type === "transfer" && detail && "toNumber" in detail;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <DialogTitle className="text-base">
-                {order.orderNumber}
-              </DialogTitle>
-              <OrderTypeBadge type={order.type} />
-            </div>
-            {isPO && (
-              <StatusUpdateActions
-                po={detail as PurchaseOrder}
-                onUpdate={handleStatusUpdate}
-                updating={statusUpdating}
-              />
-            )}
-          </div>
-          <DialogDescription className="sr-only">
-            Details for order {order.orderNumber}
-          </DialogDescription>
-        </DialogHeader>
+    <SidePanel
+      open={open}
+      onClose={onClose}
+      title={order.orderNumber}
+      subtitle={`Details for ${order.orderNumber}`}
+      width="wide"
+      headerActions={<OrderTypeBadge type={order.type} />}
+    >
+      <div className="space-y-4 p-4">
+        {isPO && (
+          <StatusUpdateActions
+            po={detail as PurchaseOrder}
+            onUpdate={handleStatusUpdate}
+            updating={statusUpdating}
+          />
+        )}
 
         {loading ? (
           <div className="space-y-4 py-4">
@@ -587,7 +577,7 @@ export function OrderDetailDrawer({
             <StatusTimeline order={order} detail={detail} />
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </SidePanel>
   );
 }

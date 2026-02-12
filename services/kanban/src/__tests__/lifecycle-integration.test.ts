@@ -191,7 +191,7 @@ describe('Transition Matrix', () => {
     expect(VALID_TRANSITIONS.ordered).toEqual(['in_transit', 'received']);
     expect(VALID_TRANSITIONS.in_transit).toEqual(['received']);
     expect(VALID_TRANSITIONS.received).toEqual(['restocked']);
-    expect(VALID_TRANSITIONS.restocked).toEqual(['created']);
+    expect(VALID_TRANSITIONS.restocked).toEqual(['triggered']);
   });
 
   it('covers all 6 stages', () => {
@@ -208,8 +208,8 @@ describe('Transition Matrix', () => {
       expect(isValidTransition('created', 'triggered')).toBe(true);
     });
 
-    it('allows restocked → created (cycle restart)', () => {
-      expect(isValidTransition('restocked', 'created')).toBe(true);
+    it('allows restocked → triggered (cycle restart)', () => {
+      expect(isValidTransition('restocked', 'triggered')).toBe(true);
     });
 
     it('allows ordered → received (skip in_transit for local)', () => {

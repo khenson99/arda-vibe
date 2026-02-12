@@ -2,13 +2,9 @@ import * as React from "react";
 import { toast } from "sonner";
 import { Loader2, Plus } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   Button,
   Input,
+  SidePanel,
 } from "@/components/ui";
 import {
   ApiError,
@@ -364,20 +360,20 @@ export function CreateLoopDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Create Loop
-        </Button>
-      </DialogTrigger>
+    <>
+      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" />
+        Create Loop
+      </Button>
 
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Create Kanban Loop</DialogTitle>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      <SidePanel
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Create Kanban Loop"
+        subtitle="Define the pull loop parameters and starting cards"
+        width="default"
+      >
+        <form onSubmit={handleSubmit} noValidate className="space-y-4 p-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground" htmlFor="create-partId">
               Item <span className="text-destructive">*</span>
@@ -682,7 +678,7 @@ export function CreateLoopDialog({
             </Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </SidePanel>
+    </>
   );
 }

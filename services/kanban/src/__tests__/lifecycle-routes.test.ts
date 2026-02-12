@@ -45,7 +45,7 @@ vi.mock('../services/card-lifecycle.service.js', () => ({
     ordered: ['in_transit', 'received'],
     in_transit: ['received'],
     received: ['restocked'],
-    restocked: ['created'],
+    restocked: ['triggered'],
   },
   TRANSITION_MATRIX: {
     created: ['triggered'],
@@ -53,7 +53,7 @@ vi.mock('../services/card-lifecycle.service.js', () => ({
     ordered: ['in_transit', 'received'],
     in_transit: ['received'],
     received: ['restocked'],
-    restocked: ['created'],
+    restocked: ['triggered'],
   },
   TRANSITION_RULES: [],
   isValidTransition: vi.fn(),
@@ -390,6 +390,7 @@ describe('Lifecycle Route Service Integration', () => {
         totalCards: 3,
         numberOfCards: 3,
         stageCounts: { created: 1, triggered: 1, ordered: 1 },
+        byStage: { created: 1, triggered: 1, ordered: 1 },
         triggeredCount: 1,
         inFlightCount: 2,
         inFlightQuantity: 200,
@@ -406,6 +407,7 @@ describe('Lifecycle Route Service Integration', () => {
       const result = await mockGetLoopCardSummary('loop-001', 'tenant-001');
       expect(result.cardMode).toBe('multi');
       expect(result.totalCards).toBe(3);
+      expect(result.byStage.created).toBe(1);
       expect(result.inFlightCount).toBe(2);
       expect(result.cards).toHaveLength(3);
     });

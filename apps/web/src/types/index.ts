@@ -101,8 +101,13 @@ export interface QueueCard {
   facilityId: string;
   primarySupplierId?: string | null;
   supplierName?: string | null;
+  supplierRecipient?: string | null;
+  supplierRecipientEmail?: string | null;
   supplierContactEmail?: string | null;
   supplierContactPhone?: string | null;
+  supplierPaymentTerms?: string | null;
+  supplierShippingTerms?: string | null;
+  supplierUnitCost?: string | number | null;
   draftPurchaseOrderId?: string | null;
   minQuantity: number;
   orderQuantity: number;
@@ -179,8 +184,13 @@ export interface SupplierRecord {
   tenantId: string;
   name: string;
   code?: string | null;
+  contactName?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
+  recipient?: string | null;
+  recipientEmail?: string | null;
+  paymentTerms?: string | null;
+  shippingTerms?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -198,6 +208,7 @@ export type ProcurementOrderMethod =
 export interface ProcurementDraftLineInput {
   cardId: string;
   quantityOrdered: number;
+  unitPrice?: number | null;
   description?: string | null;
   orderMethod: ProcurementOrderMethod;
   sourceUrl?: string | null;
@@ -206,6 +217,7 @@ export interface ProcurementDraftLineInput {
 
 export interface CreateProcurementDraftsInput {
   supplierId: string;
+  recipient?: string | null;
   recipientEmail?: string | null;
   paymentTerms?: string | null;
   shippingTerms?: string | null;
@@ -216,6 +228,7 @@ export interface CreateProcurementDraftsInput {
 
 export interface CreateProcurementDraftsResult {
   supplierId: string;
+  recipient?: string | null;
   recipientEmail: string | null;
   drafts: Array<{
     poId: string;

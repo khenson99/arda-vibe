@@ -2,7 +2,7 @@ import * as React from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { Truck, Factory, Package2, Clock, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { KanbanCard, LoopType } from "@/types";
+import type { KanbanCard, LoopType, CardStage } from "@/types";
 
 /* ── Loop type visual config ────────────────────────────────── */
 
@@ -51,12 +51,48 @@ function ageHours(isoTimestamp: string): number {
 interface BoardCardProps {
   card: KanbanCard;
   onClick: (card: KanbanCard) => void;
+  onMoveNext: (card: KanbanCard) => Promise<void>;
+  onMovePrevious: (card: KanbanCard) => Promise<void>;
+  onCreateOrder: (card: KanbanCard) => Promise<void>;
   isDragOverlay?: boolean;
+}
+
+const TRANSITION_MATRIX: Record<CardStage, CardStage[]> = {
+  created: ["triggered"],
+  triggered: ["ordered"],
+  ordered: ["in_transit", "received"],
+  in_transit: ["received"],
+  received: ["restocked"],
+  restocked: ["triggered"],
+};
+
+function getNextStage(card: KanbanCard): CardStage | null {
+  const options = TRANSITION_MATRIX[card.currentStage] ?? [];
+  if (options.length === 0) return null;
+
+  if (card.currentStage === "ordered") {
+    if (card.loopType === "production") return "received";
+    return "in_transit";
+  }
+
+  return options[0] ?? null;
+}
+
+function getPreviousStage(card: KanbanCard): CardStage | null {
+  if (card.currentStage === "triggered") return "created";
+  if (card.currentStage === "ordered") return "triggered";
+  if (card.currentStage === "in_transit") return "ordered";
+  if (card.currentStage === "received") return "in_transit";
+  if (card.currentStage === "restocked") return "received";
+  return null;
 }
 
 export const BoardCard = React.memo(function BoardCard({
   card,
   onClick,
+  onMoveNext,
+  onMovePrevious,
+  onCreateOrder,
   isDragOverlay = false,
 }: BoardCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -73,6 +109,17 @@ export const BoardCard = React.memo(function BoardCard({
   const LoopIcon = loopConfig?.icon ?? Package2;
   const age = formatAge(card.currentStageEnteredAt);
   const isAging = ageHours(card.currentStageEnteredAt) >= 24;
+  const nextStage = getNextStage(card);
+  const previousStage = getPreviousStage(card);
+  const canMoveNext =
+    !!nextStage && (TRANSITION_MATRIX[card.currentStage] ?? []).includes(nextStage);
+  const canMovePrevious =
+    !!previousStage && (TRANSITION_MATRIX[card.currentStage] ?? []).includes(previousStage);
+  const canCreateOrder = card.currentStage === "triggered" && card.loopType === "procurement";
+
+  const blockDragFromButton = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  };
 
   return (
     <div
@@ -142,6 +189,59 @@ export const BoardCard = React.memo(function BoardCard({
           </div>
         )}
       </button>
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        <button
+          type="button"
+          className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+          onPointerDown={blockDragFromButton}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick(card);
+          }}
+        >
+          View
+        </button>
+        <button
+          type="button"
+          className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          title={canMovePrevious ? "Move to previous stage" : "Previous stage is not allowed by lifecycle rules"}
+          disabled={!canMovePrevious}
+          onPointerDown={blockDragFromButton}
+          onClick={(event) => {
+            event.stopPropagation();
+            void onMovePrevious(card);
+          }}
+        >
+          Prev
+        </button>
+        <button
+          type="button"
+          className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          title={canMoveNext ? "Move to next stage" : "Next stage is not allowed by lifecycle rules"}
+          disabled={!canMoveNext}
+          onPointerDown={blockDragFromButton}
+          onClick={(event) => {
+            event.stopPropagation();
+            void onMoveNext(card);
+          }}
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          title={canCreateOrder ? "Create order" : "Create Order is available for triggered procurement cards only"}
+          disabled={!canCreateOrder}
+          onPointerDown={blockDragFromButton}
+          onClick={(event) => {
+            event.stopPropagation();
+            void onCreateOrder(card);
+          }}
+        >
+          Create Order
+        </button>
+      </div>
     </div>
   );
 });

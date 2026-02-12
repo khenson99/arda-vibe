@@ -19,6 +19,8 @@ const createSupplierSchema = z.object({
   contactName: z.string().max(255).optional(),
   contactEmail: z.string().email().optional(),
   contactPhone: z.string().max(50).optional(),
+  recipient: z.string().max(255).optional(),
+  recipientEmail: z.string().email().optional(),
   addressLine1: z.string().max(255).optional(),
   addressLine2: z.string().max(255).optional(),
   city: z.string().max(100).optional(),
@@ -29,6 +31,7 @@ const createSupplierSchema = z.object({
   notes: z.string().optional(),
   statedLeadTimeDays: z.number().int().positive().optional(),
   paymentTerms: z.string().max(100).optional(),
+  shippingTerms: z.string().max(100).optional(),
 });
 
 // ─── GET /suppliers ───────────────────────────────────────────────────

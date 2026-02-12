@@ -46,6 +46,8 @@ const schemaMock = vi.hoisted(() => {
     kanbanCards: makeTable('kanban_cards'),
     kanbanLoops: makeTable('kanban_loops'),
     suppliers: makeTable('suppliers'),
+    parts: makeTable('parts'),
+    supplierParts: makeTable('supplier_parts'),
     auditLog: makeTable('audit_log'),
     purchaseOrders: makeTable('purchase_orders'),
     purchaseOrderLines: makeTable('purchase_order_lines'),

@@ -24,7 +24,7 @@ describe('VALID_TRANSITIONS', () => {
   });
 
   it('forms a complete cycle from created back to created', () => {
-    const cycle = ['created', 'triggered', 'ordered', 'in_transit', 'received', 'restocked', 'created'];
+    const cycle = ['created', 'triggered', 'ordered', 'in_transit', 'received', 'restocked', 'triggered'];
     for (let i = 0; i < cycle.length - 1; i++) {
       expect(VALID_TRANSITIONS[cycle[i]]).toContain(cycle[i + 1]);
     }
@@ -50,7 +50,7 @@ describe('isValidTransition', () => {
     expect(isValidTransition('ordered', 'received')).toBe(true);
     expect(isValidTransition('in_transit', 'received')).toBe(true);
     expect(isValidTransition('received', 'restocked')).toBe(true);
-    expect(isValidTransition('restocked', 'created')).toBe(true);
+    expect(isValidTransition('restocked', 'triggered')).toBe(true);
   });
 
   it('returns false for backward transitions', () => {

@@ -17,12 +17,43 @@ import type { GroupedCards } from "@/hooks/use-kanban-board";
 import type { KanbanCard, CardStage } from "@/types";
 import { CARD_STAGES, CARD_STAGE_META } from "@/types";
 
+const CARD_TRANSITION_MATRIX: Record<CardStage, CardStage[]> = {
+  created: ["triggered"],
+  triggered: ["ordered"],
+  ordered: ["in_transit", "received"],
+  in_transit: ["received"],
+  received: ["restocked"],
+  restocked: ["triggered"],
+};
+
+function getNextStage(card: KanbanCard): CardStage | null {
+  const options = CARD_TRANSITION_MATRIX[card.currentStage] ?? [];
+  if (options.length === 0) return null;
+
+  if (card.currentStage === "ordered") {
+    if (card.loopType === "production") return "received";
+    return "in_transit";
+  }
+
+  return options[0] ?? null;
+}
+
+function getPreviousStage(card: KanbanCard): CardStage | null {
+  if (card.currentStage === "triggered") return "created";
+  if (card.currentStage === "ordered") return "triggered";
+  if (card.currentStage === "in_transit") return "ordered";
+  if (card.currentStage === "received") return "in_transit";
+  if (card.currentStage === "restocked") return "received";
+  return null;
+}
+
 /* ── Props ──────────────────────────────────────────────────── */
 
 interface BoardContainerProps {
   grouped: GroupedCards;
   allCards: KanbanCard[];
   moveCard: (cardId: string, toStage: CardStage) => Promise<boolean>;
+  onCreateOrder: (card: KanbanCard) => Promise<boolean>;
   onCardClick: (card: KanbanCard) => void;
 }
 
@@ -32,6 +63,7 @@ export function BoardContainer({
   grouped,
   allCards,
   moveCard,
+  onCreateOrder,
   onCardClick,
 }: BoardContainerProps) {
   const [activeCard, setActiveCard] = React.useState<KanbanCard | null>(null);
@@ -45,6 +77,56 @@ export function BoardContainer({
     activationConstraint: { delay: 200, tolerance: 6 },
   });
   const sensors = useSensors(pointerSensor, touchSensor);
+
+  const handleMoveNext = React.useCallback(
+    async (card: KanbanCard) => {
+      const toStage = getNextStage(card);
+      if (!toStage) {
+        toast.error("No valid next stage for this card.");
+        return;
+      }
+      try {
+        await moveCard(card.id, toStage);
+        toast.success(`Card #${card.cardNumber} moved to ${CARD_STAGE_META[toStage].label}`);
+      } catch (err) {
+        toast.error(parseApiError(err));
+      }
+    },
+    [moveCard],
+  );
+
+  const handleMovePrevious = React.useCallback(
+    async (card: KanbanCard) => {
+      const toStage = getPreviousStage(card);
+      if (!toStage) {
+        toast.error("No valid previous stage for this card.");
+        return;
+      }
+      try {
+        await moveCard(card.id, toStage);
+        toast.success(`Card #${card.cardNumber} moved to ${CARD_STAGE_META[toStage].label}`);
+      } catch (err) {
+        toast.error(parseApiError(err));
+      }
+    },
+    [moveCard],
+  );
+
+  const handleCreateOrder = React.useCallback(
+    async (card: KanbanCard) => {
+      try {
+        const created = await onCreateOrder(card);
+        if (created) {
+          toast.success(`Order created from card #${card.cardNumber}`);
+          return;
+        }
+        toast.error("Create Order is only available for triggered procurement cards.");
+      } catch (err) {
+        toast.error(parseApiError(err));
+      }
+    },
+    [onCreateOrder],
+  );
 
   /* ── Drag handlers ──────────────────────────────────────── */
 
@@ -107,6 +189,9 @@ export function BoardContainer({
               stage={stage}
               cards={grouped[stage]}
               onCardClick={onCardClick}
+              onMoveNext={handleMoveNext}
+              onMovePrevious={handleMovePrevious}
+              onCreateOrder={handleCreateOrder}
             />
           </div>
         ))}
@@ -119,6 +204,9 @@ export function BoardContainer({
             <BoardCard
               card={activeCard}
               onClick={() => {}}
+              onMoveNext={handleMoveNext}
+              onMovePrevious={handleMovePrevious}
+              onCreateOrder={handleCreateOrder}
               isDragOverlay
             />
           </div>

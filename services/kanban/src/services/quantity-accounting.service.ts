@@ -288,6 +288,7 @@ export async function getLoopCardSummary(loopId: string, tenantId: string) {
   for (const card of cards) {
     stageCounts[card.currentStage] = (stageCounts[card.currentStage] || 0) + 1;
   }
+  const byStage = { ...stageCounts };
 
   // Counting metrics
   const triggeredCount = cards.filter((c) => c.currentStage === 'triggered').length;
@@ -302,6 +303,7 @@ export async function getLoopCardSummary(loopId: string, tenantId: string) {
     totalCards: cards.length,
     numberOfCards: loop.numberOfCards,
     stageCounts,
+    byStage,
     triggeredCount,
     inFlightCount,
     inFlightQuantity,
