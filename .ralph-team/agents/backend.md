@@ -114,6 +114,17 @@ patterns, gotchas, and conventions.
 - Route helper functions (e.g. writeWorkOrderStatusAudit) also need refactoring — easy to miss in grep
 - Drizzle insert chain `.values(...).returning({col}).execute()`: .returning() returns a builder, not an array
 
+### Auth Audit Pattern
+- Centralized audit helpers in `services/auth/src/services/auth-audit.ts`: action constants, redaction, writeAuthAuditEntry
+- Service functions accept optional `auditCtx?: AuthAuditContext` (ipAddress, userAgent, userId)
+- Routes extract audit context with `extractAuditContext(req)` — works for both authenticated and unauthenticated requests
+- For unauthenticated endpoints: extract IP from X-Forwarded-For or socket.remoteAddress, UA from header
+- `redactSensitiveFields()` deep-clones and replaces sensitive keys with '[REDACTED]' — applied to previousState/newState/metadata
+- User management actions use `performedBy` field in input to track the admin who performed the action
+- Failed login audits use `userId: null` (security event, can't attribute to authenticated user)
+- Login with unknown email produces no audit entry (no tenantId available for hash chain)
+- FR-05 action constants: user.login, user.login_failed, user.logout, user.registered, user.password_reset_requested, user.password_reset_completed, token.refreshed, token.replay_detected, token.revoked, user.invited, user.role_changed, user.deactivated, user.reactivated, oauth.google_login, oauth.google_linked, oauth.google_registered, api_key.created, api_key.revoked
+
 ### Express Routes
 - Register routers in service index.ts with `app.use(prefix, router)`
 - Middleware order: helmet → cors → express.json → routes → errorHandler

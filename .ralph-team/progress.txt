@@ -205,3 +205,46 @@ Learnings:
   - Test mock pattern for .returning().execute() chain: mock returning() to return object with execute() method
   - Drizzle insert chain: .values(...).returning({col}).execute() — the returning returns a builder, not a result
   - Zero inline db.insert(auditLog) / tx.insert(schema.auditLog) remain in non-test files after this iteration
+
+--- Architect Iteration 5 ---
+Timestamp: 2026-02-12T23:55:00Z
+Tickets assigned: #254 (MVP-18/T5 — auth audit events), #255 (MVP-18/T6 — kanban audit writes)
+Tickets completed: none (all 4 current tickets awaiting review)
+Tickets blocked: none
+Decisions made: ADR-006 (Continue MVP-18 T5-T6 while PRs await review)
+Learnings:
+  - PR #382 CI fully completed: Lint/Typecheck PASS, Security Gates PASS, all new suites PASS
+  - PR #382 failures are all pre-existing on main: kanban, orders, web unit tests + Integration Tests
+  - Only PR-specific failure: Migration Safety (needs migration-approved label per ADR-005)
+  - PR #385 CI still running (Lint & Typecheck in progress), Security Gates all PASS
+  - Both PRs are MERGEABLE — no conflicts
+  - Backend-engineer idle after completing all 4 tickets — assigning T5 and T6 to keep momentum
+  - T5 (#254) and T6 (#255) can be developed on branches off issue-253 without waiting for merges
+  - Critical path: review and merge PR #382 → then PR #385 → then T5/T6 PRs
+
+--- Backend Agent Iteration 6 | Issue #254 ---
+Timestamp: 2026-02-13T03:05:00Z
+Status: completed
+Changes:
+  New files:
+  - services/auth/src/services/auth-audit.ts (centralized FR-05 action constants, redactSensitiveFields, writeAuthAuditEntry helper)
+  - services/auth/src/services/auth-audit.test.ts (8 unit tests — action constants, redaction logic)
+  - services/auth/src/services/auth-audit-integration.test.ts (11 integration tests — register, login, login_failed, invite, role change, deactivation, redaction, context propagation)
+  Modified files:
+  - services/auth/src/services/auth.service.ts (audit writes for register, login, login_failed, forgotPassword, resetPassword, refreshAccessToken, token replay, Google OAuth login/link/register)
+  - services/auth/src/services/user-management.service.ts (audit writes for inviteUser, updateUserRole, deactivateUser with previousState/newState)
+  - services/auth/src/routes/auth.routes.ts (extractAuditContext helper, audit context propagation to all service calls, logout audit write)
+  - services/auth/src/routes/users.routes.ts (extractAuditContext, performedBy propagation)
+  - 3 existing test files: added writeAuditEntry/writeAuditEntries to @arda/db mocks
+Tests: 56 total passing (19 new + 37 existing), TypeScript clean. Build succeeds.
+PR: https://github.com/khenson99/arda-v2/pull/386
+Learnings:
+  - Auth service functions accept optional `auditCtx?: AuthAuditContext` parameter (IP/UA/userId) — routes extract and pass through
+  - For unauthenticated routes (login, register, etc.), extract IP/UA from req headers directly (no authMiddleware needed)
+  - Failed login audit entries use userId: null — can't attribute to a user since credentials are invalid
+  - Login with unknown email can't produce audit (no tenantId available) — document this gap
+  - User management functions accept `performedBy` in input type to track the admin who performed the action
+  - writeAuthAuditEntry wraps writeAuditEntry with automatic redactSensitiveFields on previousState/newState/metadata
+  - Sensitive field set: password, passwordHash, token, tokenHash, refreshToken, accessToken, idToken, apiKey, keyHash, secret, webhookSecret, resetToken
+  - Google OAuth has 3 audit paths: google_login (existing account), google_linked (email match, auto-link), google_registered (new account)
+  - Auth service deactivated-account login failures produce audit with userId: null and reason: 'account_deactivated'
