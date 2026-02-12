@@ -1336,10 +1336,14 @@ export interface KanbanCardPrintDetail {
   cardNumber: number;
   currentStage: CardStage;
   loopType?: LoopType;
+  partNumber?: string;
   partName?: string;
   facilityName?: string;
+  supplierName?: string;
   minQuantity?: number;
   orderQuantity?: number;
+  imageUrl?: string;
+  itemNotes?: string;
   qrCode?: string;
   scanUrl?: string;
   loop?: {
@@ -1357,6 +1361,8 @@ export interface KanbanCardPrintDetail {
     statedLeadTimeDays?: number;
     safetyStockDays?: number;
     notes?: string;
+    imageUrl?: string;
+    itemNotes?: string;
   } | null;
 }
 

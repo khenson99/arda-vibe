@@ -148,6 +148,9 @@ export function CardLabelDesigner({
   const [isPrinting, setIsPrinting] = React.useState(false);
   const [isSavingImageUrl, setIsSavingImageUrl] = React.useState(false);
   const [draft, setDraft] = React.useState<EditorDraft>(() => buildFallbackDraftFromPart(part));
+  const selectedCardId = selectedCard?.id ?? null;
+  const partLoopLookupKey = `${part.id}|${part.eId ?? ""}|${part.partNumber}|${part.externalGuid ?? ""}`;
+  const partForLoop = React.useMemo(() => part, [partLoopLookupKey]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -156,7 +159,7 @@ export function CardLabelDesigner({
       setLoadError(null);
       try {
         const loops = await withTimeout(
-          fetchLoopsForPart(token, part),
+          fetchLoopsForPart(token, partForLoop),
           CARD_PREVIEW_LOAD_TIMEOUT_MS,
           "Loading card loops timed out.",
         );
@@ -200,21 +203,20 @@ export function CardLabelDesigner({
     return () => {
       cancelled = true;
     };
-  }, [token, part, onUnauthorized]);
+  }, [token, partForLoop, onUnauthorized]);
 
   React.useEffect(() => {
-    if (!selectedCard) {
+    if (!selectedCardId) {
       setBasePrintData(null);
       setDraft(buildFallbackDraftFromPart(part));
       return;
     }
-
-    const selectedCardId = selectedCard.id;
+    const currentSelectedCardId = selectedCardId;
     let cancelled = false;
     async function loadPreviewData() {
       setIsLoadingPreviewData(true);
       try {
-        const detail = await fetchCardPrintDetail(token, selectedCardId);
+        const detail = await fetchCardPrintDetail(token, currentSelectedCardId);
         if (cancelled) return;
 
         const mapped = mapCardPrintDetailToPrintData(detail, { tenantName, tenantLogoUrl });
@@ -238,7 +240,7 @@ export function CardLabelDesigner({
     return () => {
       cancelled = true;
     };
-  }, [token, selectedCard, tenantName, tenantLogoUrl, onUnauthorized, part]);
+  }, [token, selectedCardId, tenantName, tenantLogoUrl, onUnauthorized, part]);
 
   const previewData = React.useMemo(() => {
     if (!basePrintData) return null;

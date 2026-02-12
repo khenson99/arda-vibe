@@ -60,8 +60,7 @@ function cleanString(value: unknown, fallback = ""): string {
 
 function formatQty(value: unknown): string {
   const qty = toNonNegativeNumber(value, 0);
-  const unit = qty === 1 ? "each" : "each";
-  return `${qty} ${unit}`;
+  return `${qty} each`;
 }
 
 export function mapCardPrintDetailToPrintData(

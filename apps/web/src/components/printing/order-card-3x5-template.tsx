@@ -47,10 +47,22 @@ const ICON_SVGS = {
   location:
     '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1118 0z"/><circle cx="12" cy="10" r="3"/></svg>',
   order:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>',
+    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3H9z"/><rect x="6" y="5" width="12" height="16" rx="2"/><path d="M9 11h6"/><path d="M9 15h4"/></svg>',
   supplier:
     '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1 1 0 00.2 1.1l.1.1a1 1 0 010 1.4l-1 1a1 1 0 01-1.4 0l-.1-.1a1 1 0 00-1.1-.2 1 1 0 00-.6.9V20a1 1 0 01-1 1h-1.5a1 1 0 01-1-1v-.1a1 1 0 00-.6-.9 1 1 0 00-1.1.2l-.1.1a1 1 0 01-1.4 0l-1-1a1 1 0 010-1.4l.1-.1a1 1 0 00.2-1.1 1 1 0 00-.9-.6H4a1 1 0 01-1-1v-1.5a1 1 0 011-1h.1a1 1 0 00.9-.6 1 1 0 00-.2-1.1l-.1-.1a1 1 0 010-1.4l1-1a1 1 0 011.4 0l.1.1a1 1 0 001.1.2 1 1 0 00.6-.9V4a1 1 0 011-1h1.5a1 1 0 011 1v.1a1 1 0 00.6.9 1 1 0 001.1-.2l.1-.1a1 1 0 011.4 0l1 1a1 1 0 010 1.4l-.1.1a1 1 0 00-.2 1.1 1 1 0 00.9.6h.1a1 1 0 011 1V13a1 1 0 01-1 1h-.1a1 1 0 00-.9.6z"/></svg>',
 };
+
+function normalizeImageUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 function buildOrderCard3x5LayoutModel(data: KanbanPrintData, config: FormatConfig): OrderCard3x5LayoutModel {
   const accentColor = normalizeColor(data.accentColor);
@@ -138,12 +150,13 @@ export function renderOrderCard3x5Html(data: KanbanPrintData, config: FormatConf
   const titleHtml = model.titleLines.map((line) => escapeHtml(line)).join('<br/>');
   const skuHtml = model.skuLines.map((line) => escapeHtml(line)).join('<br/>');
   const notesHtml = model.notesLines.map((line) => escapeHtml(line)).join('<br/>');
-  const imageHtml = data.imageUrl
-    ? `<img src="${escapeHtml(data.imageUrl)}" alt="Item image" style="display:block;max-width:100%;max-height:100%;object-fit:contain;"/>`
+  const normalizedImageUrl = normalizeImageUrl(data.imageUrl);
+  const imageHtml = normalizedImageUrl
+    ? `<img src="${escapeHtml(normalizedImageUrl)}" alt="Item image" style="display:block;max-width:100%;max-height:100%;object-fit:contain;"/>`
     : `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:${PLACEHOLDER_BG};color:#8a8a8a;font-size:11px;">No image</div>`;
 
   return `
-    <div class="print-card" style="position:relative;box-sizing:border-box;width:${config.widthPx}px;height:${config.heightPx}px;padding:${config.safeInsetPx}px;background:${CARD_BG};font-family:'Open Sans',Arial,sans-serif;border:1px solid #ddd;overflow:hidden;">
+    <div class="print-card" style="position:relative;box-sizing:border-box;width:${config.widthPx}px;height:${config.heightPx}px;padding:${config.safeInsetPx}px;background:${CARD_BG};font-family:'Open Sans',Arial,sans-serif;border:1px solid #ddd;overflow:hidden;display:flex;flex-direction:column;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:${model.titleFontSizePx}px;font-weight:700;line-height:1.1;color:#111;max-height:72px;overflow:hidden;">${titleHtml}</div>
@@ -160,16 +173,16 @@ export function renderOrderCard3x5Html(data: KanbanPrintData, config: FormatConf
         ${model.fields.map(renderFieldRow).join('')}
       </div>
 
-      <div style="margin-top:10px;height:166px;display:flex;align-items:center;justify-content:center;">
+      <div style="margin-top:8px;flex:1;min-height:120px;display:flex;align-items:center;justify-content:center;">
         ${imageHtml}
       </div>
 
-      <div style="margin-top:3px;height:22px;font-size:${model.notesFontSizePx}px;line-height:1.2;color:#7b7b7b;overflow:hidden;">
+      <div style="margin-top:4px;min-height:20px;font-size:${model.notesFontSizePx}px;line-height:1.2;color:#7b7b7b;overflow:hidden;">
         ${notesHtml}
       </div>
 
-      <div style="margin-top:6px;height:17px;background:${model.accentColor};"></div>
-      <div style="margin-top:8px;text-align:center;font-size:15px;line-height:1;color:#e2e2e2;">Arda</div>
+      <div style="margin-top:4px;height:17px;background:${model.accentColor};"></div>
+      <div style="margin-top:6px;text-align:center;font-size:15px;line-height:1;color:#e2e2e2;">Arda</div>
     </div>
   `;
 }
