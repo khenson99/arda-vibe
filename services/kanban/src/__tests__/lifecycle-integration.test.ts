@@ -89,6 +89,7 @@ vi.mock('@arda/events', () => ({
 
 vi.mock('@arda/config', () => ({
   config: { REDIS_URL: 'redis://localhost:6379' },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock('../middleware/error-handler.js', () => ({
@@ -631,6 +632,10 @@ describe('transitionCard Orchestrator', () => {
 describe('triggerCardByScan', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFindFirst.mockReset();
+    mockSelectLimit.mockReset();
+    mockSelectLimit.mockResolvedValue([]);
+    mockTransaction.mockReset();
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
       const tx = {
         insert: vi.fn().mockReturnValue({
@@ -687,26 +692,22 @@ describe('triggerCardByScan', () => {
 
     await expect(
       triggerCardByScan({ cardId: 'card-001' })
-    ).rejects.toThrow('already in the "triggered" stage');
+    ).rejects.toThrow('Scan conflict: card is in "triggered" stage');
   });
 
-  it('returns success for idempotent replay after card already advanced', async () => {
+  it('rejects idempotent replay after card already advanced', async () => {
     const triggeredCard = makeCard({ currentStage: 'triggered' });
-    mockFindFirst
-      .mockResolvedValueOnce(triggeredCard)
-      .mockResolvedValueOnce(triggeredCard);
+    mockFindFirst.mockResolvedValueOnce(triggeredCard);
     mockSelectLimit.mockResolvedValueOnce([
       makeTransition({
         metadata: { idempotencyKey: 'scan-card-001-session-123' },
       }),
     ]);
 
-    const result = await triggerCardByScan({
+    await expect(triggerCardByScan({
       cardId: 'card-001',
       idempotencyKey: 'scan-card-001-session-123',
-    });
-
-    expect(result.message).toContain('Order Queue');
+    })).rejects.toThrow('Scan conflict: card is in "triggered" stage');
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 

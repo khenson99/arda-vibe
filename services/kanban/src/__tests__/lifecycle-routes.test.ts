@@ -16,7 +16,10 @@ vi.mock('@arda/db', () => ({
   },
 }));
 vi.mock('@arda/events', () => ({ getEventBus: vi.fn(() => ({ publish: vi.fn() })) }));
-vi.mock('@arda/config', () => ({ config: { REDIS_URL: 'redis://localhost:6379' } }));
+vi.mock('@arda/config', () => ({
+  config: { REDIS_URL: 'redis://localhost:6379' },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
 vi.mock('../../middleware/error-handler.js', () => ({
   AppError: class AppError extends Error {
     constructor(public statusCode: number, message: string, public code?: string) {

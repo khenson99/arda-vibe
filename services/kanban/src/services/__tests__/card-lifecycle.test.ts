@@ -3,7 +3,10 @@ import { describe, it, expect, vi } from 'vitest';
 // Mock heavy dependencies that need env vars / database connections
 vi.mock('@arda/db', () => ({ db: {}, schema: {} }));
 vi.mock('@arda/events', () => ({ getEventBus: vi.fn() }));
-vi.mock('@arda/config', () => ({ config: { REDIS_URL: 'redis://localhost:6379' } }));
+vi.mock('@arda/config', () => ({
+  config: { REDIS_URL: 'redis://localhost:6379' },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
 vi.mock('../../middleware/error-handler.js', () => ({
   AppError: class AppError extends Error {
     constructor(public status: number, message: string, public code?: string) {

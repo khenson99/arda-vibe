@@ -59,6 +59,7 @@ vi.mock('@arda/config', () => ({
     REDIS_URL: 'redis://localhost:6379',
     APP_URL: 'https://app.arda.io',
   },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock('../../middleware/error-handler.js', () => ({

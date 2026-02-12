@@ -6,6 +6,7 @@ vi.mock('@arda/config', () => ({
     NODE_ENV: 'development',
     APP_URL: 'http://localhost:5173',
   },
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 import { buildScanUrl } from '../qr-generator.js';
