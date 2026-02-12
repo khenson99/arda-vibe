@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, inArray, sql, gt } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { getEventBus } from '@arda/events';
 import { config } from '@arda/config';
 import type { AuthRequest } from '@arda/auth-utils';
@@ -236,6 +236,29 @@ loopsRouter.post('/', async (req: AuthRequest, res, next) => {
         changedByUserId: req.user!.sub,
       });
 
+      // Audit: loop created
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: req.user!.sub,
+        action: 'loop.created',
+        entityType: 'kanban_loop',
+        entityId: loop.id,
+        newState: {
+          loopType: input.loopType,
+          cardMode: input.cardMode,
+          minQuantity: input.minQuantity,
+          orderQuantity: input.orderQuantity,
+          numberOfCards: input.numberOfCards,
+          partId: input.partId,
+          facilityId: input.facilityId,
+        },
+        metadata: {
+          cardsCreated: cards.length,
+          ...(input.primarySupplierId ? { primarySupplierId: input.primarySupplierId } : {}),
+          ...(input.sourceFacilityId ? { sourceFacilityId: input.sourceFacilityId } : {}),
+        },
+      });
+
       return { loop, cards };
     });
 
@@ -328,6 +351,26 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
         .update(kanbanLoops)
         .set(updateFields)
         .where(and(eq(kanbanLoops.id, req.params.id as string), eq(kanbanLoops.tenantId, tenantId)));
+
+      // Audit: loop parameters changed
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: req.user!.sub,
+        action: 'loop.parameters_changed',
+        entityType: 'kanban_loop',
+        entityId: req.params.id as string,
+        previousState: {
+          minQuantity: existingLoop.minQuantity,
+          orderQuantity: existingLoop.orderQuantity,
+          numberOfCards: existingLoop.numberOfCards,
+        },
+        newState: {
+          minQuantity: input.minQuantity ?? existingLoop.minQuantity,
+          orderQuantity: input.orderQuantity ?? existingLoop.orderQuantity,
+          numberOfCards: input.numberOfCards ?? existingLoop.numberOfCards,
+        },
+        metadata: { reason: input.reason },
+      });
 
       // If numberOfCards changed, add or deactivate cards
       if (input.numberOfCards && input.numberOfCards !== existingLoop.numberOfCards) {

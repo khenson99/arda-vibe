@@ -75,6 +75,8 @@ vi.mock('drizzle-orm', () => ({
 vi.mock('@arda/db', () => ({
   db: dbMock,
   schema: schemaMock,
+  writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'mock', sequenceNumber: 1 })),
+  writeAuditEntries: vi.fn(async () => []),
 }));
 
 vi.mock('@arda/events', () => ({

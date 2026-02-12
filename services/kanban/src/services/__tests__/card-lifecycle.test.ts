@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Mock heavy dependencies that need env vars / database connections
-vi.mock('@arda/db', () => ({ db: {}, schema: {} }));
+vi.mock('@arda/db', () => ({
+  db: {},
+  schema: {},
+  writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'mock', sequenceNumber: 1 })),
+  writeAuditEntries: vi.fn(async () => []),
+}));
 vi.mock('@arda/events', () => ({ getEventBus: vi.fn() }));
 vi.mock('@arda/config', () => ({
   config: { REDIS_URL: 'redis://localhost:6379' },
