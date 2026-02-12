@@ -20,6 +20,8 @@ vi.mock('@arda/db', () => ({
     routingTemplates: {},
     auditLog: {},
   },
+  writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'test', sequenceNumber: 1 })),
+  writeAuditEntries: vi.fn(async () => []),
 }));
 
 vi.mock('@arda/config', () => ({

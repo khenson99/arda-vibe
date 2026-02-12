@@ -12,7 +12,7 @@
  * via event subscription (eventually consistent).
  */
 
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
@@ -24,7 +24,6 @@ const {
   workOrders,
   workOrderRoutings,
   productionOperationLogs,
-  auditLog,
 } = schema;
 
 // BOM comes from the catalog schema
@@ -155,7 +154,7 @@ export async function recordMaterialConsumption(
   }
 
   // Audit
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'material_consumption.recorded',
@@ -172,8 +171,6 @@ export async function recordMaterialConsumption(
       })),
     },
     metadata: { source: 'material_consumption' },
-    ipAddress: null,
-    userAgent: null,
     timestamp: now,
   });
 

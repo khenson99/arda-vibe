@@ -8,7 +8,7 @@
  * - Backlog limit checks to prevent over-scheduling
  */
 
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and, sql, gte, lte, desc, asc } from 'drizzle-orm';
 import { createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
@@ -20,7 +20,6 @@ const {
   workCenterCapacityWindows,
   workOrderRoutings,
   workOrders,
-  auditLog,
 } = schema;
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -128,7 +127,7 @@ export async function createCapacityWindow(
     .execute();
 
   // Audit
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'capacity_window.created',
@@ -137,9 +136,6 @@ export async function createCapacityWindow(
     previousState: null,
     newState: { workCenterId, dayOfWeek, startHour, endHour, availableMinutes },
     metadata: { source: 'capacity_scheduler' },
-    ipAddress: null,
-    userAgent: null,
-    timestamp: new Date(),
   });
 
   return { id: result.id };
@@ -231,7 +227,7 @@ export async function allocateCapacity(input: AllocateCapacityInput): Promise<{ 
     .where(eq(workCenterCapacityWindows.id, windowId))
     .execute();
 
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'capacity_window.allocated',
@@ -240,8 +236,6 @@ export async function allocateCapacity(input: AllocateCapacityInput): Promise<{ 
     previousState: { allocatedMinutes: window.allocatedMinutes },
     newState: { allocatedMinutes: newAllocated, minutesAdded: minutes },
     metadata: { workCenterId, workOrderId: workOrderId || null, source: 'capacity_scheduler' },
-    ipAddress: null,
-    userAgent: null,
     timestamp: now,
   });
 
@@ -281,7 +275,7 @@ export async function releaseCapacity(input: ReleaseCapacityInput): Promise<{ su
     .where(eq(workCenterCapacityWindows.id, windowId))
     .execute();
 
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'capacity_window.released',
@@ -290,8 +284,6 @@ export async function releaseCapacity(input: ReleaseCapacityInput): Promise<{ su
     previousState: { allocatedMinutes: window.allocatedMinutes },
     newState: { allocatedMinutes: newAllocated, minutesReleased: minutes },
     metadata: { workCenterId, workOrderId: workOrderId || null, source: 'capacity_scheduler' },
-    ipAddress: null,
-    userAgent: null,
     timestamp: now,
   });
 
