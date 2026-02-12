@@ -61,6 +61,20 @@ function cleanString(value: unknown, fallback = ""): string {
   return isNonEmptyString(value) ? value.trim() : fallback;
 }
 
+function formatUnitPrice(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return cleanString(value, '');
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(numeric);
+}
+
+function formatDate(value: unknown): string {
+  if (!isNonEmptyString(value)) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleDateString('en-US');
+}
+
 function formatQty(value: unknown): string {
   const qty = toNonNegativeNumber(value, 0);
   const unit = qty === 1 ? "each" : "each";
@@ -72,9 +86,13 @@ export function mapCardPrintDetailToPrintData(
   defaults: PrintDataDefaults = {},
 ): KanbanPrintData {
   const loop = card.loop ?? null;
+  const part = card.part ?? null;
   const cardNumber = toPositiveInt(card.cardNumber, 1);
   const totalCards = Math.max(cardNumber, toPositiveInt(loop?.numberOfCards, cardNumber));
   const partNumber = cleanString(loop?.partNumber ?? card.partName ?? loop?.partName, `Card-${cardNumber}`);
+  const statusText = toCardStage(card.currentStage).replaceAll('_', ' ');
+  const orderQuantityValue = String(toNonNegativeNumber(card.orderQuantity ?? loop?.orderQuantity ?? part?.orderQty, 0));
+  const minQuantityValue = String(toNonNegativeNumber(card.minQuantity ?? loop?.minQuantity ?? part?.minQty, 0));
 
   return {
     cardId: card.id,
@@ -98,8 +116,8 @@ export function mapCardPrintDetailToPrintData(
     tenantName: cleanString(defaults.tenantName, "Tenant"),
     tenantLogoUrl: isNonEmptyString(defaults.tenantLogoUrl) ? defaults.tenantLogoUrl.trim() : undefined,
     notes: isNonEmptyString(loop?.notes) ? loop.notes.trim() : undefined,
-    notesText: cleanString(loop?.itemNotes ?? loop?.notes, ""),
-    imageUrl: cleanString(loop?.imageUrl, ""),
+    notesText: cleanString(loop?.itemNotes ?? part?.itemNotes ?? loop?.notes, ""),
+    imageUrl: cleanString(loop?.imageUrl ?? part?.imageUrl, ""),
     minimumText: formatQty(card.minQuantity ?? loop?.minQuantity),
     locationText: cleanString(loop?.storageLocationName ?? card.facilityName ?? loop?.facilityName, "Location TBD"),
     orderText: formatQty(card.orderQuantity ?? loop?.orderQuantity),
@@ -107,6 +125,20 @@ export function mapCardPrintDetailToPrintData(
       loop?.primarySupplierName ?? loop?.sourceFacilityName ?? card.facilityName,
       "Unknown supplier",
     ),
+    unitPriceText: formatUnitPrice(part?.unitPrice),
+    orderQuantityValue,
+    orderUnitsText: cleanString(part?.orderQtyUnit ?? part?.uom, ''),
+    minQuantityValue,
+    minUnitsText: cleanString(part?.minQtyUnit ?? part?.uom, ''),
+    cardsCountText: String(totalCards),
+    orderMethodText: cleanString(part?.orderMechanism, ''),
+    itemLocationText: cleanString(part?.location ?? loop?.storageLocationName, ''),
+    statusText: statusText ? statusText[0]!.toUpperCase() + statusText.slice(1) : '',
+    updatedAtText: formatDate(part?.updatedAt),
+    glCodeText: cleanString(part?.glCode, ''),
+    itemTypeText: cleanString(part?.type, ''),
+    itemSubtypeText: cleanString(part?.itemSubtype, ''),
+    uomText: cleanString(part?.uom, ''),
     accentColor: "#2F6FCC",
     showArdaWatermark: false,
   };

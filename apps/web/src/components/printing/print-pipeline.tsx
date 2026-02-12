@@ -273,10 +273,11 @@ export function dispatchPrint(
   const cardsHtml = cards
     .map(
       (card) => {
+        if (templateDefinition) {
+          return renderTemplateToHtml(templateDefinition, card, config);
+        }
+
         if (config.layoutVariant === 'order_card_3x5_portrait') {
-          if (templateDefinition) {
-            return renderTemplateToHtml(templateDefinition, card, config);
-          }
           return renderOrderCard3x5Html(card, config);
         }
 

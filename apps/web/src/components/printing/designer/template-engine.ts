@@ -1,16 +1,6 @@
 import type { CardTemplateBindingToken, CardTemplateDefinition, CardTemplateElement } from '@arda/shared-types';
 import type { KanbanPrintData, FormatConfig } from '../types';
-
-const ICON_SVGS: Record<'minimum' | 'location' | 'order' | 'supplier', string> = {
-  minimum:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>',
-  location:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1118 0z"/><circle cx="12" cy="10" r="3"/></svg>',
-  order:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3H9z"/><rect x="6" y="5" width="12" height="16" rx="2"/><path d="M9 11h6"/><path d="M9 15h4"/></svg>',
-  supplier:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1 1 0 00.2 1.1l.1.1a1 1 0 010 1.4l-1 1a1 1 0 01-1.4 0l-.1-.1a1 1 0 00-1.1-.2 1 1 0 00-.6.9V20a1 1 0 01-1 1h-1.5a1 1 0 01-1-1v-.1a1 1 0 00-.6-.9 1 1 0 00-1.1.2l-.1.1a1 1 0 01-1.4 0l-1-1a1 1 0 010-1.4l.1-.1a1 1 0 00.2-1.1 1 1 0 00-.9-.6H4a1 1 0 01-1-1v-1.5a1 1 0 011-1h.1a1 1 0 00.9-.6 1 1 0 00-.2-1.1l-.1-.1a1 1 0 010-1.4l1-1a1 1 0 011.4 0l.1.1a1 1 0 001.1.2 1 1 0 00.6-.9V4a1 1 0 011-1h1.5a1 1 0 011 1v.1a1 1 0 00.6.9 1 1 0 001.1-.2l.1-.1a1 1 0 011.4 0l1 1a1 1 0 010 1.4l-.1.1a1 1 0 00-.2 1.1 1 1 0 00.9.6h.1a1 1 0 011 1V13a1 1 0 01-1 1h-.1a1 1 0 00-.9.6z"/></svg>',
-};
+import { normalizeUrl, renderIconMarkup } from './icon-library';
 
 function escapeHtml(value: string): string {
   return value
@@ -22,26 +12,19 @@ function escapeHtml(value: string): string {
 }
 
 export function normalizeImageUrl(value?: string): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      return parsed.toString();
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  return normalizeUrl(value);
 }
 
 export function resolveBindingToken(token: CardTemplateBindingToken, data: KanbanPrintData): string {
   switch (token) {
     case 'title':
       return data.partDescription || data.partNumber;
+    case 'itemName':
+      return data.partDescription || data.partNumber;
     case 'sku':
       return data.sku || data.partNumber;
+    case 'partNumberText':
+      return data.partNumber || '';
     case 'minimumText':
       return data.minimumText || '';
     case 'locationText':
@@ -50,6 +33,44 @@ export function resolveBindingToken(token: CardTemplateBindingToken, data: Kanba
       return data.orderText || '';
     case 'supplierText':
       return data.supplierText || '';
+    case 'supplierNameText':
+      return data.supplierName || '';
+    case 'unitPriceText':
+      return data.unitPriceText || '';
+    case 'orderQuantityValue':
+      return data.orderQuantityValue || '';
+    case 'orderUnitsText':
+      return data.orderUnitsText || '';
+    case 'minQuantityValue':
+      return data.minQuantityValue || '';
+    case 'minUnitsText':
+      return data.minUnitsText || '';
+    case 'cardsCountText':
+      return data.cardsCountText || '';
+    case 'orderMethodText':
+      return data.orderMethodText || '';
+    case 'itemLocationText':
+      return data.itemLocationText || '';
+    case 'statusText':
+      return data.statusText || '';
+    case 'updatedAtText':
+      return data.updatedAtText || '';
+    case 'glCodeText':
+      return data.glCodeText || '';
+    case 'itemTypeText':
+      return data.itemTypeText || '';
+    case 'itemSubtypeText':
+      return data.itemSubtypeText || '';
+    case 'uomText':
+      return data.uomText || '';
+    case 'facilityNameText':
+      return data.facilityName || '';
+    case 'sourceFacilityNameText':
+      return data.sourceFacilityName || '';
+    case 'storageLocationText':
+      return data.storageLocation || '';
+    case 'scanUrlText':
+      return data.scanUrl || '';
     case 'notesText':
       return data.notesText || '';
     case 'imageUrl':
@@ -119,7 +140,7 @@ function renderElementHtml(element: CardTemplateElement, data: KanbanPrintData):
   }
 
   if (element.type === 'icon') {
-    return `<div data-el-id="${escapeHtml(element.id)}" style="${baseStyle};display:flex;align-items:center;justify-content:center;">${ICON_SVGS[element.iconName]}</div>`;
+    return `<div data-el-id="${escapeHtml(element.id)}" style="${baseStyle};display:flex;align-items:center;justify-content:center;color:#4b5563;">${renderIconMarkup(element.iconName, element.iconUrl)}</div>`;
   }
 
   if (element.type === 'line') {
@@ -145,8 +166,8 @@ function renderElementHtml(element: CardTemplateElement, data: KanbanPrintData):
     const value = resolveBindingToken(element.token, data);
     return `
       <div data-el-id="${escapeHtml(element.id)}" style="${baseStyle};display:flex;align-items:flex-start;gap:8px;">
-        <div style="width:30px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;">
-          ${ICON_SVGS[element.iconName]}
+        <div style="width:30px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;color:#4b5563;">
+          ${renderIconMarkup(element.iconName, element.iconUrl)}
           <div style="margin-top:2px;font-size:8px;line-height:1;color:#2F6FCC;">${escapeHtml(element.label)}</div>
         </div>
         <div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(value)}</div>

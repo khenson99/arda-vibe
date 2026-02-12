@@ -1,26 +1,57 @@
 import * as React from 'react';
 import { Button, Input } from '@/components/ui';
 import type { CardTemplateBindingToken, CardTemplateDefinition, CardTemplateElement } from '@arda/shared-types';
+import { normalizeUrl, STOCK_ICON_NAMES, type StockIconName } from './icon-library';
 
-const TOKENS: CardTemplateBindingToken[] = [
-  'title',
-  'sku',
-  'minimumText',
-  'locationText',
-  'orderText',
-  'supplierText',
-  'notesText',
-  'imageUrl',
-  'qrCodeDataUrl',
+const TOKENS: Array<{ token: CardTemplateBindingToken; label: string }> = [
+  { token: 'title', label: 'Title' },
+  { token: 'itemName', label: 'Item name' },
+  { token: 'sku', label: 'SKU' },
+  { token: 'partNumberText', label: 'Part number' },
+  { token: 'minimumText', label: 'Minimum (formatted)' },
+  { token: 'locationText', label: 'Location (formatted)' },
+  { token: 'orderText', label: 'Order (formatted)' },
+  { token: 'supplierText', label: 'Supplier (formatted)' },
+  { token: 'supplierNameText', label: 'Supplier name' },
+  { token: 'unitPriceText', label: 'Unit price' },
+  { token: 'orderQuantityValue', label: 'Order quantity' },
+  { token: 'orderUnitsText', label: 'Order units' },
+  { token: 'minQuantityValue', label: 'Min quantity' },
+  { token: 'minUnitsText', label: 'Min units' },
+  { token: 'cardsCountText', label: 'Card count' },
+  { token: 'orderMethodText', label: 'Order method' },
+  { token: 'itemLocationText', label: 'Item location' },
+  { token: 'statusText', label: 'Status' },
+  { token: 'updatedAtText', label: 'Updated date' },
+  { token: 'glCodeText', label: 'GL code' },
+  { token: 'itemTypeText', label: 'Item type' },
+  { token: 'itemSubtypeText', label: 'Item subtype' },
+  { token: 'uomText', label: 'UOM' },
+  { token: 'facilityNameText', label: 'Facility name' },
+  { token: 'sourceFacilityNameText', label: 'Source facility' },
+  { token: 'storageLocationText', label: 'Storage location' },
+  { token: 'scanUrlText', label: 'Scan URL' },
+  { token: 'notesText', label: 'Notes' },
+  { token: 'imageUrl', label: 'Image URL' },
+  { token: 'qrCodeDataUrl', label: 'QR data URL' },
 ];
 
 interface InspectorPanelProps {
   definition: CardTemplateDefinition;
   selectedElementId: string | null;
   onDefinitionChange: (definition: CardTemplateDefinition) => void;
+  customIconUrls: string[];
+  onCustomIconUrlsChange: (urls: string[]) => void;
 }
 
-export function InspectorPanel({ definition, selectedElementId, onDefinitionChange }: InspectorPanelProps) {
+export function InspectorPanel({
+  definition,
+  selectedElementId,
+  onDefinitionChange,
+  customIconUrls,
+  onCustomIconUrlsChange,
+}: InspectorPanelProps) {
+  const [newIconUrl, setNewIconUrl] = React.useState('');
   const selectedElement = React.useMemo(
     () => definition.elements.find((element) => element.id === selectedElementId) ?? null,
     [definition.elements, selectedElementId],
@@ -50,6 +81,12 @@ export function InspectorPanel({ definition, selectedElementId, onDefinitionChan
   }
 
   const required = !!selectedElement.key && definition.requiredElementKeys.includes(selectedElement.key);
+  const selectedIconValue =
+    (selectedElement.type === 'icon' || selectedElement.type === 'field_row_group') && selectedElement.iconUrl
+      ? `custom:${selectedElement.iconUrl}`
+      : (selectedElement.type === 'icon' || selectedElement.type === 'field_row_group')
+        ? `stock:${selectedElement.iconName}`
+        : '';
 
   return (
     <div className="space-y-3 rounded-md border border-border p-3">
@@ -104,11 +141,66 @@ export function InspectorPanel({ definition, selectedElementId, onDefinitionChan
             }}
             className="h-9 rounded-md border border-input bg-background px-2"
           >
-            {TOKENS.map((token) => (
-              <option key={token} value={token}>{token}</option>
+            {TOKENS.map(({ token, label }) => (
+              <option key={token} value={token}>{label}</option>
             ))}
           </select>
         </LabelValue>
+      )}
+
+      {(selectedElement.type === 'icon' || selectedElement.type === 'field_row_group') && (
+        <>
+          <LabelValue label="Icon">
+            <select
+              value={selectedIconValue}
+              onChange={(e) =>
+                updateSelected((el) => {
+                  if (el.type !== 'icon' && el.type !== 'field_row_group') return el;
+                  if (e.target.value.startsWith('custom:')) {
+                    return { ...el, iconUrl: e.target.value.slice('custom:'.length) };
+                  }
+                  const stock = e.target.value.slice('stock:'.length) as StockIconName;
+                  return { ...el, iconName: stock, iconUrl: undefined };
+                })
+              }
+              className="h-9 rounded-md border border-input bg-background px-2"
+            >
+              {STOCK_ICON_NAMES.map((iconName) => (
+                <option key={iconName} value={`stock:${iconName}`}>
+                  Stock: {iconName}
+                </option>
+              ))}
+              {customIconUrls.map((iconUrl) => (
+                <option key={iconUrl} value={`custom:${iconUrl}`}>
+                  Custom: {iconUrl}
+                </option>
+              ))}
+            </select>
+          </LabelValue>
+
+          <LabelValue label="Custom icon URL">
+            <div className="flex gap-2">
+              <Input value={newIconUrl} onChange={(e) => setNewIconUrl(e.target.value)} placeholder="https://..." />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const normalized = normalizeUrl(newIconUrl);
+                  if (!normalized) return;
+                  const next = customIconUrls.includes(normalized) ? customIconUrls : [...customIconUrls, normalized];
+                  onCustomIconUrlsChange(next);
+                  updateSelected((el) => (el.type === 'icon' || el.type === 'field_row_group'
+                    ? { ...el, iconUrl: normalized }
+                    : el));
+                  setNewIconUrl('');
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          </LabelValue>
+        </>
       )}
 
       {selectedElement.type === 'field_row_group' && (
@@ -122,8 +214,8 @@ export function InspectorPanel({ definition, selectedElementId, onDefinitionChan
               onChange={(e) => updateSelected((el) => el.type === 'field_row_group' ? { ...el, token: e.target.value as typeof selectedElement.token } : el)}
               className="h-9 rounded-md border border-input bg-background px-2"
             >
-              {['minimumText', 'locationText', 'orderText', 'supplierText'].map((token) => (
-                <option key={token} value={token}>{token}</option>
+              {TOKENS.map(({ token, label }) => (
+                <option key={token} value={token}>{label}</option>
               ))}
             </select>
           </LabelValue>

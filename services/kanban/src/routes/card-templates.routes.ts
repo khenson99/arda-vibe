@@ -25,11 +25,32 @@ const CARD_TEMPLATE_REQUIRED_KEYS = [
 
 const tokenSchema = z.enum([
   'title',
+  'itemName',
   'sku',
+  'partNumberText',
   'minimumText',
   'locationText',
   'orderText',
   'supplierText',
+  'supplierNameText',
+  'unitPriceText',
+  'orderQuantityValue',
+  'orderUnitsText',
+  'minQuantityValue',
+  'minUnitsText',
+  'cardsCountText',
+  'orderMethodText',
+  'itemLocationText',
+  'statusText',
+  'updatedAtText',
+  'glCodeText',
+  'itemTypeText',
+  'itemSubtypeText',
+  'uomText',
+  'facilityNameText',
+  'sourceFacilityNameText',
+  'storageLocationText',
+  'scanUrlText',
   'notesText',
   'imageUrl',
   'qrCodeDataUrl',
@@ -87,6 +108,7 @@ const elementSchema = z.discriminatedUnion('type', [
   baseElementSchema.extend({
     type: z.literal('icon'),
     iconName: z.enum(['minimum', 'location', 'order', 'supplier']),
+    iconUrl: z.string().url().optional(),
   }),
   baseElementSchema.extend({
     type: z.literal('line'),
@@ -102,8 +124,9 @@ const elementSchema = z.discriminatedUnion('type', [
   baseElementSchema.extend({
     type: z.literal('field_row_group'),
     iconName: z.enum(['minimum', 'location', 'order', 'supplier']),
+    iconUrl: z.string().url().optional(),
     label: z.string().max(120),
-    token: z.enum(['minimumText', 'locationText', 'orderText', 'supplierText']),
+    token: tokenSchema,
   }),
 ]);
 

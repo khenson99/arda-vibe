@@ -144,6 +144,11 @@ async function parseResponsePayload(response: Response): Promise<Record<string, 
   const text = await response.text();
   if (!text) return {};
 
+  const preMatch = text.match(/<pre>([\s\S]*?)<\/pre>/i);
+  if (preMatch?.[1]) {
+    return { message: preMatch[1].trim() };
+  }
+
   try {
     const parsed = JSON.parse(text) as unknown;
     const asObject = toObjectPayload(parsed);
@@ -1347,6 +1352,26 @@ export interface KanbanCardPrintDetail {
     notes?: string;
     imageUrl?: string;
     itemNotes?: string;
+  } | null;
+  part?: {
+    partNumber?: string;
+    name?: string;
+    type?: string;
+    uom?: string;
+    orderMechanism?: string;
+    location?: string;
+    minQty?: number | null;
+    minQtyUnit?: string | null;
+    orderQty?: number | null;
+    orderQtyUnit?: string | null;
+    primarySupplierName?: string | null;
+    primarySupplierLink?: string | null;
+    itemNotes?: string | null;
+    unitPrice?: string | number | null;
+    glCode?: string | null;
+    itemSubtype?: string | null;
+    updatedAt?: string | null;
+    imageUrl?: string | null;
   } | null;
 }
 

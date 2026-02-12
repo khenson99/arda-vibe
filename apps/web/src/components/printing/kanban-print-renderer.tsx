@@ -47,10 +47,11 @@ export function KanbanPrintRenderer({ data, format, templateDefinition }: Kanban
   }
 
   if (isCardFormat(format)) {
+    if (templateDefinition) {
+      return <div dangerouslySetInnerHTML={{ __html: renderTemplateToHtml(templateDefinition, data, config) }} />;
+    }
+
     if (config.layoutVariant === 'order_card_3x5_portrait') {
-      if (templateDefinition) {
-        return <div dangerouslySetInnerHTML={{ __html: renderTemplateToHtml(templateDefinition, data, config) }} />;
-      }
       return <OrderCard3x5Template data={data} format={format} config={config} />;
     }
     return <KanbanCardTemplate data={data} format={format} config={config} />;

@@ -14,14 +14,36 @@ declare module "@arda/shared-types" {
   export type CardTemplateStatus = "active" | "archived";
   export type CardTemplateBindingToken =
     | "title"
+    | "itemName"
     | "sku"
+    | "partNumberText"
     | "minimumText"
     | "locationText"
     | "orderText"
     | "supplierText"
+    | "supplierNameText"
+    | "unitPriceText"
+    | "orderQuantityValue"
+    | "orderUnitsText"
+    | "minQuantityValue"
+    | "minUnitsText"
+    | "cardsCountText"
+    | "orderMethodText"
+    | "itemLocationText"
+    | "statusText"
+    | "updatedAtText"
+    | "glCodeText"
+    | "itemTypeText"
+    | "itemSubtypeText"
+    | "uomText"
+    | "facilityNameText"
+    | "sourceFacilityNameText"
+    | "storageLocationText"
+    | "scanUrlText"
     | "notesText"
     | "imageUrl"
     | "qrCodeDataUrl";
+  export type CardTemplateIconName = "minimum" | "location" | "order" | "supplier";
 
   export interface CardTemplateElementStyle {
     fontFamily?: string;
@@ -73,7 +95,8 @@ declare module "@arda/shared-types" {
   }
   export interface CardTemplateIconElement extends CardTemplateBaseElement {
     type: "icon";
-    iconName: "minimum" | "location" | "order" | "supplier";
+    iconName: CardTemplateIconName;
+    iconUrl?: string;
   }
   export interface CardTemplateLineElement extends CardTemplateBaseElement {
     type: "line";
@@ -88,9 +111,10 @@ declare module "@arda/shared-types" {
   }
   export interface CardTemplateFieldRowGroupElement extends CardTemplateBaseElement {
     type: "field_row_group";
-    iconName: "minimum" | "location" | "order" | "supplier";
+    iconName: CardTemplateIconName;
+    iconUrl?: string;
     label: string;
-    token: Extract<CardTemplateBindingToken, "minimumText" | "locationText" | "orderText" | "supplierText">;
+    token: CardTemplateBindingToken;
   }
   export type CardTemplateElement =
     | CardTemplateBoundTextElement

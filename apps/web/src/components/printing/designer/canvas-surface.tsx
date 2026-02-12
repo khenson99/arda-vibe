@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { CardTemplateDefinition, CardTemplateElement, CardTemplateTextElement } from '@arda/shared-types';
 import type { KanbanPrintData } from '../types';
 import { normalizeImageUrl, resolveBindingToken } from './template-engine';
+import { renderIconMarkup } from './icon-library';
 
 type InteractionMode = 'drag' | 'resize';
 
@@ -13,17 +14,6 @@ interface CanvasSurfaceProps {
   onDefinitionChange: (definition: CardTemplateDefinition) => void;
   scale?: number;
 }
-
-const ICON_SVGS: Record<'minimum' | 'location' | 'order' | 'supplier', string> = {
-  minimum:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>',
-  location:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1118 0z"/><circle cx="12" cy="10" r="3"/></svg>',
-  order:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3H9z"/><rect x="6" y="5" width="12" height="16" rx="2"/><path d="M9 11h6"/><path d="M9 15h4"/></svg>',
-  supplier:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1 1 0 00.2 1.1l.1.1a1 1 0 010 1.4l-1 1a1 1 0 01-1.4 0l-.1-.1a1 1 0 00-1.1-.2 1 1 0 00-.6.9V20a1 1 0 01-1 1h-1.5a1 1 0 01-1-1v-.1a1 1 0 00-.6-.9 1 1 0 00-1.1.2l-.1.1a1 1 0 01-1.4 0l-1-1a1 1 0 010-1.4l.1-.1a1 1 0 00.2-1.1 1 1 0 00-.9-.6H4a1 1 0 01-1-1v-1.5a1 1 0 011-1h.1a1 1 0 00.9-.6 1 1 0 00-.2-1.1l-.1-.1a1 1 0 010-1.4l1-1a1 1 0 011.4 0l.1.1a1 1 0 001.1.2 1 1 0 00.6-.9V4a1 1 0 011-1h1.5a1 1 0 011 1v.1a1 1 0 00.6.9 1 1 0 001.1-.2l.1-.1a1 1 0 011.4 0l1 1a1 1 0 010 1.4l-.1.1a1 1 0 00-.2 1.1 1 1 0 00.9.6h.1a1 1 0 011 1V13a1 1 0 01-1 1h-.1a1 1 0 00-.9.6z"/></svg>',
-};
 
 function clampElementWithinBounds(definition: CardTemplateDefinition, element: CardTemplateElement): CardTemplateElement {
   const minX = definition.safeArea.left;
@@ -141,7 +131,7 @@ export function CanvasSurface({
   }, [selectedElement, updateElement]);
 
   return (
-    <div className="overflow-auto rounded-md border border-border bg-muted/10 p-3">
+    <div className="overflow-auto rounded-md border border-border bg-white p-3">
       <div
         className="mx-auto"
         style={{
@@ -159,7 +149,7 @@ export function CanvasSurface({
             height: definition.canvas.height,
             transform: `scale(${scale})`,
             transformOrigin: 'top left',
-            background: definition.canvas.background,
+            background: '#ffffff',
             border: '1px solid #d1d5db',
             boxSizing: 'border-box',
             backgroundImage: definition.grid.enabled
@@ -277,15 +267,24 @@ export function CanvasSurface({
                 )}
 
                 {element.type === 'icon' && (
-                  <div className="flex h-full w-full items-center justify-center" dangerouslySetInnerHTML={{ __html: ICON_SVGS[element.iconName] }} />
+                  <div
+                    className="flex h-full w-full items-center justify-center text-[#4b5563]"
+                    dangerouslySetInnerHTML={{ __html: renderIconMarkup(element.iconName, element.iconUrl) }}
+                  />
                 )}
 
                 {element.type === 'line' && (
                   <div
                     style={{
-                      width: element.type === 'line' && element.orientation === 'horizontal' ? '100%' : (style.strokeWidth ?? 1),
-                      height: element.type === 'line' && element.orientation === 'vertical' ? '100%' : (style.strokeWidth ?? 1),
+                      width: element.type === 'line' && element.orientation === 'horizontal' ? '100%' : (style.strokeWidth ?? 2),
+                      height: element.type === 'line' && element.orientation === 'vertical' ? '100%' : (style.strokeWidth ?? 2),
                       background: style.strokeColor ?? '#2F6FCC',
+                      marginTop: element.type === 'line' && element.orientation === 'horizontal'
+                        ? Math.max(0, Math.floor((element.h - (style.strokeWidth ?? 2)) / 2))
+                        : 0,
+                      marginLeft: element.type === 'line' && element.orientation === 'vertical'
+                        ? Math.max(0, Math.floor((element.w - (style.strokeWidth ?? 2)) / 2))
+                        : 0,
                     }}
                   />
                 )}
@@ -300,7 +299,13 @@ export function CanvasSurface({
 
                 {element.type === 'field_row_group' && (
                   <div className="flex h-full items-start gap-2">
-                    <div className="flex w-8 flex-col items-center" dangerouslySetInnerHTML={{ __html: ICON_SVGS[element.iconName] }} />
+                    <div className="flex w-8 flex-col items-center text-[#4b5563]">
+                      <div
+                        className="h-5 w-5"
+                        dangerouslySetInnerHTML={{ __html: renderIconMarkup(element.iconName, element.iconUrl) }}
+                      />
+                      <div className="mt-0.5 text-[8px] leading-none text-[#2F6FCC]">{element.label}</div>
+                    </div>
                     <div className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{valueForFieldRow}</div>
                   </div>
                 )}

@@ -29,7 +29,7 @@ const TOOL_DEFS: Array<{ label: string; factory: () => CardTemplateElement }> = 
   },
   {
     label: 'Line',
-    factory: () => ({ id: `el-line-${crypto.randomUUID()}`, type: 'line', orientation: 'horizontal', x: 24, y: 278, w: 120, h: 1, z: 50 }),
+    factory: () => ({ id: `el-line-${crypto.randomUUID()}`, type: 'line', orientation: 'horizontal', x: 24, y: 278, w: 120, h: 4, z: 50, style: { strokeColor: '#2F6FCC', strokeWidth: 2 } }),
   },
   {
     label: 'Rectangle',

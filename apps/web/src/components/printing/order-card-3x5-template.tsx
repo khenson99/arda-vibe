@@ -1,15 +1,16 @@
 import type { KanbanPrintData, FormatConfig, PrintTemplateProps } from './types';
 import { fitText } from './text-fit';
+import { renderIconMarkup, type StockIconName } from './designer/icon-library';
 
 const DEFAULT_ACCENT_COLOR = '#2F6FCC';
 const PLACEHOLDER_BG = '#efefef';
-const CARD_BG = '#eeeeee';
+const CARD_BG = '#ffffff';
 
 interface FieldRenderModel {
   key: string;
   label: string;
   value: string;
-  iconSvg: string;
+  iconName: StockIconName;
   fontSizePx: number;
 }
 
@@ -40,17 +41,6 @@ function normalizeColor(value: string | undefined): string {
     ? trimmed
     : DEFAULT_ACCENT_COLOR;
 }
-
-const ICON_SVGS = {
-  minimum:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>',
-  location:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1118 0z"/><circle cx="12" cy="10" r="3"/></svg>',
-  order:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>',
-  supplier:
-    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1 1 0 00.2 1.1l.1.1a1 1 0 010 1.4l-1 1a1 1 0 01-1.4 0l-.1-.1a1 1 0 00-1.1-.2 1 1 0 00-.6.9V20a1 1 0 01-1 1h-1.5a1 1 0 01-1-1v-.1a1 1 0 00-.6-.9 1 1 0 00-1.1.2l-.1.1a1 1 0 01-1.4 0l-1-1a1 1 0 010-1.4l.1-.1a1 1 0 00.2-1.1 1 1 0 00-.9-.6H4a1 1 0 01-1-1v-1.5a1 1 0 011-1h.1a1 1 0 00.9-.6 1 1 0 00-.2-1.1l-.1-.1a1 1 0 010-1.4l1-1a1 1 0 011.4 0l.1.1a1 1 0 001.1.2 1 1 0 00.6-.9V4a1 1 0 011-1h1.5a1 1 0 011 1v.1a1 1 0 00.6.9 1 1 0 001.1-.2l.1-.1a1 1 0 011.4 0l1 1a1 1 0 010 1.4l-.1.1a1 1 0 00-.2 1.1 1 1 0 00.9.6h.1a1 1 0 011 1V13a1 1 0 01-1 1h-.1a1 1 0 00-.9.6z"/></svg>',
-};
 
 function buildOrderCard3x5LayoutModel(data: KanbanPrintData, config: FormatConfig): OrderCard3x5LayoutModel {
   const accentColor = normalizeColor(data.accentColor);
@@ -85,12 +75,12 @@ function buildOrderCard3x5LayoutModel(data: KanbanPrintData, config: FormatConfi
     maxLines: 2,
   });
 
-  const fields: FieldRenderModel[] = [
-    { key: 'minimum', label: 'Minimum', value: data.minimumText, iconSvg: ICON_SVGS.minimum, fontSizePx: 14 },
-    { key: 'location', label: 'Location', value: data.locationText, iconSvg: ICON_SVGS.location, fontSizePx: 14 },
-    { key: 'order', label: 'Order', value: data.orderText, iconSvg: ICON_SVGS.order, fontSizePx: 14 },
-    { key: 'supplier', label: 'Supplier', value: data.supplierText, iconSvg: ICON_SVGS.supplier, fontSizePx: 14 },
-  ].map((field) => {
+  const fields: FieldRenderModel[] = ([
+    { key: 'minimum', label: 'Minimum', value: data.minimumText, iconName: 'minimum', fontSizePx: 14 },
+    { key: 'location', label: 'Location', value: data.locationText, iconName: 'location', fontSizePx: 14 },
+    { key: 'order', label: 'Order', value: data.orderText, iconName: 'order', fontSizePx: 14 },
+    { key: 'supplier', label: 'Supplier', value: data.supplierText, iconName: 'supplier', fontSizePx: 14 },
+  ] satisfies FieldRenderModel[]).map((field) => {
     const fit = fitText({
       text: field.value || '',
       containerWidthPx: config.widthPx - (config.safeInsetPx * 2) - 40,
@@ -122,8 +112,8 @@ function buildOrderCard3x5LayoutModel(data: KanbanPrintData, config: FormatConfi
 function renderFieldRow(field: FieldRenderModel): string {
   return `
     <div style="display:flex;align-items:flex-start;gap:10px;margin-top:3px;">
-      <div style="width:32px;display:flex;flex-direction:column;align-items:center;">
-        ${field.iconSvg}
+      <div style="width:32px;display:flex;flex-direction:column;align-items:center;color:#4b5563;">
+        ${renderIconMarkup(field.iconName)}
         <div style="margin-top:2px;font-size:8px;color:${DEFAULT_ACCENT_COLOR};line-height:1;">${escapeHtml(field.label)}</div>
       </div>
       <div style="flex:1;min-width:0;padding-top:1px;font-size:${field.fontSizePx}px;line-height:1.15;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">

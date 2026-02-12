@@ -218,6 +218,28 @@ cardsRouter.get('/:id/print-detail', async (req: AuthRequest, res, next) => {
         imageUrl: partRow?.imageUrl ?? undefined,
         itemNotes: partRow?.itemNotes ?? undefined,
       },
+      part: partRow
+        ? {
+            partNumber: partRow.partNumber ?? undefined,
+            name: partRow.name ?? undefined,
+            type: partRow.type ?? undefined,
+            uom: partRow.uom ?? undefined,
+            orderMechanism: partRow.orderMechanism ?? undefined,
+            location: partRow.location ?? undefined,
+            minQty: partRow.minQty ?? undefined,
+            minQtyUnit: partRow.minQtyUnit ?? undefined,
+            orderQty: partRow.orderQty ?? undefined,
+            orderQtyUnit: partRow.orderQtyUnit ?? undefined,
+            primarySupplierName: partRow.primarySupplierName ?? undefined,
+            primarySupplierLink: partRow.primarySupplierLink ?? undefined,
+            itemNotes: partRow.itemNotes ?? undefined,
+            unitPrice: partRow.unitPrice ?? undefined,
+            glCode: partRow.glCode ?? undefined,
+            itemSubtype: partRow.itemSubtype ?? undefined,
+            updatedAt: partRow.updatedAt?.toISOString() ?? undefined,
+            imageUrl: partRow.imageUrl ?? undefined,
+          }
+        : null,
     });
   } catch (err) {
     next(err);
