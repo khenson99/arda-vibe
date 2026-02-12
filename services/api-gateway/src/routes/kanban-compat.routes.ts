@@ -50,7 +50,8 @@ function normalizeToken(req: AuthRequest): string {
 }
 
 function isServiceUnavailableStatus(status: number): boolean {
-  return status === 502 || status === 503 || status === 504;
+  // Fallback should handle any upstream 5xx condition for read-only loop detail.
+  return status >= 500 && status < 600;
 }
 
 async function parseErrorMessageFromResponse(response: Response): Promise<string> {

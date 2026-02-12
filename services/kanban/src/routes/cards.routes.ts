@@ -187,10 +187,13 @@ cardsRouter.get('/:id/print-detail', async (req: AuthRequest, res, next) => {
     res.json({
       id: card.id,
       cardNumber: card.cardNumber,
+      stage: card.currentStage,
       currentStage: card.currentStage,
       loopType: card.loop.loopType,
       partName: partRow?.name ?? null,
+      partNumber: partRow?.partNumber ?? null,
       facilityName: facilityRow?.name ?? null,
+      supplierName: supplierRow?.name ?? null,
       minQuantity: card.loop.minQuantity,
       orderQuantity: card.loop.orderQuantity,
       qrCode,

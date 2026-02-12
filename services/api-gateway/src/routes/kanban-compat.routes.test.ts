@@ -212,4 +212,24 @@ describe('kanban compat loop detail fallback', () => {
     expect(history).toHaveLength(1);
     expect(history[0]).toEqual(expect.objectContaining({ id: 'hist-1' }));
   });
+
+  it('falls back on upstream 500 responses', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'upstream internal error' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const app = createApp();
+    const response = await getJson(app, '/loops/loop-1');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        id: 'loop-1',
+        partName: 'Lean Bolt',
+      }),
+    );
+  });
 });
