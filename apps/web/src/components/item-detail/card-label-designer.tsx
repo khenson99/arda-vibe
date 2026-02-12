@@ -1,19 +1,24 @@
 import * as React from "react";
-import { Printer, QrCode, Loader2 } from "lucide-react";
+import { Loader2, Printer } from "lucide-react";
 import { toast } from "sonner";
-import { Badge, Button } from "@/components/ui";
+import { Button, Input } from "@/components/ui";
 import {
+  apiRequest,
+  fetchCardPrintDetail,
   fetchCards,
-  fetchCardQR,
   isUnauthorized,
   parseApiError,
 } from "@/lib/api-client";
-import { printCardsFromIds } from "@/lib/kanban-printing";
+import {
+  mapCardPrintDetailToPrintData,
+  printCardsFromIds,
+} from "@/lib/kanban-printing";
 import { fetchLoopsForPart } from "@/lib/kanban-loops";
+import { KanbanPrintRenderer } from "@/components/printing/kanban-print-renderer";
+import type { KanbanPrintData } from "@/components/printing/types";
 import type { KanbanCard, PartRecord } from "@/types";
-import { CARD_STAGE_META, LOOP_META } from "@/types";
+import { LOOP_META } from "@/types";
 import type { LoopType } from "@/types";
-import { cn } from "@/lib/utils";
 import { formatReadableLabel } from "@/lib/formatters";
 
 interface CardLabelDesignerProps {
@@ -22,11 +27,25 @@ interface CardLabelDesignerProps {
   tenantName: string;
   tenantLogoUrl?: string;
   onUnauthorized: () => void;
+  onSaved?: () => Promise<void>;
   onOpenLoopsTab?: () => void;
+}
+
+interface EditorDraft {
+  title: string;
+  sku: string;
+  minimumText: string;
+  locationText: string;
+  orderText: string;
+  supplierText: string;
+  notesText: string;
+  imageUrl: string;
+  accentColor: string;
 }
 
 const MAX_CARD_PAGES_PER_LOOP = 10;
 const CARD_PREVIEW_LOAD_TIMEOUT_MS = 20_000;
+const DEFAULT_ACCENT = "#2F6FCC";
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -61,29 +80,79 @@ export function resolveLoopLabel(loopType?: string | null): string | null {
   return LOOP_META[loopType as LoopType]?.label ?? formatReadableLabel(loopType);
 }
 
+function buildDraftFromData(data: KanbanPrintData): EditorDraft {
+  return {
+    title: data.partDescription || data.partNumber,
+    sku: data.sku || data.partNumber,
+    minimumText: data.minimumText,
+    locationText: data.locationText,
+    orderText: data.orderText,
+    supplierText: data.supplierText,
+    notesText: data.notesText ?? "",
+    imageUrl: data.imageUrl ?? "",
+    accentColor: data.accentColor ?? DEFAULT_ACCENT,
+  };
+}
+
+function normalizeColor(value: string): string {
+  const trimmed = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(trimmed) || /^#[0-9a-fA-F]{3}$/.test(trimmed)) return trimmed;
+  return DEFAULT_ACCENT;
+}
+
+function applyDraft(base: KanbanPrintData, draft: EditorDraft): KanbanPrintData {
+  return {
+    ...base,
+    partDescription: draft.title,
+    sku: draft.sku,
+    minimumText: draft.minimumText,
+    locationText: draft.locationText,
+    orderText: draft.orderText,
+    supplierText: draft.supplierText,
+    notesText: draft.notesText,
+    imageUrl: draft.imageUrl,
+    accentColor: normalizeColor(draft.accentColor),
+  };
+}
+
+function buildFallbackDraftFromPart(part: PartRecord): EditorDraft {
+  const qtyUnit = part.orderQtyUnit || part.minQtyUnit || part.uom || "each";
+  return {
+    title: part.name || part.partNumber,
+    sku: part.partNumber,
+    minimumText: `${part.minQty ?? 0} ${qtyUnit}`,
+    locationText: part.location || "Location TBD",
+    orderText: `${part.orderQty ?? 0} ${qtyUnit}`,
+    supplierText: part.primarySupplier || "Unknown supplier",
+    notesText: part.notes || "",
+    imageUrl: part.imageUrl || "",
+    accentColor: DEFAULT_ACCENT,
+  };
+}
+
 export function CardLabelDesigner({
   part,
   token,
   tenantName,
   tenantLogoUrl,
   onUnauthorized,
+  onSaved,
   onOpenLoopsTab,
 }: CardLabelDesignerProps) {
   const [cards, setCards] = React.useState<KanbanCard[]>([]);
-  const [isLoading, setIsLoading] = React.useState(false);
+  const [isLoadingCards, setIsLoadingCards] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [selectedCard, setSelectedCard] = React.useState<KanbanCard | null>(
-    null,
-  );
-  const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null);
-  const [isLoadingQr, setIsLoadingQr] = React.useState(false);
+  const [selectedCard, setSelectedCard] = React.useState<KanbanCard | null>(null);
+  const [basePrintData, setBasePrintData] = React.useState<KanbanPrintData | null>(null);
+  const [isLoadingPreviewData, setIsLoadingPreviewData] = React.useState(false);
   const [isPrinting, setIsPrinting] = React.useState(false);
+  const [isSavingImageUrl, setIsSavingImageUrl] = React.useState(false);
+  const [draft, setDraft] = React.useState<EditorDraft>(() => buildFallbackDraftFromPart(part));
 
-  // Load cards for this part
   React.useEffect(() => {
     let cancelled = false;
-    async function load() {
-      setIsLoading(true);
+    async function loadCards() {
+      setIsLoadingCards(true);
       setLoadError(null);
       try {
         const loops = await withTimeout(
@@ -110,9 +179,7 @@ export function CardLabelDesigner({
         setCards(partCards);
         setSelectedCard((current) => {
           if (partCards.length === 0) return null;
-          if (current && partCards.some((card) => card.id === current.id)) {
-            return current;
-          }
+          if (current && partCards.some((card) => card.id === current.id)) return current;
           return partCards[0];
         });
       } catch (error) {
@@ -121,44 +188,65 @@ export function CardLabelDesigner({
           return;
         }
         const message = parseApiError(error);
-        setLoadError(message);
-        toast.error(message);
+        if (!cancelled) {
+          setLoadError(message);
+          toast.error(message);
+        }
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) setIsLoadingCards(false);
       }
     }
-    void load();
+    void loadCards();
     return () => {
       cancelled = true;
     };
-  }, [token, part.id, onUnauthorized]);
+  }, [token, part, onUnauthorized]);
 
-  // Load QR for selected card
   React.useEffect(() => {
     if (!selectedCard) {
-      setQrDataUrl(null);
+      setBasePrintData(null);
+      setDraft(buildFallbackDraftFromPart(part));
       return;
     }
+
+    const selectedCardId = selectedCard.id;
     let cancelled = false;
-    async function loadQr() {
-      setIsLoadingQr(true);
+    async function loadPreviewData() {
+      setIsLoadingPreviewData(true);
       try {
-        const result = await fetchCardQR(token, selectedCard!.id);
-        if (!cancelled) setQrDataUrl(result.qrDataUrl);
-      } catch {
-        if (!cancelled) setQrDataUrl(null);
+        const detail = await fetchCardPrintDetail(token, selectedCardId);
+        if (cancelled) return;
+
+        const mapped = mapCardPrintDetailToPrintData(detail, { tenantName, tenantLogoUrl });
+        setBasePrintData(mapped);
+        setDraft(buildDraftFromData(mapped));
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          onUnauthorized();
+          return;
+        }
+        if (!cancelled) {
+          toast.error(parseApiError(error));
+          setBasePrintData(null);
+        }
       } finally {
-        if (!cancelled) setIsLoadingQr(false);
+        if (!cancelled) setIsLoadingPreviewData(false);
       }
     }
-    void loadQr();
+
+    void loadPreviewData();
     return () => {
       cancelled = true;
     };
-  }, [token, selectedCard?.id]);
+  }, [token, selectedCard, tenantName, tenantLogoUrl, onUnauthorized, part]);
+
+  const previewData = React.useMemo(() => {
+    if (!basePrintData) return null;
+    return applyDraft(basePrintData, draft);
+  }, [basePrintData, draft]);
 
   const handlePrint = React.useCallback(async () => {
-    if (!selectedCard) return;
+    if (!selectedCard || !basePrintData) return;
     setIsPrinting(true);
     try {
       const result = await printCardsFromIds({
@@ -166,12 +254,24 @@ export function CardLabelDesigner({
         cardIds: [selectedCard.id],
         tenantName,
         tenantLogoUrl,
+        format: "order_card_3x5_portrait",
+        overridesByCardId: {
+          [selectedCard.id]: {
+            partDescription: draft.title,
+            sku: draft.sku,
+            minimumText: draft.minimumText,
+            locationText: draft.locationText,
+            orderText: draft.orderText,
+            supplierText: draft.supplierText,
+            notesText: draft.notesText,
+            imageUrl: draft.imageUrl,
+            accentColor: normalizeColor(draft.accentColor),
+          },
+        },
         onUnauthorized,
       });
       toast.success(`Print dialog opened for card #${selectedCard.cardNumber}`);
-      if (result.auditError) {
-        toast.warning(`Printed, but audit logging failed: ${result.auditError}`);
-      }
+      if (result.auditError) toast.warning(`Printed, but audit logging failed: ${result.auditError}`);
     } catch (error) {
       if (isUnauthorized(error)) {
         onUnauthorized();
@@ -181,12 +281,50 @@ export function CardLabelDesigner({
     } finally {
       setIsPrinting(false);
     }
-  }, [selectedCard, token, tenantName, tenantLogoUrl, onUnauthorized]);
+  }, [selectedCard, basePrintData, token, tenantName, tenantLogoUrl, draft, onUnauthorized]);
 
-  if (isLoading) {
+  const handleSaveImageUrl = React.useCallback(async () => {
+    const normalized = draft.imageUrl.trim();
+    if (!normalized) {
+      toast.error("Enter an image URL before saving.");
+      return;
+    }
+    try {
+      const parsed = new URL(normalized);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        toast.error("Image URL must start with http:// or https://");
+        return;
+      }
+    } catch {
+      toast.error("Image URL must be a valid URL.");
+      return;
+    }
+
+    setIsSavingImageUrl(true);
+    try {
+      await apiRequest(`/api/catalog/parts/${encodeURIComponent(part.id)}`, {
+        method: "PATCH",
+        token,
+        body: { imageUrl: normalized },
+      });
+      setBasePrintData((current) => (current ? { ...current, imageUrl: normalized } : current));
+      toast.success("Item image URL updated.");
+      if (onSaved) await onSaved();
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        onUnauthorized();
+        return;
+      }
+      toast.error(parseApiError(error));
+    } finally {
+      setIsSavingImageUrl(false);
+    }
+  }, [draft.imageUrl, onSaved, onUnauthorized, part.id, token]);
+
+  if (isLoadingCards) {
     return (
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold">Card Label Preview</h3>
+        <h3 className="text-sm font-semibold">Card Editor</h3>
         <div className="flex items-center justify-center rounded-md border border-border p-8 text-xs text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           Loading cards...
@@ -199,7 +337,7 @@ export function CardLabelDesigner({
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Card Label Preview</h3>
+          <h3 className="text-sm font-semibold">Card Editor</h3>
           {onOpenLoopsTab && (
             <Button size="sm" variant="outline" onClick={onOpenLoopsTab}>
               Open Loops &amp; Cards
@@ -207,7 +345,7 @@ export function CardLabelDesigner({
           )}
         </div>
         <div className="space-y-3 rounded-md border border-border p-6 text-center text-xs text-muted-foreground">
-          <p>Unable to load card preview: {loadError}</p>
+          <p>Unable to load card editor: {loadError}</p>
           {onOpenLoopsTab && (
             <Button size="sm" variant="outline" onClick={onOpenLoopsTab}>
               Go to Loops &amp; Cards
@@ -222,7 +360,7 @@ export function CardLabelDesigner({
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Card Label Preview</h3>
+          <h3 className="text-sm font-semibold">Card Editor</h3>
           {onOpenLoopsTab && (
             <Button size="sm" variant="outline" onClick={onOpenLoopsTab}>
               Open Loops &amp; Cards
@@ -241,15 +379,10 @@ export function CardLabelDesigner({
     );
   }
 
-  const selectedLoopLabel = resolveLoopLabel(selectedCard?.loopType);
-  const stageMeta = selectedCard
-    ? CARD_STAGE_META[selectedCard.currentStage]
-    : null;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Card Label Preview</h3>
+        <h3 className="text-sm font-semibold">Card Editor</h3>
         <div className="flex items-center gap-2">
           {cards.length > 1 && (
             <select
@@ -263,9 +396,7 @@ export function CardLabelDesigner({
               {cards.map((card) => (
                 <option key={card.id} value={card.id}>
                   Card #{card.cardNumber}
-                  {card.loopType
-                    ? ` — ${resolveLoopLabel(card.loopType)}`
-                    : ""}
+                  {card.loopType ? ` — ${resolveLoopLabel(card.loopType)}` : ""}
                 </option>
               ))}
             </select>
@@ -278,145 +409,138 @@ export function CardLabelDesigner({
         </div>
       </div>
 
-      {/* Label preview — simulates a physical kanban card */}
-      {selectedCard && (
-        <div className="overflow-hidden rounded-xl border-2 border-dashed border-border bg-white shadow-sm">
-          {/* Color bar */}
-          <div
-            className="h-2"
-            style={{
-              backgroundColor: stageMeta?.color || "#e5e5e5",
-            }}
-          />
-
-          <div className="space-y-3 p-4">
-            {/* Row 1: Card number + QR */}
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-lg font-bold leading-none">
-                  #{selectedCard.cardNumber}
-                </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {selectedCard.id.slice(0, 8)}
-                </p>
-              </div>
-              <div className="flex h-16 w-16 items-center justify-center rounded-md border border-border bg-muted/30">
-                {isLoadingQr ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                ) : qrDataUrl ? (
-                  <img
-                    src={qrDataUrl}
-                    alt="QR code"
-                    className="h-full w-full object-contain p-0.5"
-                  />
-                ) : (
-                  <QrCode className="h-6 w-6 text-muted-foreground/40" />
-                )}
-              </div>
-            </div>
-
-            {/* Row 2: Part name */}
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Part
-              </p>
-              <p className="text-sm font-semibold leading-snug">
-                {part.name || part.partNumber}
-              </p>
-              {part.partNumber && part.name && (
-                <p className="text-xs text-muted-foreground">
-                  {part.partNumber}
-                </p>
-              )}
-            </div>
-
-            {/* Row 3: Details grid */}
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <LabelField
-                label="Supplier"
-                value={part.primarySupplier || "--"}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px]">
+        <div className="space-y-3 rounded-md border border-border p-3">
+          <Field label="Title">
+            <Input
+              value={draft.title}
+              onChange={(e) => setDraft((prev) => ({ ...prev, title: e.target.value }))}
+            />
+          </Field>
+          <Field label="SKU">
+            <Input
+              value={draft.sku}
+              onChange={(e) => setDraft((prev) => ({ ...prev, sku: e.target.value }))}
+            />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Minimum">
+              <Input
+                value={draft.minimumText}
+                onChange={(e) => setDraft((prev) => ({ ...prev, minimumText: e.target.value }))}
               />
-              <LabelField label="Location" value={part.location || "--"} />
-              <LabelField
-                label="Order Method"
-                value={part.orderMechanism || part.type || "--"}
+            </Field>
+            <Field label="Location">
+              <Input
+                value={draft.locationText}
+                onChange={(e) => setDraft((prev) => ({ ...prev, locationText: e.target.value }))}
               />
-            </div>
-
-            {/* Row 4: Quantities */}
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <LabelField
-                label="Min Qty"
-                value={`${part.minQty ?? 0} ${part.minQtyUnit || part.uom || "ea"}`}
+            </Field>
+            <Field label="Order">
+              <Input
+                value={draft.orderText}
+                onChange={(e) => setDraft((prev) => ({ ...prev, orderText: e.target.value }))}
               />
-              <LabelField
-                label="Order Qty"
-                value={
-                  part.orderQty != null
-                    ? `${part.orderQty} ${part.orderQtyUnit || part.uom || "ea"}`
-                    : "--"
-                }
+            </Field>
+            <Field label="Supplier">
+              <Input
+                value={draft.supplierText}
+                onChange={(e) => setDraft((prev) => ({ ...prev, supplierText: e.target.value }))}
               />
-              <LabelField
-                label="Cycles"
-                value={String(selectedCard.completedCycles)}
+            </Field>
+          </div>
+          <Field label="Image URL">
+            <div className="space-y-2">
+              <Input
+                value={draft.imageUrl}
+                onChange={(e) => setDraft((prev) => ({ ...prev, imageUrl: e.target.value }))}
+                placeholder="https://..."
               />
-            </div>
-
-            {/* Row 5: Badges */}
-            <div className="flex items-center gap-2">
-              {selectedLoopLabel && (
-                <Badge variant="secondary" className="text-[10px]">
-                  {selectedLoopLabel}
-                </Badge>
-              )}
-              {stageMeta && (
-                <Badge
-                  className={cn(
-                    "border-transparent text-[10px]",
-                    stageMeta.bgClass,
-                    stageMeta.textClass,
-                  )}
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleSaveImageUrl()}
+                  disabled={isSavingImageUrl}
                 >
-                  {stageMeta.label}
-                </Badge>
-              )}
+                  {isSavingImageUrl ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : null}
+                  Save image URL
+                </Button>
+              </div>
             </div>
+          </Field>
+          <Field label="Notes">
+            <textarea
+              className="min-h-[72px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              value={draft.notesText}
+              onChange={(e) => setDraft((prev) => ({ ...prev, notesText: e.target.value }))}
+            />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-[140px_1fr]">
+            <Field label="Accent">
+              <input
+                type="color"
+                className="h-9 w-full cursor-pointer rounded-md border border-border bg-background p-1"
+                value={normalizeColor(draft.accentColor)}
+                onChange={(e) => setDraft((prev) => ({ ...prev, accentColor: e.target.value }))}
+              />
+            </Field>
+            <Field label="Accent (Hex)">
+              <Input
+                value={draft.accentColor}
+                onChange={(e) => setDraft((prev) => ({ ...prev, accentColor: e.target.value }))}
+              />
+            </Field>
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => basePrintData && setDraft(buildDraftFromData(basePrintData))}
+              disabled={!basePrintData}
+            >
+              Reset
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void handlePrint()}
+              disabled={isPrinting || !basePrintData}
+            >
+              {isPrinting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Printer className="h-3.5 w-3.5" />
+              )}
+              Print 3x5 Portrait
+            </Button>
           </div>
         </div>
-      )}
 
-      {/* Print action */}
-      {selectedCard && (
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void handlePrint()}
-            disabled={isPrinting}
-          >
-            {isPrinting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Printer className="h-3.5 w-3.5" />
-            )}
-            Print label
-          </Button>
+        <div className="overflow-auto rounded-md border border-border bg-muted/10 p-2">
+          {isLoadingPreviewData || !previewData ? (
+            <div className="flex min-h-[420px] items-center justify-center text-xs text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading preview...
+            </div>
+          ) : (
+            <div className="origin-top-left scale-[0.95]">
+              <KanbanPrintRenderer data={previewData} format="order_card_3x5_portrait" />
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-/* ── Label field ────────────────────────────────────────────── */
-
-function LabelField({ label, value }: { label: string; value: string }) {
+function Field(props: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      <p className="truncate font-medium">{value}</p>
-    </div>
+    <label className="block space-y-1">
+      <span className="text-[11px] font-medium text-muted-foreground">{props.label}</span>
+      {props.children}
+    </label>
   );
 }

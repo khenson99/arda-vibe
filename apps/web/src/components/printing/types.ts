@@ -11,6 +11,7 @@ export interface KanbanPrintData {
   totalCards: number;
   partNumber: string;
   partDescription: string;
+  sku: string;
   loopType: 'procurement' | 'production' | 'transfer';
   currentStage: 'created' | 'triggered' | 'ordered' | 'in_transit' | 'received' | 'restocked';
   facilityName: string;
@@ -26,6 +27,13 @@ export interface KanbanPrintData {
   tenantName: string;
   tenantLogoUrl?: string;
   notes?: string;
+  notesText?: string;
+  imageUrl?: string;
+  minimumText: string;
+  locationText: string;
+  orderText: string;
+  supplierText: string;
+  accentColor?: string;
   lastPrintedAt?: string;
   showArdaWatermark: boolean;
 }
@@ -46,6 +54,7 @@ export interface FormatConfig {
   qrSizePx: number;
   safeInsetPx: number;
   printerClass: 'standard' | 'thermal';
+  layoutVariant: 'legacy' | 'order_card_3x5_portrait';
   showLogo: boolean;
   showDescription: boolean;
   showExtendedFields: boolean;
@@ -61,6 +70,21 @@ export interface ValidationResult {
 
 // ─── Format Configs (Source of Truth) ───────────────────────────────
 export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
+  order_card_3x5_portrait: {
+    widthIn: 3,
+    heightIn: 5,
+    widthPx: 288,
+    heightPx: 480,
+    qrSizePx: 62,
+    safeInsetPx: 13,
+    printerClass: 'standard',
+    layoutVariant: 'order_card_3x5_portrait',
+    showLogo: false,
+    showDescription: true,
+    showExtendedFields: false,
+    showNotes: true,
+    showScanUrl: false,
+  },
   '3x5_card': {
     widthIn: 5,
     heightIn: 3,
@@ -69,6 +93,7 @@ export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
     qrSizePx: 96,
     safeInsetPx: 12,
     printerClass: 'standard',
+    layoutVariant: 'legacy',
     showLogo: true,
     showDescription: true,
     showExtendedFields: false,
@@ -83,6 +108,7 @@ export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
     qrSizePx: 120,
     safeInsetPx: 12,
     printerClass: 'standard',
+    layoutVariant: 'legacy',
     showLogo: true,
     showDescription: true,
     showExtendedFields: true,
@@ -97,6 +123,7 @@ export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
     qrSizePx: 64,
     safeInsetPx: 12,
     printerClass: 'standard',
+    layoutVariant: 'legacy',
     showLogo: true,
     showDescription: true,
     showExtendedFields: false,
@@ -111,6 +138,7 @@ export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
     qrSizePx: 48,
     safeInsetPx: 6,
     printerClass: 'thermal',
+    layoutVariant: 'legacy',
     showLogo: false,
     showDescription: true,
     showExtendedFields: false,
@@ -125,6 +153,7 @@ export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
     qrSizePx: 48,
     safeInsetPx: 6,
     printerClass: 'thermal',
+    layoutVariant: 'legacy',
     showLogo: false,
     showDescription: true,
     showExtendedFields: false,
@@ -139,6 +168,7 @@ export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
     qrSizePx: 48,
     safeInsetPx: 6,
     printerClass: 'thermal',
+    layoutVariant: 'legacy',
     showLogo: false,
     showDescription: false,
     showExtendedFields: false,
@@ -153,6 +183,7 @@ export const FORMAT_CONFIGS: Record<CardFormat, FormatConfig> = {
     qrSizePx: 80,
     safeInsetPx: 6,
     printerClass: 'thermal',
+    layoutVariant: 'legacy',
     showLogo: false,
     showDescription: false,
     showExtendedFields: false,

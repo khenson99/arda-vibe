@@ -191,6 +191,7 @@ export interface PaginatedResponse<T> {
 
 // ─── Card Print Format ───────────────────────────────────────────────
 export type CardFormat =
+  | 'order_card_3x5_portrait'
   | '3x5_card'
   | '4x6_card'
   | 'business_card'

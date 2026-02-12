@@ -26,6 +26,10 @@ export function validatePrintData(
     errors.push('partNumber is required');
   }
 
+  if (!data.sku || data.sku.trim().length === 0) {
+    errors.push('sku is required');
+  }
+
   if (!Number.isInteger(data.cardNumber) || data.cardNumber < 1) {
     errors.push('cardNumber must be a positive integer');
   }
@@ -61,6 +65,13 @@ export function validatePrintData(
     if (!data.tenantName || data.tenantName.trim().length === 0) {
       errors.push('tenantName is required for card formats');
     }
+  }
+
+  if (format === 'order_card_3x5_portrait') {
+    if (!data.minimumText?.trim()) errors.push('minimumText is required for order_card_3x5_portrait');
+    if (!data.locationText?.trim()) errors.push('locationText is required for order_card_3x5_portrait');
+    if (!data.orderText?.trim()) errors.push('orderText is required for order_card_3x5_portrait');
+    if (!data.supplierText?.trim()) errors.push('supplierText is required for order_card_3x5_portrait');
   }
 
   // ── Label format validations (thermal printers) ──

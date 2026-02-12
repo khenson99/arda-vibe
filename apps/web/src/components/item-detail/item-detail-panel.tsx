@@ -100,6 +100,7 @@ export function ItemDetailPanel({
               tenantName={session.user.tenantName}
               tenantLogoUrl={session.user.tenantLogo}
               onUnauthorized={onUnauthorized}
+              onSaved={onSaved}
               onOpenLoopsTab={() => setActiveTab("loops")}
             />
           </div>

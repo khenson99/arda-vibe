@@ -17,6 +17,12 @@ import {
 
 describe('FORMAT_CONFIGS accuracy', () => {
   describe('dimensional specifications', () => {
+    it('order_card_3x5_portrait is 3in wide x 5in tall', () => {
+      const config = FORMAT_CONFIGS['order_card_3x5_portrait'];
+      expect(config.widthIn).toBe(3);
+      expect(config.heightIn).toBe(5);
+    });
+
     it('3x5_card is 5in wide x 3in tall', () => {
       const config = FORMAT_CONFIGS['3x5_card'];
       expect(config.widthIn).toBe(5);
@@ -61,7 +67,7 @@ describe('FORMAT_CONFIGS accuracy', () => {
   });
 
   describe('printer class assignment', () => {
-    const standardFormats: CardFormat[] = ['3x5_card', '4x6_card', 'business_card'];
+    const standardFormats: CardFormat[] = ['order_card_3x5_portrait', '3x5_card', '4x6_card', 'business_card'];
     const thermalFormats: CardFormat[] = ['business_label', '1x3_label', 'bin_label', '1x1_label'];
 
     it.each(standardFormats)('%s is assigned to standard printer class', (format) => {
@@ -74,10 +80,14 @@ describe('FORMAT_CONFIGS accuracy', () => {
   });
 
   describe('logo visibility', () => {
-    it('card formats show logo', () => {
+    it('legacy card formats show logo', () => {
       expect(FORMAT_CONFIGS['3x5_card'].showLogo).toBe(true);
       expect(FORMAT_CONFIGS['4x6_card'].showLogo).toBe(true);
       expect(FORMAT_CONFIGS['business_card'].showLogo).toBe(true);
+    });
+
+    it('portrait order card hides logo', () => {
+      expect(FORMAT_CONFIGS['order_card_3x5_portrait'].showLogo).toBe(false);
     });
 
     it('label formats hide logo (per layout spec)', () => {
@@ -90,6 +100,7 @@ describe('FORMAT_CONFIGS accuracy', () => {
 
   describe('description visibility', () => {
     it('most formats show description', () => {
+      expect(FORMAT_CONFIGS['order_card_3x5_portrait'].showDescription).toBe(true);
       expect(FORMAT_CONFIGS['3x5_card'].showDescription).toBe(true);
       expect(FORMAT_CONFIGS['4x6_card'].showDescription).toBe(true);
       expect(FORMAT_CONFIGS['business_card'].showDescription).toBe(true);
@@ -107,6 +118,11 @@ describe('FORMAT_CONFIGS accuracy', () => {
     it('only 4x6_card shows extended fields', () => {
       expect(FORMAT_CONFIGS['4x6_card'].showExtendedFields).toBe(true);
       expect(FORMAT_CONFIGS['4x6_card'].showNotes).toBe(true);
+    });
+
+    it('portrait order card allows notes without extended fields', () => {
+      expect(FORMAT_CONFIGS['order_card_3x5_portrait'].showExtendedFields).toBe(false);
+      expect(FORMAT_CONFIGS['order_card_3x5_portrait'].showNotes).toBe(true);
     });
 
     const nonExtendedFormats: CardFormat[] = [
@@ -130,6 +146,7 @@ describe('FORMAT_CONFIGS accuracy', () => {
     });
 
     it('labels do not show scan URL', () => {
+      expect(FORMAT_CONFIGS['order_card_3x5_portrait'].showScanUrl).toBe(false);
       expect(FORMAT_CONFIGS['business_label'].showScanUrl).toBe(false);
       expect(FORMAT_CONFIGS['1x3_label'].showScanUrl).toBe(false);
       expect(FORMAT_CONFIGS['bin_label'].showScanUrl).toBe(false);
@@ -138,10 +155,14 @@ describe('FORMAT_CONFIGS accuracy', () => {
   });
 
   describe('safe inset', () => {
-    it('card formats use 12px inset (0.125in at 96dpi)', () => {
+    it('legacy card formats use 12px inset (0.125in at 96dpi)', () => {
       expect(FORMAT_CONFIGS['3x5_card'].safeInsetPx).toBe(12);
       expect(FORMAT_CONFIGS['4x6_card'].safeInsetPx).toBe(12);
       expect(FORMAT_CONFIGS['business_card'].safeInsetPx).toBe(12);
+    });
+
+    it('portrait order card uses 13px inset', () => {
+      expect(FORMAT_CONFIGS['order_card_3x5_portrait'].safeInsetPx).toBe(13);
     });
 
     it('label formats use 6px inset (tighter margins)', () => {

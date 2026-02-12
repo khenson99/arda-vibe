@@ -192,6 +192,8 @@ cardsRouter.get('/:id/print-detail', async (req: AuthRequest, res, next) => {
       loopType: card.loop.loopType,
       partName: partRow?.name ?? null,
       partNumber: partRow?.partNumber ?? null,
+      imageUrl: partRow?.imageUrl ?? null,
+      itemNotes: partRow?.itemNotes ?? null,
       facilityName: facilityRow?.name ?? null,
       supplierName: supplierRow?.name ?? null,
       minQuantity: card.loop.minQuantity,
@@ -213,6 +215,8 @@ cardsRouter.get('/:id/print-detail', async (req: AuthRequest, res, next) => {
         statedLeadTimeDays: card.loop.statedLeadTimeDays ?? undefined,
         safetyStockDays: Number.isFinite(safetyStockDays) ? safetyStockDays : undefined,
         notes: card.loop.notes ?? undefined,
+        imageUrl: partRow?.imageUrl ?? undefined,
+        itemNotes: partRow?.itemNotes ?? undefined,
       },
     });
   } catch (err) {

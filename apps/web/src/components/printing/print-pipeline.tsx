@@ -8,6 +8,7 @@ import type { CardFormat } from '@arda/shared-types';
 import type { KanbanPrintData, FormatConfig } from './types';
 import { FORMAT_CONFIGS } from './types';
 import { KanbanPrintRenderer } from './kanban-print-renderer';
+import { renderOrderCard3x5Html } from './order-card-3x5-template';
 
 // ─── Print Settings ──────────────────────────────────────────────────
 
@@ -266,7 +267,9 @@ export function dispatchPrint(
   // Build the HTML content as a string
   const cardsHtml = cards
     .map(
-      (card) => `
+      (card) => config.layoutVariant === 'order_card_3x5_portrait'
+        ? renderOrderCard3x5Html(card, config)
+        : `
     <div class="print-card" style="
       width: ${config.widthPx}px;
       height: ${config.heightPx}px;
@@ -318,6 +321,10 @@ export function dispatchPrint(
   const headContent = doc.head;
   const bodyContent = doc.body;
 
+  // Reset existing content in case the window was reused.
+  printWindow.document.head.innerHTML = '';
+  printWindow.document.body.innerHTML = '';
+
   // Import and append head elements
   for (const child of Array.from(headContent.childNodes)) {
     const imported = printWindow.document.importNode(child, true);
@@ -330,13 +337,68 @@ export function dispatchPrint(
     printWindow.document.body.appendChild(imported);
   }
 
-  // Wait for images to load, then print
-  setTimeout(() => {
-    printWindow.print();
-    if (options.closeWindowAfterPrint ?? true) {
-      printWindow.close();
+  const shouldClose = options.closeWindowAfterPrint ?? true;
+
+  // Wait for images to settle before printing for more reliable preview output.
+  const images = Array.from(printWindow.document.images ?? []);
+  const imageLoadPromises = images.map((img) => {
+    if (img.complete) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      img.addEventListener('load', () => resolve(), { once: true });
+      img.addEventListener('error', () => resolve(), { once: true });
+    });
+  });
+
+  const triggerPrint = () => {
+    try {
+      printWindow.focus();
+    } catch {
+      // Ignore focus errors for browser-managed windows.
     }
-  }, 500);
+
+    if (shouldClose) {
+      let closed = false;
+      const closeSafely = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          printWindow.close();
+        } catch {
+          // Ignore close errors for browser-managed windows.
+        }
+      };
+
+      if (typeof printWindow.addEventListener === 'function') {
+        printWindow.addEventListener(
+          'afterprint',
+          () => {
+            setTimeout(closeSafely, 50);
+          },
+          { once: true },
+        );
+      } else {
+        // Minimal fallback for environments without afterprint events.
+        setTimeout(closeSafely, 1_000);
+      }
+
+      // Fallback for browsers that do not reliably fire afterprint.
+      setTimeout(closeSafely, 60_000);
+    }
+
+    printWindow.print();
+  };
+
+  const schedulePrint = () => {
+    // Let layout settle one frame before printing.
+    setTimeout(triggerPrint, 100);
+  };
+
+  if (imageLoadPromises.length === 0) {
+    schedulePrint();
+    return;
+  }
+
+  Promise.all(imageLoadPromises).finally(schedulePrint);
 }
 
 // ─── Standalone Print Function ───────────────────────────────────────

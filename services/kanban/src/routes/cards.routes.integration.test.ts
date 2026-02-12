@@ -71,6 +71,8 @@ const state = vi.hoisted(() => ({
     partNumber: 'LB-100',
     name: 'Lean Bolt',
     description: 'M8 bolt',
+    imageUrl: 'https://example.com/lean-bolt.png',
+    itemNotes: 'Use coated variant for humid zones',
   } as Record<string, unknown> | null,
   facility: {
     id: 'fac-1',
@@ -222,6 +224,9 @@ describe('cards print detail route', () => {
         currentStage: 'triggered',
         loopType: 'procurement',
         partName: 'Lean Bolt',
+        partNumber: 'LB-100',
+        imageUrl: 'https://example.com/lean-bolt.png',
+        itemNotes: 'Use coated variant for humid zones',
         facilityName: 'Main Plant',
         minQuantity: 10,
         orderQuantity: 24,
@@ -246,6 +251,8 @@ describe('cards print detail route', () => {
         statedLeadTimeDays: 5,
         safetyStockDays: 2,
         notes: 'Keep two bins in rotation',
+        imageUrl: 'https://example.com/lean-bolt.png',
+        itemNotes: 'Use coated variant for humid zones',
       }),
     );
   });

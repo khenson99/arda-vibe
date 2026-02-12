@@ -46,6 +46,7 @@ export function ItemEditForm({
   const [itemName, setItemName] = React.useState("");
   const [supplier, setSupplier] = React.useState("");
   const [location, setLocation] = React.useState("");
+  const [imageUrl, setImageUrl] = React.useState("");
   const [orderMethod, setOrderMethod] = React.useState("purchase_order");
   const [minQty, setMinQty] = React.useState("0");
   const [minQtyUnit, setMinQtyUnit] = React.useState("each");
@@ -61,6 +62,7 @@ export function ItemEditForm({
     setItemName(nextPart?.name?.trim() || "");
     setSupplier(nextPart?.primarySupplier?.trim() || "");
     setLocation(nextPart?.location?.trim() || "");
+    setImageUrl(nextPart?.imageUrl?.trim() || "");
     const existingOrderMethod = nextPart?.orderMechanism?.trim() || nextPart?.type?.trim() || "";
     try {
       setOrderMethod(normalizeProcurementOrderMethod(existingOrderMethod));
@@ -126,7 +128,7 @@ export function ItemEditForm({
           orderQtyUnit: normalizeOptionalString(orderQtyUnit),
           primarySupplier: supplier.trim() || "Unknown supplier",
           primarySupplierLink: null,
-          imageUrl: normalizeOptionalString(part?.imageUrl ?? null),
+          imageUrl: normalizeOptionalString(imageUrl),
           notes: part?.notes ?? null,
         },
       });
@@ -146,6 +148,7 @@ export function ItemEditForm({
     isCreateMode,
     itemCode,
     itemName,
+    imageUrl,
     location,
     minQty,
     minQtyUnit,
@@ -156,7 +159,6 @@ export function ItemEditForm({
     orderQty,
     orderQtyUnit,
     part?.eId,
-    part?.imageUrl,
     session.tokens.accessToken,
     session.user.email,
     session.user.id,
@@ -182,6 +184,25 @@ export function ItemEditForm({
         <div>
           <label className="text-xs font-medium text-muted-foreground">Location</label>
           <Input value={location} onChange={(event) => setLocation(event.target.value)} className="mt-1" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="text-xs font-medium text-muted-foreground">Image URL</label>
+          <Input
+            value={imageUrl}
+            onChange={(event) => setImageUrl(event.target.value)}
+            className="mt-1"
+            placeholder="https://..."
+          />
+          {imageUrl.trim() ? (
+            <div className="mt-2 flex h-24 w-24 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/20">
+              <img
+                src={imageUrl}
+                alt="Item preview"
+                className="h-full w-full object-contain"
+                loading="lazy"
+              />
+            </div>
+          ) : null}
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground">Order method</label>

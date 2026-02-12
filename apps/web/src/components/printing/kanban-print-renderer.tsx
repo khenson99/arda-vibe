@@ -6,9 +6,10 @@ import type { KanbanPrintData } from './types';
 import { FORMAT_CONFIGS } from './types';
 import { KanbanCardTemplate } from './kanban-card-template';
 import { KanbanLabelTemplate } from './kanban-label-template';
+import { OrderCard3x5Template } from './order-card-3x5-template';
 import { validatePrintData } from './validation';
 
-const CARD_FORMATS: CardFormat[] = ['3x5_card', '4x6_card', 'business_card'];
+const CARD_FORMATS: CardFormat[] = ['order_card_3x5_portrait', '3x5_card', '4x6_card', 'business_card'];
 const LABEL_FORMATS: CardFormat[] = ['business_label', '1x3_label', 'bin_label', '1x1_label'];
 
 export function isCardFormat(format: CardFormat): boolean {
@@ -43,6 +44,9 @@ export function KanbanPrintRenderer({ data, format }: KanbanPrintRendererProps) 
   }
 
   if (isCardFormat(format)) {
+    if (config.layoutVariant === 'order_card_3x5_portrait') {
+      return <OrderCard3x5Template data={data} format={format} config={config} />;
+    }
     return <KanbanCardTemplate data={data} format={format} config={config} />;
   }
 

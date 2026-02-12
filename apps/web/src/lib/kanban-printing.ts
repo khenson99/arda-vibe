@@ -18,6 +18,7 @@ export interface PrintCardsFromIdsInput extends PrintDataDefaults {
   cardIds: string[];
   format?: CardFormat;
   onUnauthorized?: () => void;
+  overridesByCardId?: Record<string, Partial<KanbanPrintData>>;
 }
 
 export interface PrintCardsFromIdsResult {
@@ -57,6 +58,12 @@ function cleanString(value: unknown, fallback = ""): string {
   return isNonEmptyString(value) ? value.trim() : fallback;
 }
 
+function formatQty(value: unknown): string {
+  const qty = toNonNegativeNumber(value, 0);
+  const unit = qty === 1 ? "each" : "each";
+  return `${qty} ${unit}`;
+}
+
 export function mapCardPrintDetailToPrintData(
   card: KanbanCardPrintDetail,
   defaults: PrintDataDefaults = {},
@@ -72,6 +79,7 @@ export function mapCardPrintDetailToPrintData(
     totalCards,
     partNumber,
     partDescription: cleanString(loop?.partDescription ?? card.partName, partNumber),
+    sku: cleanString(loop?.partNumber ?? partNumber, partNumber),
     loopType: toLoopType(card.loopType ?? loop?.loopType),
     currentStage: toCardStage(card.currentStage),
     facilityName: cleanString(card.facilityName ?? loop?.facilityName, "Unknown Facility"),
@@ -87,6 +95,16 @@ export function mapCardPrintDetailToPrintData(
     tenantName: cleanString(defaults.tenantName, "Tenant"),
     tenantLogoUrl: isNonEmptyString(defaults.tenantLogoUrl) ? defaults.tenantLogoUrl.trim() : undefined,
     notes: isNonEmptyString(loop?.notes) ? loop.notes.trim() : undefined,
+    notesText: cleanString(loop?.itemNotes ?? loop?.notes, ""),
+    imageUrl: cleanString(loop?.imageUrl, ""),
+    minimumText: formatQty(card.minQuantity ?? loop?.minQuantity),
+    locationText: cleanString(loop?.storageLocationName ?? card.facilityName ?? loop?.facilityName, "Location TBD"),
+    orderText: formatQty(card.orderQuantity ?? loop?.orderQuantity),
+    supplierText: cleanString(
+      loop?.primarySupplierName ?? loop?.sourceFacilityName ?? card.facilityName,
+      "Unknown supplier",
+    ),
+    accentColor: "#2F6FCC",
     showArdaWatermark: false,
   };
 }
@@ -108,7 +126,16 @@ export async function printCardsFromIds(input: PrintCardsFromIdsInput): Promise<
     const details = await Promise.all(
       uniqueCardIds.map((cardId) => fetchCardPrintDetail(input.token, cardId)),
     );
-    const printData = details.map((detail) => mapCardPrintDetailToPrintData(detail, input));
+    const printData = details.map((detail) => {
+      const base = mapCardPrintDetailToPrintData(detail, input);
+      const overrides = input.overridesByCardId?.[detail.id];
+      if (!overrides) return base;
+      return {
+        ...base,
+        ...overrides,
+        cardId: base.cardId,
+      };
+    });
 
     dispatchPrint(printData, format, getDefaultSettings(format), { printWindow });
 
@@ -144,4 +171,3 @@ export async function printCardsFromIds(input: PrintCardsFromIdsInput): Promise<
     throw err;
   }
 }
-

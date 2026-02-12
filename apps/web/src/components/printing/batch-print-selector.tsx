@@ -17,6 +17,7 @@ interface BatchPrintSelectorProps {
 }
 
 const FORMAT_OPTIONS: { value: CardFormat; label: string }[] = [
+  { value: 'order_card_3x5_portrait', label: 'Order Card 3x5 (Portrait)' },
   { value: '3x5_card', label: '3x5 Card' },
   { value: '4x6_card', label: '4x6 Card' },
   { value: 'business_card', label: 'Business Card' },

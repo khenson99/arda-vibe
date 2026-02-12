@@ -14,7 +14,7 @@ import type { KanbanPrintData } from '../types';
 
 describe('getDefaultSettings', () => {
   describe('printer class detection', () => {
-    const standardFormats: CardFormat[] = ['3x5_card', '4x6_card', 'business_card'];
+    const standardFormats: CardFormat[] = ['order_card_3x5_portrait', '3x5_card', '4x6_card', 'business_card'];
     const thermalFormats: CardFormat[] = ['business_label', '1x3_label', 'bin_label', '1x1_label'];
 
     it.each(standardFormats)('%s defaults to standard printer class', (format) => {
@@ -179,6 +179,7 @@ describe('dispatchPrint', () => {
     totalCards: 3,
     partNumber: 'PN-100',
     partDescription: 'Widget',
+    sku: 'PN-100',
     loopType: 'procurement',
     currentStage: 'created',
     facilityName: 'Plant A',
@@ -187,6 +188,13 @@ describe('dispatchPrint', () => {
     qrCodeDataUrl: 'data:image/png;base64,abc123',
     scanUrl: '',
     tenantName: 'Arda',
+    notesText: '',
+    imageUrl: '',
+    minimumText: '5 each',
+    locationText: 'Plant A',
+    orderText: '10 each',
+    supplierText: 'Test Supplier',
+    accentColor: '#2F6FCC',
     showArdaWatermark: false,
   };
 
