@@ -76,6 +76,8 @@ vi.mock('@arda/db', () => {
       },
       kanbanParameterHistory: {},
     },
+    writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'mock', sequenceNumber: 1 })),
+    writeAuditEntries: vi.fn(async () => []),
   };
 });
 
