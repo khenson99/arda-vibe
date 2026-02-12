@@ -36,6 +36,13 @@
       "when": 1770937200000,
       "tag": "0004_lean_pull_flow",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1770856668245,
+      "tag": "0005_transfer_priority_approval",
+      "breakpoints": true
     }
   ]
 }

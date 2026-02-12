@@ -248,6 +248,9 @@ export const transferOrders = ordersSchema.table(
     requestedDate: timestamp('requested_date', { withTimezone: true }),
     shippedDate: timestamp('shipped_date', { withTimezone: true }),
     receivedDate: timestamp('received_date', { withTimezone: true }),
+    priorityScore: numeric('priority_score', { precision: 8, scale: 4 }).default('0'),
+    approvedByUserId: uuid('approved_by_user_id'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
     notes: text('notes'),
     kanbanCardId: uuid('kanban_card_id'),
     createdByUserId: uuid('created_by_user_id'),
@@ -260,6 +263,7 @@ export const transferOrders = ordersSchema.table(
     index('to_source_facility_idx').on(table.sourceFacilityId),
     index('to_dest_facility_idx').on(table.destinationFacilityId),
     index('to_status_idx').on(table.tenantId, table.status),
+    index('to_priority_idx').on(table.tenantId, table.priorityScore),
   ]
 );
 
