@@ -1,0 +1,235 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main, peach]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref (branch, tag, or SHA) to deploy
+        required: false
+        default: main
+      deploy_web:
+        description: Deploy web app to Vercel
+        required: true
+        type: boolean
+        default: true
+      deploy_backend:
+        description: Trigger backend deploy hooks (main only)
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.event_name }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare Deploy Context
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.resolve.outputs.should_run }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      branch: ${{ steps.resolve.outputs.branch }}
+      is_main: ${{ steps.resolve.outputs.is_main }}
+      deploy_web: ${{ steps.resolve.outputs.deploy_web }}
+      deploy_backend: ${{ steps.resolve.outputs.deploy_backend }}
+
+    steps:
+      - name: Resolve context
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          should_run="true"
+          sha=""
+          ref=""
+          branch=""
+          deploy_web="true"
+          deploy_backend="true"
+
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            if [[ "${{ github.event.workflow_run.event }}" != "push" ]]; then
+              should_run="false"
+            fi
+
+            if [[ "${{ github.event.workflow_run.conclusion }}" != "success" ]]; then
+              should_run="false"
+            fi
+
+            sha="${{ github.event.workflow_run.head_sha }}"
+            branch="${{ github.event.workflow_run.head_branch }}"
+            ref="${branch}"
+          else
+            ref="${{ github.event.inputs.ref }}"
+            branch="$ref"
+
+            if [[ -z "$ref" ]]; then
+              ref="main"
+              branch="main"
+            fi
+
+            deploy_web="${{ github.event.inputs.deploy_web }}"
+            deploy_backend="${{ github.event.inputs.deploy_backend }}"
+          fi
+
+          is_main="false"
+          if [[ "$branch" == "main" || "$branch" == "refs/heads/main" ]]; then
+            is_main="true"
+          fi
+
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "is_main=$is_main" >> "$GITHUB_OUTPUT"
+          echo "deploy_web=$deploy_web" >> "$GITHUB_OUTPUT"
+          echo "deploy_backend=$deploy_backend" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Deployment Plan"
+            echo ""
+            echo "- should_run: \`${{ steps.resolve.outputs.should_run }}\`"
+            echo "- branch/ref: \`${{ steps.resolve.outputs.branch }}\` / \`${{ steps.resolve.outputs.ref }}\`"
+            echo "- sha: \`${{ steps.resolve.outputs.sha || 'n/a' }}\`"
+            echo "- deploy_web: \`${{ steps.resolve.outputs.deploy_web }}\`"
+            echo "- deploy_backend: \`${{ steps.resolve.outputs.deploy_backend }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-web:
+    name: Deploy Web (Vercel)
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.deploy_web == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha != '' && needs.prepare.outputs.sha || needs.prepare.outputs.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Validate Vercel secrets
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -z "${VERCEL_TOKEN}" ]] && missing+=("VERCEL_TOKEN")
+          [[ -z "${VERCEL_ORG_ID}" ]] && missing+=("VERCEL_ORG_ID")
+          [[ -z "${VERCEL_PROJECT_ID}" ]] && missing+=("VERCEL_PROJECT_ID")
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Resolve deploy target
+        id: target
+        shell: bash
+        run: |
+          if [[ "${{ needs.prepare.outputs.is_main }}" == "true" ]]; then
+            echo "environment=production" >> "$GITHUB_OUTPUT"
+            echo "prod_flag=--prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=preview" >> "$GITHUB_OUTPUT"
+            echo "prod_flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment=${{ steps.target.outputs.environment }} --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build Vercel output
+        run: vercel build ${{ steps.target.outputs.prod_flag }} --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Deploy to Vercel
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEPLOY_OUTPUT=$(vercel deploy --prebuilt ${{ steps.target.outputs.prod_flag }} --token=${{ secrets.VERCEL_TOKEN }})
+          DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | tail -n 1)
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Web deploy summary
+        run: |
+          {
+            echo "## Web Deploy"
+            echo ""
+            echo "- branch: \`${{ needs.prepare.outputs.branch }}\`"
+            echo "- environment: \`${{ steps.target.outputs.environment }}\`"
+            echo "- deployment: ${{ steps.deploy.outputs.url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-backend:
+    name: Trigger Backend Deploy Hooks
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.deploy_backend == 'true' && needs.prepare.outputs.is_main == 'true'
+
+    steps:
+      - name: Trigger Railway deploy hook(s)
+        shell: bash
+        env:
+          RAILWAY_DEPLOY_HOOK_URLS: ${{ secrets.RAILWAY_DEPLOY_HOOK_URLS }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RAILWAY_DEPLOY_HOOK_URLS}" ]]; then
+            echo "RAILWAY_DEPLOY_HOOK_URLS is not set; skipping backend deploy hooks." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          normalized=$(echo "${RAILWAY_DEPLOY_HOOK_URLS}" | tr '\n' ',' | tr ';' ',')
+          IFS=',' read -ra hooks <<< "$normalized"
+
+          triggered=0
+          for raw in "${hooks[@]}"; do
+            hook=$(echo "$raw" | xargs)
+            if [[ -z "$hook" ]]; then
+              continue
+            fi
+            curl --fail --silent --show-error --request POST "$hook" >/dev/null
+            triggered=$((triggered + 1))
+          done
+
+          if (( triggered == 0 )); then
+            echo "No valid Railway deploy hook URLs found in RAILWAY_DEPLOY_HOOK_URLS." >&2
+            exit 1
+          fi
+
+          {
+            echo "## Backend Deploy"
+            echo ""
+            echo "- Triggered Railway deploy hook(s): $triggered"
+          } >> "$GITHUB_STEP_SUMMARY"
