@@ -23,6 +23,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "lint": "eslint src/",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
     "db:generate": "drizzle-kit generate",

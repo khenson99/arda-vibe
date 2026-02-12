@@ -58,17 +58,18 @@ export function buildVendorQueueGroups(input: {
     const partId = normalizePartLinkId(card.partId) ?? card.partId;
     const part = partById.get(partId);
 
+    const candidateOrderMethod = part ? (part.orderMechanism ?? 'purchase_order') : null;
     let orderMethod: ProcurementOrderMethod | null = null;
     let orderMethodError: string | null = null;
     try {
-      orderMethod = normalizeProcurementOrderMethod(part?.orderMechanism ?? null);
+      orderMethod = normalizeProcurementOrderMethod(candidateOrderMethod);
     } catch (error) {
       orderMethodError = error instanceof Error ? error.message : "Unsupported order method";
     }
 
     const orderMethodLabel = orderMethod
       ? procurementOrderMethodLabel(orderMethod)
-      : (part?.orderMechanism ?? "Unknown");
+      : (candidateOrderMethod ?? "Unknown");
 
     const group =
       grouped.get(supplierKey) ??

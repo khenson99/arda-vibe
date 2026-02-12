@@ -51,6 +51,17 @@ type CatalogPart = {
   type: string;
   uom: string;
   isActive: boolean;
+  orderMechanism?: string | null;
+  location?: string | null;
+  minQty?: number | null;
+  minQtyUnit?: string | null;
+  orderQty?: number | null;
+  orderQtyUnit?: string | null;
+  primarySupplierName?: string | null;
+  primarySupplierLink?: string | null;
+  itemNotes?: string | null;
+  glCode?: string | null;
+  itemSubtype?: string | null;
   description?: string | null;
   specifications?: Record<string, string> | null;
   imageUrl?: string | null;
@@ -59,6 +70,7 @@ type CatalogPart = {
 };
 
 const ITEM_NOTES_SPEC_KEY = '__ardaItemNotesHtml';
+const DEFAULT_ORDER_MECHANISM = 'purchase_order';
 
 function requireTenantId(req: AuthRequest): string {
   const tenantId = req.user?.tenantId?.trim();
@@ -102,7 +114,12 @@ function mergeNotesIntoSpecifications(
 
 function resolveItemNotes(part: CatalogPart): string | null {
   const specs = sanitizeSpecifications(part.specifications);
-  return normalizeOptionalString(specs[ITEM_NOTES_SPEC_KEY]) ?? normalizeOptionalString(part.description);
+  return (
+    normalizeOptionalString(part.itemNotes) ??
+    normalizeOptionalString(specs.itemNotes) ??
+    normalizeOptionalString(specs[ITEM_NOTES_SPEC_KEY]) ??
+    normalizeOptionalString(part.description)
+  );
 }
 
 function toPositiveInt(input?: number | null, fallback = 1): number {
@@ -118,12 +135,6 @@ function normalizeToken(req: AuthRequest): string {
     throw error;
   }
   return header.slice('Bearer '.length).trim();
-}
-
-function toCatalogType(orderMechanism?: string | null): string {
-  const mechanism = (orderMechanism || '').trim().toLowerCase();
-  if (mechanism === 'recurring') return 'component';
-  return 'other';
 }
 
 function toCatalogUom(minQtyUnit?: string | null, orderQtyUnit?: string | null): string {
@@ -146,6 +157,38 @@ function toCatalogUom(minQtyUnit?: string | null, orderQtyUnit?: string | null):
     'other',
   ]);
   return allowed.has(candidate) ? candidate : 'each';
+}
+
+function toOptionalInt(input: unknown): number | null {
+  if (input === null || input === undefined) return null;
+  const parsed = Number(input);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.trunc(parsed));
+}
+
+function resolveSpecString(part: CatalogPart, keys: string[]): string | null {
+  const specs = sanitizeSpecifications(part.specifications);
+  for (const key of keys) {
+    const candidate = normalizeOptionalString(specs[key]);
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+function resolveOrderMechanism(part: CatalogPart): string {
+  return (
+    normalizeOptionalString(part.orderMechanism) ??
+    resolveSpecString(part, ['orderMechanism', 'order_mechanism']) ??
+    DEFAULT_ORDER_MECHANISM
+  );
+}
+
+function resolveOptionalInt(part: CatalogPart, direct: number | null | undefined, specKeys: string[]): number | null {
+  if (typeof direct === 'number' && Number.isFinite(direct)) {
+    return Math.max(0, Math.trunc(direct));
+  }
+  const raw = resolveSpecString(part, specKeys);
+  return toOptionalInt(raw);
 }
 
 function toEpochSeconds(input?: string): number {
@@ -191,6 +234,17 @@ async function createCatalogPart(input: {
   name: string;
   type: string;
   uom: string;
+  orderMechanism: string;
+  location?: string | null;
+  minQty?: number | null;
+  minQtyUnit?: string | null;
+  orderQty?: number | null;
+  orderQtyUnit?: string | null;
+  primarySupplierName?: string | null;
+  primarySupplierLink?: string | null;
+  itemNotes?: string | null;
+  glCode?: string | null;
+  itemSubtype?: string | null;
   imageUrl?: string | null;
   description?: string | null;
   specifications?: Record<string, string>;
@@ -206,6 +260,17 @@ async function createCatalogPart(input: {
       name: input.name,
       type: input.type,
       uom: input.uom,
+      orderMechanism: input.orderMechanism,
+      location: input.location || undefined,
+      minQty: input.minQty ?? undefined,
+      minQtyUnit: input.minQtyUnit || undefined,
+      orderQty: input.orderQty ?? undefined,
+      orderQtyUnit: input.orderQtyUnit || undefined,
+      primarySupplierName: input.primarySupplierName || undefined,
+      primarySupplierLink: input.primarySupplierLink || undefined,
+      itemNotes: input.itemNotes || undefined,
+      glCode: input.glCode || undefined,
+      itemSubtype: input.itemSubtype || undefined,
       imageUrl: input.imageUrl || undefined,
       description: input.description || undefined,
       specifications: input.specifications ?? undefined,
@@ -228,6 +293,17 @@ async function updateCatalogPart(input: {
   name: string;
   type: string;
   uom: string;
+  orderMechanism?: string | null;
+  location?: string | null;
+  minQty?: number | null;
+  minQtyUnit?: string | null;
+  orderQty?: number | null;
+  orderQtyUnit?: string | null;
+  primarySupplierName?: string | null;
+  primarySupplierLink?: string | null;
+  itemNotes?: string | null;
+  glCode?: string | null;
+  itemSubtype?: string | null;
   imageUrl?: string | null;
   description?: string | null;
   specifications?: Record<string, string>;
@@ -242,6 +318,17 @@ async function updateCatalogPart(input: {
       name: input.name,
       type: input.type,
       uom: input.uom,
+      orderMechanism: input.orderMechanism || undefined,
+      location: input.location || undefined,
+      minQty: input.minQty ?? undefined,
+      minQtyUnit: input.minQtyUnit || undefined,
+      orderQty: input.orderQty ?? undefined,
+      orderQtyUnit: input.orderQtyUnit || undefined,
+      primarySupplierName: input.primarySupplierName || undefined,
+      primarySupplierLink: input.primarySupplierLink || undefined,
+      itemNotes: input.itemNotes || undefined,
+      glCode: input.glCode || undefined,
+      itemSubtype: input.itemSubtype || undefined,
       imageUrl: input.imageUrl || undefined,
       description: input.description || undefined,
       specifications: input.specifications ?? undefined,
@@ -530,8 +617,49 @@ itemsCompatRouter.put('/item/:entityId', async (req: AuthRequest, res, next) => 
       (part) => part.partNumber.trim().toLowerCase() === partNumber.toLowerCase(),
     );
 
-    const type = toCatalogType(input.payload.orderMechanism);
-    const uom = toCatalogUom(input.payload.minQtyUnit, input.payload.orderQtyUnit);
+    const type = existing?.type ?? 'component';
+    const uom = toCatalogUom(
+      input.payload.minQtyUnit ?? existing?.minQtyUnit ?? existing?.uom ?? null,
+      input.payload.orderQtyUnit ?? existing?.orderQtyUnit ?? existing?.uom ?? null
+    );
+    const orderMechanism =
+      normalizeOptionalString(input.payload.orderMechanism) ??
+      normalizeOptionalString(existing?.orderMechanism) ??
+      DEFAULT_ORDER_MECHANISM;
+    const location =
+      normalizeOptionalString(input.payload.location) ??
+      normalizeOptionalString(existing?.location) ??
+      null;
+    const minQty = toOptionalInt(input.payload.minQty ?? existing?.minQty);
+    const minQtyUnit =
+      normalizeOptionalString(input.payload.minQtyUnit) ??
+      normalizeOptionalString(existing?.minQtyUnit) ??
+      uom;
+    const orderQty = toOptionalInt(input.payload.orderQty ?? existing?.orderQty);
+    const orderQtyUnit =
+      normalizeOptionalString(input.payload.orderQtyUnit) ??
+      normalizeOptionalString(existing?.orderQtyUnit) ??
+      minQtyUnit;
+    const primarySupplierName =
+      normalizeOptionalString(input.payload.primarySupplier) ??
+      normalizeOptionalString(existing?.primarySupplierName) ??
+      null;
+    const primarySupplierLink =
+      normalizeOptionalString(input.payload.primarySupplierLink) ??
+      normalizeOptionalString(existing?.primarySupplierLink) ??
+      null;
+    const itemNotes =
+      normalizeOptionalString(input.payload.notes) ??
+      normalizeOptionalString(existing?.itemNotes) ??
+      null;
+    const glCode =
+      normalizeOptionalString(input.payload.glCode) ??
+      normalizeOptionalString(existing?.glCode) ??
+      null;
+    const itemSubtype =
+      normalizeOptionalString(input.payload.itemSubtype) ??
+      normalizeOptionalString(existing?.itemSubtype) ??
+      null;
     const hasNotesPatch = Object.prototype.hasOwnProperty.call(input.payload, 'notes');
     const specifications = hasNotesPatch
       ? mergeNotesIntoSpecifications(existing?.specifications, input.payload.notes)
@@ -546,6 +674,17 @@ itemsCompatRouter.put('/item/:entityId', async (req: AuthRequest, res, next) => 
           name: input.payload.name,
           type,
           uom,
+          orderMechanism,
+          location,
+          minQty,
+          minQtyUnit,
+          orderQty,
+          orderQtyUnit,
+          primarySupplierName,
+          primarySupplierLink,
+          itemNotes,
+          glCode,
+          itemSubtype,
           imageUrl: input.payload.imageUrl,
           description: existing.description ?? null,
           specifications,
@@ -556,6 +695,17 @@ itemsCompatRouter.put('/item/:entityId', async (req: AuthRequest, res, next) => 
           name: input.payload.name,
           type,
           uom,
+          orderMechanism,
+          location,
+          minQty,
+          minQtyUnit,
+          orderQty,
+          orderQtyUnit,
+          primarySupplierName,
+          primarySupplierLink,
+          itemNotes,
+          glCode,
+          itemSubtype,
           imageUrl: input.payload.imageUrl,
           description: null,
           specifications,
@@ -638,6 +788,33 @@ itemsCompatRouter.post('/item/query', async (req: AuthRequest, res, next) => {
     const sliced = records.slice(0, size);
     const results = sliced.map((part) => {
       const recorded = toEpochSeconds(part.updatedAt || part.createdAt);
+      const resolvedMinQty = resolveOptionalInt(part, part.minQty, ['minQty', 'min_qty']);
+      const resolvedOrderQty = resolveOptionalInt(part, part.orderQty, ['orderQty', 'order_qty']);
+      const resolvedLocation =
+        normalizeOptionalString(part.location) ??
+        resolveSpecString(part, ['location', 'storageLocation']);
+      const resolvedMinQtyUnit =
+        normalizeOptionalString(part.minQtyUnit) ??
+        resolveSpecString(part, ['minQtyUnit', 'min_qty_unit']) ??
+        normalizeOptionalString(part.uom) ??
+        'each';
+      const resolvedOrderQtyUnit =
+        normalizeOptionalString(part.orderQtyUnit) ??
+        resolveSpecString(part, ['orderQtyUnit', 'order_qty_unit']) ??
+        normalizeOptionalString(part.uom) ??
+        'each';
+      const resolvedPrimarySupplier =
+        normalizeOptionalString(part.primarySupplierName) ??
+        resolveSpecString(part, ['primarySupplier', 'primary_supplier_name']);
+      const resolvedPrimarySupplierLink =
+        normalizeOptionalString(part.primarySupplierLink) ??
+        resolveSpecString(part, ['primarySupplierLink', 'primary_supplier_link']);
+      const resolvedGlCode =
+        normalizeOptionalString(part.glCode) ?? resolveSpecString(part, ['glCode', 'gl_code']);
+      const resolvedItemSubtype =
+        normalizeOptionalString(part.itemSubtype) ??
+        resolveSpecString(part, ['itemSubtype', 'item_subtype']);
+
       return {
         rId: part.id,
         asOf: {
@@ -648,18 +825,18 @@ itemsCompatRouter.post('/item/query', async (req: AuthRequest, res, next) => {
           eId: part.id,
           externalGuid: part.partNumber,
           name: part.name,
-          orderMechanism: 'unspecified',
-          location: null,
-          minQty: 0,
-          minQtyUnit: part.uom || 'each',
-          orderQty: null,
-          orderQtyUnit: part.uom || 'each',
-          primarySupplier: null,
-          primarySupplierLink: null,
+          orderMechanism: resolveOrderMechanism(part),
+          location: resolvedLocation,
+          minQty: resolvedMinQty ?? 0,
+          minQtyUnit: resolvedMinQtyUnit,
+          orderQty: resolvedOrderQty,
+          orderQtyUnit: resolvedOrderQtyUnit,
+          primarySupplier: resolvedPrimarySupplier,
+          primarySupplierLink: resolvedPrimarySupplierLink,
           imageUrl: part.imageUrl ?? null,
           notes: resolveItemNotes(part),
-          glCode: null,
-          itemSubtype: null,
+          glCode: resolvedGlCode,
+          itemSubtype: resolvedItemSubtype,
         },
         metadata: {
           tenantId: req.user?.tenantId || null,

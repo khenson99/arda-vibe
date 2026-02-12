@@ -19,6 +19,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ItemDetailPanel } from "@/components/item-detail";
 import { EditableCell, PaginationBar, ColumnConfig, BulkActionsBar, ItemCardList } from "@/components/data-table";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -27,6 +34,8 @@ import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import type { AppShellOutletContext } from "@/layouts/app-shell";
 import {
   createPurchaseOrderFromCards,
+  fetchCards,
+  fetchLoops,
   isUnauthorized,
   normalizeOptionalString,
   parseApiError,
@@ -58,6 +67,11 @@ import {
   ITEM_TABLE_DEFAULT_VISIBLE_COLUMNS,
   LOOP_ORDER,
 } from "@/types";
+import {
+  PROCUREMENT_ORDER_METHODS,
+  procurementOrderMethodLabel,
+  normalizeProcurementOrderMethod,
+} from "@/components/procurement/order-method";
 
 /* ── Inline edit commit factory ─────────────────────────────── */
 
@@ -114,9 +128,9 @@ function buildCommitHandler(
 
     if (field === "orderMethod") {
       if (!rawValue) throw new Error("Order method is required.");
-      payloadPatch.orderMechanism = rawValue;
-      localPatch.orderMechanism = rawValue;
-      localPatch.type = rawValue;
+      const normalized = normalizeProcurementOrderMethod(rawValue);
+      payloadPatch.orderMechanism = normalized;
+      localPatch.orderMechanism = normalized;
     }
 
     if (field === "location") {
@@ -147,6 +161,101 @@ function buildCommitHandler(
     onOptimisticUpdate(part.id, localPatch);
     toast.success(`${ITEM_TABLE_COLUMNS.find((c) => c.key === field)?.label ?? field} updated`);
   };
+}
+
+function toKnownOrderMethod(value: string | null | undefined) {
+  try {
+    return normalizeProcurementOrderMethod(value ?? "");
+  } catch {
+    return "purchase_order" as const;
+  }
+}
+
+function OrderMethodEditableCell({
+  rawValue,
+  editable,
+  onCommit,
+}: {
+  rawValue: string;
+  editable: boolean;
+  onCommit: (nextValue: string) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [value, setValue] = React.useState(toKnownOrderMethod(rawValue));
+
+  React.useEffect(() => {
+    if (!isEditing) {
+      setValue(toKnownOrderMethod(rawValue));
+    }
+  }, [isEditing, rawValue]);
+
+  const display = procurementOrderMethodLabel(toKnownOrderMethod(rawValue));
+  if (!editable) {
+    return <span className="text-muted-foreground">{display}</span>;
+  }
+
+  if (!isEditing) {
+    return (
+      <button
+        type="button"
+        className="group inline-flex w-full items-center justify-between gap-1 rounded-sm border-b border-dashed border-border/60 px-1 py-0.5 text-left transition-colors hover:bg-muted/40"
+        onClick={() => setIsEditing(true)}
+      >
+        <span className="truncate">{display}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Select
+        value={value}
+        onValueChange={(next: string) => setValue(next as (typeof PROCUREMENT_ORDER_METHODS)[number])}
+      >
+        <SelectTrigger className="h-8 min-w-[170px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PROCUREMENT_ORDER_METHODS.map((method) => (
+            <SelectItem key={method} value={method}>
+              {procurementOrderMethodLabel(method)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        size="sm"
+        className="h-7 px-2"
+        disabled={isSaving}
+        onClick={async () => {
+          setIsSaving(true);
+          try {
+            await onCommit(value);
+            setIsEditing(false);
+          } catch {
+            // Error toast handled by caller.
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+      >
+        {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2"
+        disabled={isSaving}
+        onClick={() => {
+          setValue(toKnownOrderMethod(rawValue));
+          setIsEditing(false);
+        }}
+      >
+        Cancel
+      </Button>
+    </div>
+  );
 }
 
 /* ── PartsRoute ─────────────────────────────────────────────── */
@@ -335,6 +444,77 @@ export function PartsRoute({
 
     return stats;
   }, [queueCards]);
+
+  const [allKanbanStatsByPartId, setAllKanbanStatsByPartId] = React.useState<
+    Map<string, { loopCount: number; cards: number }>
+  >(new Map());
+
+  React.useEffect(() => {
+    let isCancelled = false;
+
+    const loadKanbanContext = async () => {
+      try {
+        const fetchAllLoopPages = async () => {
+          const rows: Awaited<ReturnType<typeof fetchLoops>>["data"] = [];
+          let page = 1;
+          let totalPages = 1;
+          while (page <= totalPages) {
+            const response = await fetchLoops(session.tokens.accessToken, { page, pageSize: 100 });
+            rows.push(...response.data);
+            totalPages = Math.max(1, response.pagination.totalPages);
+            page += 1;
+          }
+          return rows;
+        };
+
+        const fetchAllCardPages = async () => {
+          const rows: Awaited<ReturnType<typeof fetchCards>>["data"] = [];
+          let page = 1;
+          let totalPages = 1;
+          while (page <= totalPages) {
+            const response = await fetchCards(session.tokens.accessToken, { page, pageSize: 100 });
+            rows.push(...response.data);
+            totalPages = Math.max(1, response.pagination.totalPages);
+            page += 1;
+          }
+          return rows;
+        };
+
+        const [allLoops, allCards] = await Promise.all([fetchAllLoopPages(), fetchAllCardPages()]);
+
+        if (isCancelled) return;
+
+        const next = new Map<string, { loopCount: number; cards: number }>();
+        for (const loop of allLoops) {
+          const partKey = normalizePartLinkId(loop.partId);
+          if (!partKey) continue;
+          const current = next.get(partKey) ?? { loopCount: 0, cards: 0 };
+          current.loopCount += 1;
+          next.set(partKey, current);
+        }
+
+        for (const card of allCards) {
+          const partKey = normalizePartLinkId(card.partId);
+          if (!partKey) continue;
+          const current = next.get(partKey) ?? { loopCount: 0, cards: 0 };
+          current.cards += 1;
+          next.set(partKey, current);
+        }
+
+        setAllKanbanStatsByPartId(next);
+      } catch {
+        if (!isCancelled) {
+          setAllKanbanStatsByPartId(new Map());
+        }
+      }
+    };
+
+    void loadKanbanContext();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [refreshAll, session.tokens.accessToken]);
 
   const findQueueStatsForPart = React.useCallback(
     (part: PartRecord) => resolvePartLinkedValue(part, queueStatsByPartId),
@@ -525,6 +705,7 @@ export function PartsRoute({
               onToggleSelect={toggleOne}
               onOpenItemDetail={openItemDetailDialog}
               queueStatsByPartId={queueStatsByPartId}
+              allKanbanStatsByPartId={allKanbanStatsByPartId}
               orderLineByItem={orderLineByItem}
               session={session}
             />
@@ -588,6 +769,7 @@ export function PartsRoute({
                         part={part}
                         visibleColumns={visibleColumns}
                         queueStatsByPartId={queueStatsByPartId}
+                        allKanbanStatsByPartId={allKanbanStatsByPartId}
                         orderLineByItem={orderLineByItem}
                         session={session}
                         onOptimisticUpdate={applyOptimisticUpdate}
@@ -879,6 +1061,7 @@ interface ItemRowProps {
     latestStage: string | null;
     loopTypes: Set<LoopType>;
   }>;
+  allKanbanStatsByPartId: Map<string, { loopCount: number; cards: number }>;
   orderLineByItem: Record<string, import("@/types").OrderLineByItemSummary>;
   session: AuthSession;
   onOptimisticUpdate: (partId: string, patch: Partial<PartRecord>) => void;
@@ -892,6 +1075,7 @@ const ItemRow = React.memo(function ItemRow({
   part,
   visibleColumns,
   queueStatsByPartId,
+  allKanbanStatsByPartId,
   orderLineByItem,
   session,
   onOptimisticUpdate,
@@ -901,12 +1085,12 @@ const ItemRow = React.memo(function ItemRow({
   onCardCreated,
 }: ItemRowProps) {
   const queueStats = resolvePartLinkedValue(part, queueStatsByPartId);
+  const allKanbanStats = resolvePartLinkedValue(part, allKanbanStatsByPartId);
   const orderLineSummary = orderLineByItem[part.eId ?? part.id];
   const queueUpdatedAt = queueStats?.queueUpdatedAt ?? null;
   const itemCode = part.externalGuid || part.partNumber || part.id;
   const itemName = part.name?.trim() || "Unnamed item";
   const supplierLabel = part.primarySupplier || "—";
-  const orderMethod = formatReadableLabel(part.orderMechanism || part.type || null);
   const minQty = part.minQty ?? queueStats?.minUnits ?? null;
   const minQtyUnit = part.minQtyUnit || part.uom || null;
   const orderQty = part.orderQty ?? queueStats?.orderUnits ?? orderLineSummary?.orderedQty ?? null;
@@ -1072,7 +1256,12 @@ const ItemRow = React.memo(function ItemRow({
       case "cards":
         return (
           <td key={columnKey} className="table-cell-density font-semibold text-[hsl(var(--table-link))]">
-            {queueStats?.cards ?? 0}
+            <div className="leading-tight">
+              <div>{allKanbanStats?.cards ?? 0}</div>
+              <div className="text-[10px] font-normal text-muted-foreground">
+                {allKanbanStats?.loopCount ?? 0} loop{(allKanbanStats?.loopCount ?? 0) === 1 ? "" : "s"}
+              </div>
+            </div>
           </td>
         );
 
@@ -1088,11 +1277,9 @@ const ItemRow = React.memo(function ItemRow({
       case "orderMethod":
         return (
           <td key={columnKey} className="table-cell-density">
-            <EditableCell
-              displayValue={orderMethod}
-              rawValue={part.orderMechanism || part.type || ""}
+            <OrderMethodEditableCell
+              rawValue={part.orderMechanism || part.type || "purchase_order"}
               editable={isEditable}
-              placeholder="Order method"
               onCommit={makeCommit("orderMethod")}
             />
           </td>

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq, and, sql, gt } from 'drizzle-orm';
+import { eq, and, inArray, sql, gt } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
 import { getEventBus } from '@arda/events';
 import { config } from '@arda/config';
@@ -26,6 +26,75 @@ const createLoopSchema = z.object({
   notes: z.string().optional(),
 });
 
+type LoopRecord = {
+  id: string;
+  partId: string;
+  facilityId: string;
+  primarySupplierId: string | null;
+  sourceFacilityId: string | null;
+  [key: string]: unknown;
+};
+
+async function enrichLoops<T extends LoopRecord>(tenantId: string, loops: T[]): Promise<Array<T & {
+  partName: string | null;
+  partNumber: string | null;
+  facilityName: string | null;
+  primarySupplierName: string | null;
+  sourceFacilityName: string | null;
+}>> {
+  if (loops.length === 0) return [];
+
+  const partIds = [...new Set(loops.map((loop) => loop.partId).filter(Boolean))];
+  const facilityIds = [...new Set(loops.map((loop) => loop.facilityId).filter(Boolean))];
+  const sourceFacilityIds = [
+    ...new Set(loops.map((loop) => loop.sourceFacilityId).filter((id): id is string => !!id)),
+  ];
+  const primarySupplierIds = [
+    ...new Set(loops.map((loop) => loop.primarySupplierId).filter((id): id is string => !!id)),
+  ];
+  const allFacilityIds = [...new Set([...facilityIds, ...sourceFacilityIds])];
+
+  const [partsRows, facilitiesRows, suppliersRows] = await Promise.all([
+    partIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({ id: schema.parts.id, name: schema.parts.name, partNumber: schema.parts.partNumber })
+          .from(schema.parts)
+          .where(and(eq(schema.parts.tenantId, tenantId), inArray(schema.parts.id, partIds)))
+          .execute(),
+    allFacilityIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({ id: schema.facilities.id, name: schema.facilities.name })
+          .from(schema.facilities)
+          .where(and(eq(schema.facilities.tenantId, tenantId), inArray(schema.facilities.id, allFacilityIds)))
+          .execute(),
+    primarySupplierIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({ id: schema.suppliers.id, name: schema.suppliers.name })
+          .from(schema.suppliers)
+          .where(and(eq(schema.suppliers.tenantId, tenantId), inArray(schema.suppliers.id, primarySupplierIds)))
+          .execute(),
+  ]);
+
+  const partMap = new Map(partsRows.map((row) => [row.id, row]));
+  const facilityMap = new Map(facilitiesRows.map((row) => [row.id, row.name]));
+  const supplierMap = new Map(suppliersRows.map((row) => [row.id, row.name]));
+
+  return loops.map((loop) => {
+    const part = partMap.get(loop.partId);
+    return {
+      ...loop,
+      partName: part?.name ?? null,
+      partNumber: part?.partNumber ?? null,
+      facilityName: facilityMap.get(loop.facilityId) ?? null,
+      primarySupplierName: loop.primarySupplierId ? supplierMap.get(loop.primarySupplierId) ?? null : null,
+      sourceFacilityName: loop.sourceFacilityId ? facilityMap.get(loop.sourceFacilityId) ?? null : null,
+    };
+  });
+}
+
 // ─── GET /loops ───────────────────────────────────────────────────────
 loopsRouter.get('/', async (req: AuthRequest, res, next) => {
   try {
@@ -34,18 +103,21 @@ loopsRouter.get('/', async (req: AuthRequest, res, next) => {
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 25));
     const facilityId = req.query.facilityId as string | undefined;
     const loopType = req.query.loopType as string | undefined;
+    const partId = req.query.partId as string | undefined;
 
     const conditions = [eq(kanbanLoops.tenantId, tenantId), eq(kanbanLoops.isActive, true)];
     if (facilityId) conditions.push(eq(kanbanLoops.facilityId, facilityId));
     if (loopType) conditions.push(eq(kanbanLoops.loopType, loopType as (typeof schema.loopTypeEnum.enumValues)[number]));
+    if (partId) conditions.push(eq(kanbanLoops.partId, partId));
 
     const whereClause = and(...conditions);
     const offset = (page - 1) * pageSize;
 
-    const [data, countResult] = await Promise.all([
+    const [rawData, countResult] = await Promise.all([
       db.select().from(kanbanLoops).where(whereClause).limit(pageSize).offset(offset),
       db.select({ count: sql<number>`count(*)` }).from(kanbanLoops).where(whereClause),
     ]);
+    const data = await enrichLoops(tenantId, rawData as LoopRecord[]);
 
     const total = Number(countResult[0]?.count ?? 0);
     res.json({
@@ -60,8 +132,9 @@ loopsRouter.get('/', async (req: AuthRequest, res, next) => {
 // ─── GET /loops/:id ──────────────────────────────────────────────────
 loopsRouter.get('/:id', async (req: AuthRequest, res, next) => {
   try {
+    const tenantId = req.user!.tenantId;
     const loop = await db.query.kanbanLoops.findFirst({
-      where: and(eq(kanbanLoops.id, req.params.id as string), eq(kanbanLoops.tenantId, req.user!.tenantId)),
+      where: and(eq(kanbanLoops.id, req.params.id as string), eq(kanbanLoops.tenantId, tenantId)),
       with: {
         cards: true,
         parameterHistory: { orderBy: schema.kanbanParameterHistory.createdAt },
@@ -70,7 +143,29 @@ loopsRouter.get('/:id', async (req: AuthRequest, res, next) => {
     });
 
     if (!loop) throw new AppError(404, 'Kanban loop not found');
-    res.json(loop);
+    const [enrichedLoop] = await enrichLoops(tenantId, [loop as LoopRecord]);
+    if (!enrichedLoop) throw new AppError(404, 'Kanban loop not found');
+
+    const cards = (loop.cards ?? []).map((card) => ({
+      ...card,
+      loopType: loop.loopType,
+      partId: loop.partId,
+      partName: enrichedLoop.partName,
+      partNumber: enrichedLoop.partNumber,
+      facilityId: loop.facilityId,
+      facilityName: enrichedLoop.facilityName,
+      supplierName: enrichedLoop.primarySupplierName,
+      minQuantity: loop.minQuantity,
+      orderQuantity: loop.orderQuantity,
+      numberOfCards: loop.numberOfCards,
+    }));
+
+    res.json({
+      ...enrichedLoop,
+      cards,
+      parameterHistory: loop.parameterHistory,
+      recommendations: loop.recommendations,
+    });
   } catch (err) {
     next(err);
   }
@@ -271,7 +366,13 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
       }
     }
 
-    res.json(updated);
+    if (!updated) throw new AppError(404, 'Loop not found');
+    const [enrichedUpdated] = await enrichLoops(tenantId, [updated as LoopRecord]);
+    if (!enrichedUpdated) throw new AppError(404, 'Loop not found');
+    res.json({
+      ...enrichedUpdated,
+      cards: updated.cards,
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation error', details: err.errors });

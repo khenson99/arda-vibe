@@ -118,12 +118,16 @@ export function QueueRoute({
     return () => setQueueHeaderControls(null);
   }, [isRefreshing, refreshQueueOnly, scope, searchTerm, setQueueHeaderControls, sortKey]);
 
-  const groups = React.useMemo(() => {
-    const allGroups = buildVendorQueueGroups({
+  const allGroups = React.useMemo(
+    () =>
+      buildVendorQueueGroups({
       cards: queueByLoop.procurement,
       parts,
-    });
+      }),
+    [parts, queueByLoop.procurement],
+  );
 
+  const groups = React.useMemo(() => {
     const filtered = allGroups
       .filter((group) => groupMatchesScope(group, scope))
       .filter((group) => groupMatchesSearch(group, searchTerm));
@@ -141,7 +145,16 @@ export function QueueRoute({
     });
 
     return filtered;
-  }, [parts, queueByLoop.procurement, scope, searchTerm, sortKey]);
+  }, [allGroups, scope, searchTerm, sortKey]);
+
+  const unknownMethodLineCount = React.useMemo(
+    () =>
+      allGroups.reduce(
+        (count, group) => count + group.lines.filter((line) => line.orderMethod === null).length,
+        0,
+      ),
+    [allGroups],
+  );
 
   const handleCreateDrafts = React.useCallback(
     async (payload: Parameters<typeof createProcurementDrafts>[1]) => {
@@ -272,6 +285,12 @@ export function QueueRoute({
           onVerify={handleVerify}
           onSendEmail={handleSendEmail}
         />
+      )}
+
+      {unknownMethodLineCount > 0 && (
+        <div className="rounded-xl border border-[hsl(var(--arda-warning)/0.35)] bg-[hsl(var(--arda-warning-light))] px-4 py-3 text-sm text-[hsl(var(--arda-warning))]">
+          {unknownMethodLineCount} queued line{unknownMethodLineCount === 1 ? "" : "s"} still has an unsupported legacy order method. Update the item order method to continue vendor automation.
+        </div>
       )}
 
       <div className="space-y-3">

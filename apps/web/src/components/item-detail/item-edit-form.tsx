@@ -1,7 +1,22 @@
 import * as React from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button, Input } from "@/components/ui";
+import {
+  Button,
+  Input,
+} from "@/components/ui";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  PROCUREMENT_ORDER_METHODS,
+  normalizeProcurementOrderMethod,
+  procurementOrderMethodLabel,
+} from "@/components/procurement/order-method";
 import {
   updateItemRecord,
   isUnauthorized,
@@ -31,7 +46,7 @@ export function ItemEditForm({
   const [itemName, setItemName] = React.useState("");
   const [supplier, setSupplier] = React.useState("");
   const [location, setLocation] = React.useState("");
-  const [orderMethod, setOrderMethod] = React.useState("");
+  const [orderMethod, setOrderMethod] = React.useState("purchase_order");
   const [minQty, setMinQty] = React.useState("0");
   const [minQtyUnit, setMinQtyUnit] = React.useState("each");
   const [orderQty, setOrderQty] = React.useState("");
@@ -46,7 +61,12 @@ export function ItemEditForm({
     setItemName(nextPart?.name?.trim() || "");
     setSupplier(nextPart?.primarySupplier?.trim() || "");
     setLocation(nextPart?.location?.trim() || "");
-    setOrderMethod(nextPart?.orderMechanism?.trim() || nextPart?.type?.trim() || "unspecified");
+    const existingOrderMethod = nextPart?.orderMechanism?.trim() || nextPart?.type?.trim() || "";
+    try {
+      setOrderMethod(normalizeProcurementOrderMethod(existingOrderMethod));
+    } catch {
+      setOrderMethod("purchase_order");
+    }
     setMinQty(String(nextPart?.minQty ?? 0));
     setMinQtyUnit(nextPart?.minQtyUnit?.trim() || nextPart?.uom?.trim() || "each");
     setOrderQty(
@@ -98,7 +118,7 @@ export function ItemEditForm({
         payload: {
           externalGuid: normalizedCode,
           name: itemName.trim(),
-          orderMechanism: orderMethod.trim() || "unspecified",
+          orderMechanism: orderMethod.trim() || "purchase_order",
           location: normalizeOptionalString(location),
           minQty: parsedMinQty,
           minQtyUnit: minQtyUnit.trim() || "each",
@@ -165,7 +185,18 @@ export function ItemEditForm({
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground">Order method</label>
-          <Input value={orderMethod} onChange={(event) => setOrderMethod(event.target.value)} className="mt-1" />
+          <Select value={orderMethod} onValueChange={setOrderMethod}>
+            <SelectTrigger className="mt-1">
+              <SelectValue placeholder="Select order method" />
+            </SelectTrigger>
+            <SelectContent>
+              {PROCUREMENT_ORDER_METHODS.map((method) => (
+                <SelectItem key={method} value={method}>
+                  {procurementOrderMethodLabel(method)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground">Min quantity</label>

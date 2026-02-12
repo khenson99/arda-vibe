@@ -637,6 +637,7 @@ export function mapItemsServiceRecord(record: DataAuthorityEntityRecord<ItemsSer
   const payload = record.payload;
   const updatedAt = toIsoFromTimeCoordinates(record.asOf) ?? new Date().toISOString();
   const identifier = payload.externalGuid?.trim() || payload.eId || record.rId;
+  const normalizedOrderMechanism = payload.orderMechanism?.trim() || "purchase_order";
 
   return {
     id: payload.eId || record.rId,
@@ -644,8 +645,8 @@ export function mapItemsServiceRecord(record: DataAuthorityEntityRecord<ItemsSer
     partNumber: identifier,
     externalGuid: payload.externalGuid ?? null,
     name: payload.name?.trim() || identifier,
-    type: payload.orderMechanism?.trim() || "unspecified",
-    orderMechanism: payload.orderMechanism ?? null,
+    type: normalizedOrderMechanism,
+    orderMechanism: normalizedOrderMechanism,
     location: payload.location ?? null,
     uom: payload.orderQtyUnit || payload.minQtyUnit || "each",
     isSellable: false,
@@ -677,7 +678,7 @@ export function toItemsInputPayload(part: PartRecord): ItemsServiceInputPayload 
   const orderQtyValue =
     typeof part.orderQty === "number" && Number.isFinite(part.orderQty) ? Math.max(0, part.orderQty) : null;
   const orderQtyUnitValue = normalizeOptionalString(part.orderQtyUnit ?? part.uom ?? null);
-  const orderMechanismValue = part.orderMechanism?.trim() || part.type?.trim() || "unspecified";
+  const orderMechanismValue = part.orderMechanism?.trim() || part.type?.trim() || "purchase_order";
 
   return {
     externalGuid: normalizeOptionalString(part.externalGuid) || fallbackId,
@@ -692,6 +693,8 @@ export function toItemsInputPayload(part: PartRecord): ItemsServiceInputPayload 
     primarySupplierLink: normalizeOptionalString(part.primarySupplierLink),
     imageUrl: normalizeOptionalString(part.imageUrl),
     notes: part.notes ?? null,
+    glCode: normalizeOptionalString(part.glCode),
+    itemSubtype: normalizeOptionalString(part.itemSubtype),
   };
 }
 

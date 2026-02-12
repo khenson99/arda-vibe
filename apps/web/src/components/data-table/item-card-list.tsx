@@ -23,12 +23,18 @@ interface QueueStatsEntry {
   loopTypes: Set<LoopType>;
 }
 
+interface AllKanbanStatsEntry {
+  loopCount: number;
+  cards: number;
+}
+
 export interface ItemCardListProps {
   parts: PartRecord[];
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onOpenItemDetail?: (part: PartRecord) => void;
   queueStatsByPartId: Map<string, QueueStatsEntry>;
+  allKanbanStatsByPartId: Map<string, AllKanbanStatsEntry>;
   orderLineByItem: Record<string, OrderLineByItemSummary>;
   session: AuthSession;
 }
@@ -51,6 +57,7 @@ interface ItemCardProps {
   onToggleSelect: (id: string) => void;
   onOpenItemDetail?: (part: PartRecord) => void;
   queueStats: QueueStatsEntry | undefined;
+  allKanbanStats: AllKanbanStatsEntry | undefined;
   orderLineSummary: OrderLineByItemSummary | undefined;
   session: AuthSession;
 }
@@ -61,6 +68,7 @@ const ItemCard = React.memo(function ItemCard({
   onToggleSelect,
   onOpenItemDetail,
   queueStats,
+  allKanbanStats,
   orderLineSummary,
   session,
 }: ItemCardProps) {
@@ -86,6 +94,8 @@ const ItemCard = React.memo(function ItemCard({
       .at(-1) ?? part.updatedAt;
 
   const cardIds = queueStats?.cardIds ?? [];
+  const totalCards = allKanbanStats?.cards ?? queueStats?.cards ?? 0;
+  const totalLoops = allKanbanStats?.loopCount ?? 0;
   const hasCards = cardIds.length > 0;
 
   /* Action handlers */
@@ -172,12 +182,14 @@ const ItemCard = React.memo(function ItemCard({
           <span className="text-muted-foreground">Location</span>
           <p className="font-semibold text-card-foreground">{part.location || "\u2014"}</p>
         </div>
-        {queueStats && queueStats.cards > 0 && (
-          <div>
-            <span className="text-muted-foreground">Cards</span>
-            <p className="font-semibold text-card-foreground">{queueStats.cards}</p>
-          </div>
-        )}
+        <div>
+          <span className="text-muted-foreground">Cards</span>
+          <p className="font-semibold text-card-foreground">{totalCards}</p>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Loops</span>
+          <p className="font-semibold text-card-foreground">{totalLoops}</p>
+        </div>
         <div>
           <span className="text-muted-foreground">Updated</span>
           <p className="font-semibold text-card-foreground">{formatDateTime(updatedAt)}</p>
@@ -249,6 +261,7 @@ export function ItemCardList({
   onToggleSelect,
   onOpenItemDetail,
   queueStatsByPartId,
+  allKanbanStatsByPartId,
   orderLineByItem,
   session,
 }: ItemCardListProps) {
@@ -262,6 +275,7 @@ export function ItemCardList({
           onToggleSelect={onToggleSelect}
           onOpenItemDetail={onOpenItemDetail}
           queueStats={resolvePartLinkedValue(part, queueStatsByPartId)}
+          allKanbanStats={resolvePartLinkedValue(part, allKanbanStatsByPartId)}
           orderLineSummary={orderLineByItem[part.eId ?? part.id]}
           session={session}
         />

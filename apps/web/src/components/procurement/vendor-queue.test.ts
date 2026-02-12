@@ -83,4 +83,21 @@ describe("buildVendorQueueGroups", () => {
     expect(groups[0].hasUnknownMethods).toBe(true);
     expect(groups[0].lines[0].orderMethod).toBeNull();
   });
+
+  it("defaults missing methods to purchase order", () => {
+    const groups = buildVendorQueueGroups({
+      cards: [
+        makeCard({
+          id: "card-purchase-order-default",
+          partId: "part-default-method",
+          primarySupplierId: "sup-default",
+          supplierName: "Default Vendor",
+        }),
+      ],
+      parts: [makePart({ id: "part-default-method", orderMechanism: null })],
+    });
+
+    expect(groups[0].hasUnknownMethods).toBe(false);
+    expect(groups[0].lines[0].orderMethod).toBe("purchase_order");
+  });
 });
