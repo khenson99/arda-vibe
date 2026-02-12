@@ -86,6 +86,15 @@ export function CardTemplateDesigner({
   onImageUrlSaved,
 }: CardTemplateDesignerProps) {
   const history = useHistoryState<CardTemplateDefinition>(createDefaultCardTemplateDefinition(), 100);
+  const {
+    value: definition,
+    canUndo,
+    canRedo,
+    set: setDefinition,
+    undo,
+    redo,
+    reset,
+  } = history;
 
   const [templates, setTemplates] = React.useState<CardTemplateRecord[]>([]);
   const [currentDefaultId, setCurrentDefaultId] = React.useState<string | null>(null);
@@ -114,16 +123,16 @@ export function CardTemplateDesigner({
     if (!template) {
       setSelectedTemplateId(null);
       setTemplateName('Default 3x5 Portrait');
-      history.reset(createDefaultCardTemplateDefinition());
+      reset(createDefaultCardTemplateDefinition());
       setSelectedElementId(null);
       return;
     }
 
     setSelectedTemplateId(template.id);
     setTemplateName(template.name);
-    history.reset(template.definition);
+    reset(template.definition);
     setSelectedElementId(null);
-  }, [history]);
+  }, [reset]);
 
   const loadTemplates = React.useCallback(async (preferredTemplateId?: string | null) => {
     setIsLoadingTemplates(true);
@@ -164,11 +173,11 @@ export function CardTemplateDesigner({
   }, [selectedTemplateId]);
 
   const handleAddElement = React.useCallback((factory: () => CardTemplateDefinition['elements'][number]) => {
-    history.set({
-      ...history.value,
-      elements: [...history.value.elements, factory()],
+    setDefinition({
+      ...definition,
+      elements: [...definition.elements, factory()],
     });
-  }, [history]);
+  }, [definition, setDefinition]);
 
   const handleSaveTemplate = React.useCallback(async () => {
     const name = templateName.trim();
@@ -183,14 +192,14 @@ export function CardTemplateDesigner({
       if (selectedTemplateId) {
         const updated = await updateCardTemplate(token, selectedTemplateId, {
           name,
-          definition: history.value,
+          definition,
         });
         savedId = updated.id;
       } else {
         const created = await createCardTemplate(token, {
           name,
           format: FORMAT,
-          definition: history.value,
+          definition,
           makeDefault: templates.length === 0,
         });
         savedId = created.id;
@@ -207,7 +216,7 @@ export function CardTemplateDesigner({
     } finally {
       setIsSavingTemplate(false);
     }
-  }, [history.value, loadTemplates, onUnauthorized, selectedTemplateId, templateName, templates.length, token]);
+  }, [definition, loadTemplates, onUnauthorized, selectedTemplateId, templateName, templates.length, token]);
 
   const handleSetDefault = React.useCallback(async () => {
     if (!selectedTemplateId) {
@@ -237,7 +246,7 @@ export function CardTemplateDesigner({
         const created = await createCardTemplate(token, {
           name: `${templateName.trim() || 'Untitled'} (Copy)`,
           format: FORMAT,
-          definition: history.value,
+          definition,
         });
         await loadTemplates(created.id);
       }
@@ -249,7 +258,7 @@ export function CardTemplateDesigner({
       }
       toast.error(parseApiError(error));
     }
-  }, [history.value, loadTemplates, onUnauthorized, selectedTemplateId, templateName, token]);
+  }, [definition, loadTemplates, onUnauthorized, selectedTemplateId, templateName, token]);
 
   const handleArchiveTemplate = React.useCallback(async () => {
     if (!selectedTemplateId) return;
@@ -275,7 +284,7 @@ export function CardTemplateDesigner({
         format: FORMAT,
         onUnauthorized,
         templateId: selectedTemplateId ?? undefined,
-        templateDefinition: history.value,
+        templateDefinition: definition,
         overridesByCardId: {
           [selectedCard.id]: {
             partDescription: previewData.partDescription,
@@ -302,14 +311,14 @@ export function CardTemplateDesigner({
     } finally {
       setIsPrinting(false);
     }
-  }, [history.value, onUnauthorized, previewData, selectedCard.cardNumber, selectedCard.id, selectedTemplateId, token]);
+  }, [definition, onUnauthorized, previewData, selectedCard.cardNumber, selectedCard.id, selectedTemplateId, token]);
 
   const handleDownloadPdf = React.useCallback(async () => {
     setIsDownloadingPdf(true);
     try {
       const stamp = new Date().toISOString().slice(0, 10);
       await downloadCardsPdf([previewData], FORMAT, {
-        templateDefinition: history.value,
+        templateDefinition: definition,
         filename: `card-${previewData.partNumber}-${stamp}.pdf`,
       });
       toast.success('PDF downloaded.');
@@ -318,7 +327,7 @@ export function CardTemplateDesigner({
     } finally {
       setIsDownloadingPdf(false);
     }
-  }, [history.value, previewData]);
+  }, [definition, previewData]);
 
   const handleSaveImageUrl = React.useCallback(async () => {
     const normalized = overrides.imageUrl.trim();
@@ -367,17 +376,17 @@ export function CardTemplateDesigner({
         onNewTemplate={() => {
           setSelectedTemplateId(null);
           setTemplateName('Untitled Template');
-          history.reset(createDefaultCardTemplateDefinition());
+          reset(createDefaultCardTemplateDefinition());
           setSelectedElementId(null);
         }}
         onSaveTemplate={() => void handleSaveTemplate()}
         onCloneTemplate={() => void handleCloneTemplate()}
         onSetDefault={() => void handleSetDefault()}
-        onResetSeed={() => history.set(createDefaultCardTemplateDefinition())}
-        onUndo={history.undo}
-        onRedo={history.redo}
-        canUndo={history.canUndo}
-        canRedo={history.canRedo}
+        onResetSeed={() => setDefinition(createDefaultCardTemplateDefinition())}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
         isSaving={isSavingTemplate}
         hasSelectedTemplate={!!selectedTemplateId}
       />
@@ -467,19 +476,19 @@ export function CardTemplateDesigner({
         </div>
 
         <CanvasSurface
-          definition={history.value}
+          definition={definition}
           data={previewData}
           selectedElementId={selectedElementId}
           onSelectElement={setSelectedElementId}
-          onDefinitionChange={history.set}
+          onDefinitionChange={setDefinition}
           scale={1}
         />
 
         <div className="space-y-3">
           <InspectorPanel
-            definition={history.value}
+            definition={definition}
             selectedElementId={selectedElementId}
-            onDefinitionChange={history.set}
+            onDefinitionChange={setDefinition}
           />
 
           <div className="space-y-2 rounded-md border border-border p-3">
