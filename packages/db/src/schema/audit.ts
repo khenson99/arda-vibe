@@ -49,3 +49,38 @@ export const auditLog = auditSchema.table(
     uniqueIndex('audit_hash_idx').on(table.hashChain),
   ]
 );
+
+// ─── Archive Table ──────────────────────────────────────────────────
+// Holds audit rows moved from audit_log after the tenant's retention
+// window expires.  Schema parity with audit_log so archived rows can
+// be queried with the same column references.
+//
+// The underlying Postgres table is range-partitioned on "timestamp"
+// (monthly). Drizzle doesn't model partitioning natively, so the
+// partitioning DDL lives in the migration SQL (0009_audit_log_archive).
+export const auditLogArchive = auditSchema.table(
+  'audit_log_archive',
+  {
+    id: uuid('id').primaryKey(),           // preserved from audit_log (no defaultRandom — already assigned)
+    tenantId: uuid('tenant_id').notNull(),
+    userId: uuid('user_id'),
+    action: varchar('action', { length: 100 }).notNull(),
+    entityType: varchar('entity_type', { length: 100 }).notNull(),
+    entityId: uuid('entity_id'),
+    previousState: jsonb('previous_state'),
+    newState: jsonb('new_state'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    ipAddress: varchar('ip_address', { length: 45 }),
+    userAgent: text('user_agent'),
+    timestamp: timestamp('timestamp', { withTimezone: true }).notNull(),
+
+    // Hash-chain columns (preserved from audit_log)
+    hashChain: varchar('hash_chain', { length: 64 }).notNull(),
+    previousHash: varchar('previous_hash', { length: 64 }),
+    sequenceNumber: bigint('sequence_number', { mode: 'number' }).notNull(),
+  },
+  (table) => [
+    index('archive_tenant_time_idx').on(table.tenantId, table.timestamp),
+    index('archive_tenant_seq_idx').on(table.tenantId, table.sequenceNumber),
+  ]
+);

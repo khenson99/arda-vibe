@@ -64,6 +64,13 @@
       "when": 1771189200000,
       "tag": "0008_audit_hash_chain",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1771275600000,
+      "tag": "0009_audit_log_archive",
+      "breakpoints": true
     }
   ]
 }
