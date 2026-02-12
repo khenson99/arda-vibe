@@ -5,7 +5,7 @@
  * step status transitions, and WO auto-completion checks.
  */
 
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and, asc, sql, lt } from 'drizzle-orm';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
@@ -23,7 +23,6 @@ const {
   routingTemplateSteps,
   productionOperationLogs,
   productionQueueEntries,
-  auditLog,
 } = schema;
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -178,7 +177,7 @@ export async function applyRoutingTemplate(
       .execute();
 
     // Audit
-    await tx.insert(auditLog).values({
+    await writeAuditEntry(tx, {
       tenantId,
       userId: userId || null,
       action: 'work_order.routing_template_applied',
@@ -191,8 +190,6 @@ export async function applyRoutingTemplate(
         stepsCreated: steps.length,
       },
       metadata: { workOrderNumber: wo.woNumber, source: 'routing_engine' },
-      ipAddress: null,
-      userAgent: null,
       timestamp: now,
     });
 
@@ -312,7 +309,7 @@ export async function transitionRoutingStep(
   }
 
   // Audit
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'work_order.routing_updated',
@@ -327,8 +324,6 @@ export async function transitionRoutingStep(
       operationName: step.operationName,
       source: 'routing_engine',
     },
-    ipAddress: null,
-    userAgent: null,
     timestamp: now,
   });
 

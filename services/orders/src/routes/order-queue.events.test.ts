@@ -19,7 +19,12 @@ vi.mock('@arda/config', () => ({
 
 // The route module has many dependencies; for this test we only need
 // emitQueueOrderEvents, so lightweight mocks are sufficient.
-vi.mock('@arda/db', () => ({ db: {}, schema: {} }));
+vi.mock('@arda/db', () => ({
+  db: {},
+  schema: {},
+  writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'test', sequenceNumber: 1 })),
+  writeAuditEntries: vi.fn(async () => []),
+}));
 vi.mock('../services/order-number.service.js', () => ({
   getNextPONumber: vi.fn(),
   getNextWONumber: vi.fn(),

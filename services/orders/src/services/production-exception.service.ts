@@ -12,7 +12,7 @@
  * back into the procurement and production queues.
  */
 
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
@@ -25,7 +25,6 @@ const {
   workOrderRoutings,
   productionOperationLogs,
   productionQueueEntries,
-  auditLog,
   kanbanCards,
 } = schema;
 
@@ -158,18 +157,20 @@ export async function checkScrapThreshold(
     operatorUserId: userId || null,
   });
 
-  // Audit
-  await db.insert(auditLog).values({
+  // Audit — system-initiated rework uses userId from caller (may be null)
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
-    action: 'production_exception.scrap_rework',
+    action: 'work_order.rework',
     entityType: 'work_order',
     entityId: workOrderId,
     previousState: { scrapRate: scrapRate.toFixed(1), quantityScrapped: wo.quantityScrapped },
     newState: { reworkWorkOrderId: reworkWo.id, reworkWoNumber, reworkQuantity: wo.quantityScrapped },
-    metadata: { threshold: scrapThresholdPercent, source: 'production_exception' },
-    ipAddress: null,
-    userAgent: null,
+    metadata: {
+      threshold: scrapThresholdPercent,
+      source: 'production_exception',
+      ...(!userId ? { systemActor: 'production_exception' } : {}),
+    },
     timestamp: now,
   });
 
@@ -254,7 +255,7 @@ export async function handleMaterialShortageHold(
   });
 
   // Audit the requeue intent
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'production_exception.material_shortage_requeue',
@@ -262,9 +263,10 @@ export async function handleMaterialShortageHold(
     entityId: workOrderId,
     previousState: { holdReason: 'material_shortage' },
     newState: { cardId: card.id, loopId: card.loopId, requeueIntent: true },
-    metadata: { source: 'production_exception' },
-    ipAddress: null,
-    userAgent: null,
+    metadata: {
+      source: 'production_exception',
+      ...(!userId ? { systemActor: 'production_exception' } : {}),
+    },
     timestamp: now,
   });
 
@@ -390,7 +392,7 @@ export async function checkShortCompletion(
   });
 
   // Audit
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'production_exception.short_completion_followup',
@@ -403,9 +405,11 @@ export async function checkShortCompletion(
       followUpWorkOrderId: followUpWo.id,
       followUpWoNumber,
     },
-    metadata: { tolerancePercent, source: 'production_exception' },
-    ipAddress: null,
-    userAgent: null,
+    metadata: {
+      tolerancePercent,
+      source: 'production_exception',
+      ...(!userId ? { systemActor: 'production_exception' } : {}),
+    },
     timestamp: now,
   });
 

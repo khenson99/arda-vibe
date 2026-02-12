@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import type { DbOrTransaction } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
 import { getEventBus } from '@arda/events';
@@ -53,7 +53,7 @@ async function writeTransferOrderStatusAudit(
     metadata: Record<string, unknown>;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'transfer_order.status_changed',
@@ -67,7 +67,6 @@ async function writeTransferOrderStatusAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 
@@ -82,7 +81,7 @@ async function writeTransferOrderCreateAudit(
     context: RequestAuditContext;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'transfer_order.created',
@@ -99,7 +98,6 @@ async function writeTransferOrderCreateAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 
@@ -118,7 +116,7 @@ async function writeTransferOrderLinesShippedAudit(
     context: RequestAuditContext;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'transfer_order.lines_shipped',
@@ -144,7 +142,6 @@ async function writeTransferOrderLinesShippedAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 
@@ -163,7 +160,7 @@ async function writeTransferOrderLinesReceivedAudit(
     context: RequestAuditContext;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'transfer_order.lines_received',
@@ -189,7 +186,6 @@ async function writeTransferOrderLinesReceivedAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 

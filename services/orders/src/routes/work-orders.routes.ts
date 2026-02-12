@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, sql, desc } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
 import { getEventBus } from '@arda/events';
 import { config } from '@arda/config';
@@ -47,7 +47,7 @@ async function writeWorkOrderStatusAudit(
     metadata: Record<string, unknown>;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'work_order.status_changed',
@@ -61,7 +61,6 @@ async function writeWorkOrderStatusAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 
@@ -77,7 +76,7 @@ async function writeWorkOrderCreateAudit(
     context: RequestAuditContext;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'work_order.created',
@@ -95,7 +94,6 @@ async function writeWorkOrderCreateAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 
@@ -123,7 +121,7 @@ async function writeWorkOrderRoutingUpdatedAudit(
     context: RequestAuditContext;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'work_order.routing_updated',
@@ -148,7 +146,6 @@ async function writeWorkOrderRoutingUpdatedAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 
@@ -167,7 +164,7 @@ async function writeWorkOrderProductionReportedAudit(
     context: RequestAuditContext;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: 'work_order.production_reported',
@@ -189,7 +186,6 @@ async function writeWorkOrderProductionReportedAudit(
     },
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 

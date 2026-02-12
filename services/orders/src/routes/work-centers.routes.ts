@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
 
@@ -43,7 +43,7 @@ async function writeWorkCenterAudit(
     context: RequestAuditContext;
   }
 ) {
-  await tx.insert(schema.auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: input.tenantId,
     userId: input.context.userId,
     action: input.action,
@@ -54,7 +54,6 @@ async function writeWorkCenterAudit(
     metadata: input.metadata,
     ipAddress: input.context.ipAddress,
     userAgent: input.context.userAgent,
-    timestamp: new Date(),
   });
 }
 

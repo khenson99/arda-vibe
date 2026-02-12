@@ -13,7 +13,7 @@
  * artifacts when production is done.
  */
 
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
@@ -28,7 +28,6 @@ const {
   productionQueueEntries,
   kanbanCards,
   cardStageTransitions,
-  auditLog,
 } = schema;
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -126,7 +125,7 @@ export async function reportQuantity(
   });
 
   // Audit
-  await db.insert(auditLog).values({
+  await writeAuditEntry(db, {
     tenantId,
     userId: userId || null,
     action: 'wo.quantity_reported',
@@ -135,8 +134,6 @@ export async function reportQuantity(
     previousState: { quantityProduced: wo.quantityProduced, quantityScrapped: wo.quantityScrapped },
     newState: { quantityProduced: newProduced, quantityScrapped: newScrapped },
     metadata: { quantityGood, quantityScrapped, source: 'completion_posting' },
-    ipAddress: null,
-    userAgent: null,
     timestamp: now,
   });
 
@@ -328,7 +325,7 @@ export async function completeWorkOrder(
     }
 
     // Audit
-    await tx.insert(auditLog).values({
+    await writeAuditEntry(tx, {
       tenantId,
       userId: userId || null,
       action: 'wo.completed',
@@ -337,8 +334,6 @@ export async function completeWorkOrder(
       previousState: { status: wo.status, quantityProduced: wo.quantityProduced },
       newState: { status: 'completed', quantityProduced, quantityScrapped, cardAdvanced },
       metadata: { completionNotes, source: 'completion_posting' },
-      ipAddress: null,
-      userAgent: null,
       timestamp: now,
     });
 

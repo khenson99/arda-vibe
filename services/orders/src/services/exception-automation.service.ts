@@ -1,5 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { getEventBus } from '@arda/events';
 import { config, createLogger } from '@arda/config';
 import { getNextPONumber } from './order-number.service.js';
@@ -10,7 +10,6 @@ const {
   receivingExceptions,
   purchaseOrders,
   purchaseOrderLines,
-  auditLog,
 } = schema;
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -69,15 +68,15 @@ async function autoResolveException(
     })
     .where(eq(receivingExceptions.id, exception.id));
 
-  await tx.insert(auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: exception.tenantId,
+    userId: null,
     action: 'receiving.exception_auto_resolved',
     entityType: 'receiving_exception',
     entityId: exception.id,
     previousState: { status: exception.status },
     newState: { status: 'resolved', resolutionType: 'accept_as_is' },
-    metadata: { automation: true },
-    timestamp: new Date(),
+    metadata: { automation: true, systemActor: 'exception_automation' },
   });
 
   return {
@@ -207,8 +206,9 @@ async function createFollowUpPO(
     .where(eq(receivingExceptions.id, exception.id));
 
   // Audit log
-  await tx.insert(auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: exception.tenantId,
+    userId: null,
     action: 'receiving.follow_up_po_created',
     entityType: 'receiving_exception',
     entityId: exception.id,
@@ -220,10 +220,10 @@ async function createFollowUpPO(
     },
     metadata: {
       automation: true,
+      systemActor: 'exception_automation',
       followUpPONumber: poNumber,
       originalPONumber: originalPO.poNumber,
     },
-    timestamp: new Date(),
   });
 
   return {
@@ -249,15 +249,15 @@ async function escalateException(
     })
     .where(eq(receivingExceptions.id, exception.id));
 
-  await tx.insert(auditLog).values({
+  await writeAuditEntry(tx, {
     tenantId: exception.tenantId,
+    userId: null,
     action: 'receiving.exception_escalated',
     entityType: 'receiving_exception',
     entityId: exception.id,
     previousState: { status: exception.status },
     newState: { status: 'in_progress' },
-    metadata: { automation: true, reason: 'Requires manual review' },
-    timestamp: new Date(),
+    metadata: { automation: true, systemActor: 'exception_automation', reason: 'Requires manual review' },
   });
 
   return {

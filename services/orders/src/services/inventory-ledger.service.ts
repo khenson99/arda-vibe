@@ -11,7 +11,7 @@
  *   qtyInTransit – stock shipped but not yet received
  */
 
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { getEventBus, type InventoryUpdatedEvent } from '@arda/events';
 import { config, createLogger } from '@arda/config';
@@ -254,6 +254,25 @@ export async function adjustQuantity(input: AdjustQuantityInput): Promise<Adjust
       })
       .where(eq(inventoryLedger.id, row.id));
 
+    // Audit the adjustment in the same transaction
+    await writeAuditEntry(tx, {
+      tenantId,
+      userId: input.userId ?? null,
+      action: 'inventory.adjusted',
+      entityType: 'inventory_ledger',
+      entityId: row.id,
+      previousState: { [field]: previousValue },
+      newState: { [field]: newValue },
+      metadata: {
+        facilityId,
+        partId,
+        adjustmentType,
+        quantity,
+        source: source ?? 'manual',
+        ...(!input.userId ? { systemActor: 'inventory_ledger' } : {}),
+      },
+    });
+
     return { previousValue, newValue };
   });
 
@@ -353,6 +372,26 @@ export async function batchAdjust(
           updatedAt: new Date(),
         })
         .where(eq(inventoryLedger.id, row.id));
+
+      // Audit each adjustment in the same transaction
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: adj.userId ?? null,
+        action: 'inventory.ledger_updated',
+        entityType: 'inventory_ledger',
+        entityId: row.id,
+        previousState: { [field]: previousValue },
+        newState: { [field]: newValue },
+        metadata: {
+          facilityId,
+          partId,
+          adjustmentType,
+          quantity,
+          source: adj.source ?? 'batch',
+          batchSize: adjustments.length,
+          ...(!adj.userId ? { systemActor: 'inventory_ledger' } : {}),
+        },
+      });
 
       results.push({ previousValue, newValue, field, adjustmentType, quantity });
     }

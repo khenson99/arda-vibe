@@ -60,6 +60,8 @@ vi.mock('drizzle-orm', () => ({
 vi.mock('@arda/db', () => ({
   db: dbMock,
   schema: schemaMock,
+  writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'test', sequenceNumber: 1 })),
+  writeAuditEntries: vi.fn(async () => []),
 }));
 
 import { auditRouter } from './audit.routes.js';
