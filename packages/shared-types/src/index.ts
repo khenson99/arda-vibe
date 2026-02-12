@@ -405,6 +405,116 @@ export interface SourceRecommendation {
   score: number;
 }
 
+// ─── Transfer Queue Types ───────────────────────────────────────────
+export interface TransferQueueItem {
+  id: string;
+  transferOrderId: string;
+  toNumber: string;
+  sourceFacilityId: string;
+  sourceFacilityName: string;
+  destinationFacilityId: string;
+  destinationFacilityName: string;
+  status: TransferStatus;
+  priorityScore: number;
+  requestedDate: string | null;
+  shippedDate: string | null;
+  receivedDate: string | null;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+  lineCount?: number;
+  totalQuantity?: number;
+}
+
+export interface TransferQueueFilters {
+  status?: TransferStatus;
+  sourceFacilityId?: string;
+  destinationFacilityId?: string;
+  minPriorityScore?: number;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface TransferQueueResponse {
+  data: TransferQueueItem[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+// ─── Lead Time Analytics Types ──────────────────────────────────────
+export interface LeadTimeAnalytics {
+  sourceFacilityId: string;
+  destinationFacilityId: string;
+  partId?: string;
+  avgLeadTimeDays: number;
+  minLeadTimeDays: number;
+  maxLeadTimeDays: number;
+  medianLeadTimeDays: number;
+  sampleSize: number;
+  lastUpdated: string;
+}
+
+export interface LeadTimeAnalyticsQuery {
+  sourceFacilityId?: string;
+  destinationFacilityId?: string;
+  partId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface LeadTimeAnalyticsResponse {
+  data: LeadTimeAnalytics[];
+  summary?: {
+    totalRoutes: number;
+    avgLeadTimeDays: number;
+    totalTransfers: number;
+  };
+}
+
+// ─── Cross-Location Inventory Types ─────────────────────────────────
+export interface CrossLocationInventoryItem {
+  partId: string;
+  partNumber: string;
+  partDescription: string;
+  locations: {
+    facilityId: string;
+    facilityName: string;
+    qtyOnHand: number;
+    qtyReserved: number;
+    qtyInTransit: number;
+    qtyAvailable: number;
+    reorderPoint: number;
+    reorderQty: number;
+    lastCountedAt: string | null;
+  }[];
+  totalOnHand: number;
+  totalReserved: number;
+  totalInTransit: number;
+  totalAvailable: number;
+}
+
+export interface CrossLocationInventoryQuery {
+  partId?: string;
+  facilityIds?: string[];
+  includeZeroQty?: boolean;
+  sortBy?: 'partNumber' | 'totalOnHand' | 'totalAvailable';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface CrossLocationInventoryResponse {
+  data: CrossLocationInventoryItem[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 // ─── Scan Dedupe / Conflict / Replay Types ─────────────────────────
 export interface ScanDedupeResult {
   allowed: boolean;
