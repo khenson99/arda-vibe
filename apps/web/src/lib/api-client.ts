@@ -1075,7 +1075,7 @@ export async function createPurchaseOrderFromCards(
   });
 }
 
-/* ── Kanban Loops ─────────────────────────────────────────────── */
+/* ── Kanban Loops ─────────────────────────���───────────────────── */
 
 type RawKanbanLoop = KanbanLoop & {
   isActive?: boolean;
@@ -1357,6 +1357,8 @@ export interface KanbanCardPrintDetail {
     statedLeadTimeDays?: number;
     safetyStockDays?: number;
     notes?: string;
+    imageUrl?: string;
+    itemNotes?: string;
   } | null;
 }
 
