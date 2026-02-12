@@ -50,8 +50,9 @@ const CARD_PREVIEW_LOAD_TIMEOUT_MS = 20_000;
 const DEFAULT_ACCENT = "#2F6FCC";
 
 function isTemplateDesignerEnvEnabled(): boolean {
+  if (import.meta.env.PROD) return true;
   const raw = import.meta.env.VITE_ENABLE_CARD_TEMPLATE_DESIGNER;
-  if (typeof raw !== "string") return false;
+  if (typeof raw !== "string" || raw.trim().length === 0) return false;
   return raw.toLowerCase() === "true" || raw === "1";
 }
 
@@ -170,14 +171,16 @@ export function CardLabelDesigner({
       try {
         const tenant = await fetchCurrentTenant(token);
         if (cancelled) return;
-        setIsTemplateDesignerEnabled(Boolean(tenant.settings?.cardTemplateDesignerEnabled));
+        const setting = tenant.settings?.cardTemplateDesignerEnabled;
+        setIsTemplateDesignerEnabled(typeof setting === "boolean" ? setting : true);
       } catch (error) {
         if (isUnauthorized(error)) {
           onUnauthorized();
           return;
         }
         if (!cancelled) {
-          setIsTemplateDesignerEnabled(false);
+          // Default on in production if tenant settings fail to load.
+          setIsTemplateDesignerEnabled(Boolean(import.meta.env.PROD));
         }
       }
     }

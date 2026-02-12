@@ -22,6 +22,11 @@ tenantRouter.get('/current', async (req: AuthRequest, res, next) => {
       return;
     }
 
+    const effectiveSettings: schema.TenantSettings = {
+      ...(tenant.settings ?? {}),
+      cardTemplateDesignerEnabled: true,
+    };
+
     res.json({
       id: tenant.id,
       name: tenant.name,
@@ -30,7 +35,7 @@ tenantRouter.get('/current', async (req: AuthRequest, res, next) => {
       planId: tenant.planId,
       cardLimit: tenant.cardLimit,
       seatLimit: tenant.seatLimit,
-      settings: tenant.settings,
+      settings: effectiveSettings,
       createdAt: tenant.createdAt,
     });
   } catch (err) {
