@@ -87,21 +87,21 @@ export function ItemDetailPanel({
 
       {!isCreateMode && activeTab === "editor" && part && (
         <div className="space-y-6 px-4 py-4">
-          <NotesEditor
+          <CardLabelDesigner
             part={part}
-            session={session}
+            token={session.tokens.accessToken}
+            tenantName={session.user.tenantName}
+            tenantLogoUrl={session.user.tenantLogo}
             onUnauthorized={onUnauthorized}
             onSaved={onSaved}
+            onOpenLoopsTab={() => setActiveTab("loops")}
           />
           <div className="border-t border-border pt-4">
-            <CardLabelDesigner
+            <NotesEditor
               part={part}
-              token={session.tokens.accessToken}
-              tenantName={session.user.tenantName}
-              tenantLogoUrl={session.user.tenantLogo}
+              session={session}
               onUnauthorized={onUnauthorized}
               onSaved={onSaved}
-              onOpenLoopsTab={() => setActiveTab("loops")}
             />
           </div>
         </div>
