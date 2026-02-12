@@ -67,6 +67,7 @@ const mockDb = vi.hoisted(() => {
         }),
       }),
     }),
+    delete: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
     query: {
       users: {
         findFirst: vi.fn(),
@@ -84,6 +85,9 @@ const mockDb = vi.hoisted(() => {
       },
       passwordResetTokens: {
         findFirst: vi.fn(),
+      },
+      apiKeys: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     },
     _mocks: {
@@ -125,6 +129,17 @@ const mockSchema = vi.hoisted(() => ({
     userId: 'userId',
     tokenHash: 'tokenHash',
     usedAt: 'usedAt',
+  },
+  apiKeys: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    name: 'name',
+    keyHash: 'key_hash',
+    keyPrefix: 'key_prefix',
+    isActive: 'is_active',
+    permissions: 'permissions',
+    createdBy: 'created_by',
+    expiresAt: 'expires_at',
   },
 }));
 
@@ -188,6 +203,7 @@ vi.mock('google-auth-library', () => ({
 // ─── Import Services After Mocks ─────────────────────────────────────
 import * as authService from './auth.service.js';
 import * as userManagementService from './user-management.service.js';
+import * as integrationService from './integration.service.js';
 
 // ─── Test Helpers ────────────────────────────────────────────────────
 
@@ -601,6 +617,274 @@ describe('Auth Audit Integration', () => {
       const entry = findAuditEntry('user.login_failed');
       expect(entry).toBeDefined();
       expect(entry!.userId).toBeNull();
+    });
+  });
+
+  // ─── Password Reset ────────────────────────────────────────────────
+
+  describe('forgotPassword', () => {
+    it('should write user.password_reset_requested audit entry', async () => {
+      mockDb.query.users.findFirst.mockResolvedValue({
+        id: 'user-123',
+        email: 'test@example.com',
+        isActive: true,
+        tenantId: 'tenant-123',
+        firstName: 'Test',
+      });
+
+      // forgotPassword uses db.transaction — tx needs update().set().where() chain (no .returning())
+      mockDb._mocks.transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+        const mockWhere = vi.fn().mockResolvedValue(undefined);
+        const mockSet = vi.fn().mockReturnValue({ where: mockWhere });
+        const mockTxUpdate = vi.fn().mockReturnValue({ set: mockSet });
+        const tx = {
+          insert: vi.fn().mockReturnValue({
+            values: vi.fn().mockResolvedValue(undefined),
+          }),
+          update: mockTxUpdate,
+          execute: vi.fn(),
+          select: vi.fn().mockReturnValue({
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                orderBy: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockResolvedValue([]),
+                }),
+              }),
+            }),
+          }),
+        };
+        return fn(tx);
+      });
+
+      await authService.forgotPassword({ email: 'test@example.com' }, auditCtx);
+
+      const entry = findAuditEntry('user.password_reset_requested');
+      expect(entry).toBeDefined();
+      expect(entry!.entityType).toBe('user');
+      expect(entry!.entityId).toBe('user-123');
+      expect(entry!.userId).toBe('user-123');
+      expect(entry!.tenantId).toBe('tenant-123');
+      expect((entry!.metadata as Record<string, unknown>).email).toBe('test@example.com');
+      expect(entry!.ipAddress).toBe('192.168.1.100');
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('should write user.password_reset_completed audit entry', async () => {
+      const futureDate = new Date(Date.now() + 3600_000);
+      mockDb.query.passwordResetTokens.findFirst.mockResolvedValue({
+        id: 'reset-token-1',
+        userId: 'user-123',
+        tokenHash: 'hash',
+        expiresAt: futureDate,
+        usedAt: null,
+      });
+
+      // user lookup after token validation (resetPassword calls db.query.users.findFirst)
+      mockDb.query.users.findFirst.mockResolvedValue({
+        id: 'user-123',
+        tenantId: 'tenant-123',
+        email: 'test@example.com',
+        isActive: true,
+      });
+
+      // Transaction for resetPassword — tx.update() called 3 times (password, token, refresh tokens)
+      mockDb._mocks.transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+        const mockWhere = vi.fn().mockResolvedValue(undefined);
+        const mockSet = vi.fn().mockReturnValue({ where: mockWhere });
+        const mockTxUpdate = vi.fn().mockReturnValue({ set: mockSet });
+        const tx = {
+          insert: vi.fn().mockReturnValue({
+            values: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+          update: mockTxUpdate,
+          execute: vi.fn(),
+          select: vi.fn().mockReturnValue({
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                orderBy: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockResolvedValue([]),
+                }),
+              }),
+            }),
+          }),
+        };
+        return fn(tx);
+      });
+
+      await authService.resetPassword({ token: 'mock-token', newPassword: 'NewPass123!' }, auditCtx);
+
+      const entry = findAuditEntry('user.password_reset_completed');
+      expect(entry).toBeDefined();
+      expect(entry!.entityType).toBe('user');
+      expect(entry!.entityId).toBe('user-123');
+      expect(entry!.userId).toBe('user-123');
+      expect((entry!.metadata as Record<string, unknown>).tokensRevoked).toBe(true);
+      // Ensure no raw password in audit
+      const allValues = JSON.stringify(entry);
+      expect(allValues).not.toContain('NewPass123!');
+    });
+  });
+
+  // ─── Token Refresh ─────────────────────────────────────────────────
+
+  describe('refreshAccessToken', () => {
+    it('should write token.refreshed audit entry on successful refresh', async () => {
+      // Token record exists, not revoked, not expired
+      mockDb.query.refreshTokens.findFirst.mockResolvedValue({
+        id: 'token-record-1',
+        tokenHash: 'hash',
+        userId: 'user-123',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+
+      // User lookup
+      mockDb.query.users.findFirst.mockResolvedValue({
+        id: 'user-123',
+        email: 'test@example.com',
+        isActive: true,
+        tenantId: 'tenant-123',
+        role: 'tenant_admin',
+        tenant: { id: 'tenant-123', name: 'Test Tenant' },
+      });
+
+      // Transaction for token rotation
+      mockDb._mocks.transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+        const tx = {
+          insert: vi.fn().mockReturnValue({
+            values: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+          update: vi.fn().mockReturnValue({
+            set: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                returning: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          }),
+          execute: vi.fn(),
+          select: vi.fn().mockReturnValue({
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                orderBy: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockResolvedValue([]),
+                }),
+              }),
+            }),
+          }),
+        };
+        return fn(tx);
+      });
+
+      await authService.refreshAccessToken('mock-refresh-token', auditCtx);
+
+      const entry = findAuditEntry('token.refreshed');
+      expect(entry).toBeDefined();
+      expect(entry!.entityType).toBe('token');
+      expect(entry!.entityId).toBe('token-record-1');
+      expect(entry!.userId).toBe('user-123');
+      expect(entry!.tenantId).toBe('tenant-123');
+      expect((entry!.metadata as Record<string, unknown>).method).toBe('refresh');
+      expect(entry!.ipAddress).toBe('192.168.1.100');
+    });
+
+    it('should write token.replay_detected audit entry on revoked token reuse', async () => {
+      // Token record exists but is already revoked
+      mockDb.query.refreshTokens.findFirst.mockResolvedValue({
+        id: 'token-record-1',
+        tokenHash: 'hash',
+        userId: 'user-123',
+        revokedAt: new Date(), // already revoked
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+
+      // User lookup for replay audit
+      mockDb.query.users.findFirst.mockResolvedValue({
+        id: 'user-123',
+        tenantId: 'tenant-123',
+        email: 'test@example.com',
+      });
+
+      await expect(
+        authService.refreshAccessToken('mock-refresh-token', auditCtx),
+      ).rejects.toThrow('Refresh token has been revoked');
+
+      const entry = findAuditEntry('token.replay_detected');
+      expect(entry).toBeDefined();
+      expect(entry!.entityType).toBe('token');
+      expect(entry!.entityId).toBe('token-record-1');
+      expect(entry!.userId).toBe('user-123');
+      expect(entry!.tenantId).toBe('tenant-123');
+      expect((entry!.metadata as Record<string, unknown>).reason).toBe('revoked_token_reuse');
+    });
+  });
+
+  // ─── API Key Management ─────────────────────────────────────────────
+
+  describe('createApiKey', () => {
+    it('should write api_key.created audit entry', async () => {
+      const mockApiKey = {
+        id: 'api-key-1',
+        tenantId: 'tenant-123',
+        name: 'Production Key',
+        keyHash: 'mock-hash',
+        keyPrefix: 'arda_abc12345',
+        permissions: ['read', 'write'],
+        expiresAt: new Date('2027-01-01'),
+        createdBy: 'user-123',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isActive: true,
+        lastUsedAt: null,
+      };
+
+      mockDb._mocks.insertReturning.mockResolvedValue([mockApiKey]);
+
+      await integrationService.createApiKey({
+        tenantId: 'tenant-123',
+        userId: 'user-123',
+        name: 'Production Key',
+        permissions: ['read', 'write'],
+        expiresInDays: 365,
+      }, auditCtx);
+
+      const entry = findAuditEntry('api_key.created');
+      expect(entry).toBeDefined();
+      expect(entry!.entityType).toBe('api_key');
+      expect(entry!.entityId).toBe('api-key-1');
+      expect(entry!.userId).toBe('user-123');
+      expect(entry!.tenantId).toBe('tenant-123');
+      expect((entry!.newState as Record<string, unknown>).name).toBe('Production Key');
+      expect(entry!.ipAddress).toBe('192.168.1.100');
+      // Ensure no raw API key in audit
+      const allValues = JSON.stringify(entry);
+      expect(allValues).not.toMatch(/arda_[a-f0-9]{8}_[a-f0-9]{64}/);
+    });
+  });
+
+  describe('revokeApiKey', () => {
+    it('should write api_key.revoked audit entry with state transition', async () => {
+      mockDb._mocks.updateReturning.mockResolvedValue([{
+        id: 'api-key-1',
+        keyPrefix: 'arda_abc12345',
+        isActive: false,
+      }]);
+
+      await integrationService.revokeApiKey('api-key-1', 'tenant-123', 'admin-user-123', auditCtx);
+
+      const entry = findAuditEntry('api_key.revoked');
+      expect(entry).toBeDefined();
+      expect(entry!.entityType).toBe('api_key');
+      expect(entry!.entityId).toBe('api-key-1');
+      expect(entry!.userId).toBe('admin-user-123');
+      expect(entry!.tenantId).toBe('tenant-123');
+      expect(entry!.previousState).toEqual({ isActive: true, keyPrefix: 'arda_abc12345' });
+      expect(entry!.newState).toEqual({ isActive: false, keyPrefix: 'arda_abc12345' });
+      expect(entry!.ipAddress).toBe('192.168.1.100');
     });
   });
 });
