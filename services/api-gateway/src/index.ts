@@ -62,9 +62,11 @@ app.use(limiter);
 // Stricter rate limit for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  // Higher cap to avoid false lockouts on shared egress/proxy networks.
   max: config.NODE_ENV === 'production' ? 120 : 500,
   standardHeaders: true,
   legacyHeaders: false,
+  // Only failed attempts should consume the auth budget.
   skipSuccessfulRequests: true,
   keyGenerator: (req) => `${req.ip}:${req.get('user-agent') ?? 'unknown'}`,
   message: { error: 'Too many authentication attempts, please try again later' },
