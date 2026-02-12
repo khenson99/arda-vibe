@@ -14,9 +14,13 @@ import {
   getValidNextTransferStatuses,
 } from '../services/transfer-lifecycle.service.js';
 import { recommendSources } from '../services/source-recommendation.service.js';
+import {
+  getLeadTimeAggregateStats,
+  getLeadTimeTrend,
+} from '../services/lead-time-analytics.service.js';
 
 export const transferOrdersRouter = Router();
-const { transferOrders, transferOrderLines } = schema;
+const { transferOrders, transferOrderLines, leadTimeHistory } = schema;
 
 interface RequestAuditContext {
   userId?: string;
@@ -229,6 +233,18 @@ const receiveLinesSchema = z.object({
   ).min(1),
 });
 
+const leadTimeQuerySchema = z.object({
+  sourceFacilityId: z.string().uuid().optional(),
+  destinationFacilityId: z.string().uuid().optional(),
+  partId: z.string().uuid().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+});
+
+const leadTimeTrendQuerySchema = leadTimeQuerySchema.extend({
+  granularity: z.enum(['day', 'week', 'month']).optional(),
+});
+
 const paginationSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
@@ -319,6 +335,66 @@ transferOrdersRouter.get('/recommendations/source', async (req: AuthRequest, res
     });
 
     res.json({ data: recommendations });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
+// ─── Lead Time Analytics ───────────────────────────────────────────
+
+// GET /lead-times - Get aggregate lead time statistics
+// NOTE: This route MUST be registered before /:id routes to avoid matching "lead-times" as an id param
+transferOrdersRouter.get('/lead-times', async (req: AuthRequest, res, next) => {
+  try {
+    const params = leadTimeQuerySchema.parse(req.query);
+    const tenantId = req.user!.tenantId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const stats = await getLeadTimeAggregateStats({
+      tenantId,
+      sourceFacilityId: params.sourceFacilityId,
+      destinationFacilityId: params.destinationFacilityId,
+      partId: params.partId,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+    });
+
+    res.json({ data: stats });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
+// GET /lead-times/trend - Get lead time trend time-series data
+transferOrdersRouter.get('/lead-times/trend', async (req: AuthRequest, res, next) => {
+  try {
+    const params = leadTimeTrendQuerySchema.parse(req.query);
+    const tenantId = req.user!.tenantId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const trend = await getLeadTimeTrend({
+      tenantId,
+      sourceFacilityId: params.sourceFacilityId,
+      destinationFacilityId: params.destinationFacilityId,
+      partId: params.partId,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+      granularity: params.granularity,
+    });
+
+    res.json({ data: trend });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return next(new AppError(400, 'Invalid query parameters'));
@@ -855,11 +931,13 @@ transferOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
         && updatedLines.every((line) => line.quantityReceived >= line.quantityShipped);
 
       if (fullyReceived && order.status !== 'received') {
+        const receivedDate = new Date();
+
         await tx
           .update(transferOrders)
           .set({
             status: 'received',
-            receivedDate: new Date(),
+            receivedDate,
             updatedAt: new Date(),
           })
           .where(
@@ -881,6 +959,27 @@ transferOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
             updatedLineIds: receiveLines.map((line) => line.lineId),
           },
         });
+
+        // Persist lead-time history for each line
+        // Only insert history if both shippedDate and receivedDate are available
+        if (order.shippedDate) {
+          const shippedAt = order.shippedDate;
+          const leadTimeDays = (receivedDate.getTime() - shippedAt.getTime()) / (1000 * 60 * 60 * 24);
+
+          const historyRecords = updatedLines.map((line) => ({
+            tenantId,
+            sourceFacilityId: order.sourceFacilityId,
+            destinationFacilityId: order.destinationFacilityId,
+            partId: line.partId,
+            transferOrderId: id,
+            shippedAt,
+            receivedAt: receivedDate,
+            leadTimeDays: String(Math.round(leadTimeDays * 100) / 100),
+            createdAt: new Date(),
+          }));
+
+          await tx.insert(leadTimeHistory).values(historyRecords);
+        }
       }
 
       const [updatedOrder] = await tx
