@@ -637,6 +637,7 @@ export function mapItemsServiceRecord(record: DataAuthorityEntityRecord<ItemsSer
   const payload = record.payload;
   const updatedAt = toIsoFromTimeCoordinates(record.asOf) ?? new Date().toISOString();
   const identifier = payload.externalGuid?.trim() || payload.eId || record.rId;
+  const normalizedOrderMechanism = payload.orderMechanism?.trim() || "purchase_order";
 
   return {
     id: payload.eId || record.rId,
@@ -644,8 +645,8 @@ export function mapItemsServiceRecord(record: DataAuthorityEntityRecord<ItemsSer
     partNumber: identifier,
     externalGuid: payload.externalGuid ?? null,
     name: payload.name?.trim() || identifier,
-    type: payload.orderMechanism?.trim() || "unspecified",
-    orderMechanism: payload.orderMechanism ?? null,
+    type: normalizedOrderMechanism,
+    orderMechanism: normalizedOrderMechanism,
     location: payload.location ?? null,
     uom: payload.orderQtyUnit || payload.minQtyUnit || "each",
     isSellable: false,
@@ -677,7 +678,7 @@ export function toItemsInputPayload(part: PartRecord): ItemsServiceInputPayload 
   const orderQtyValue =
     typeof part.orderQty === "number" && Number.isFinite(part.orderQty) ? Math.max(0, part.orderQty) : null;
   const orderQtyUnitValue = normalizeOptionalString(part.orderQtyUnit ?? part.uom ?? null);
-  const orderMechanismValue = part.orderMechanism?.trim() || part.type?.trim() || "unspecified";
+  const orderMechanismValue = part.orderMechanism?.trim() || part.type?.trim() || "purchase_order";
 
   return {
     externalGuid: normalizeOptionalString(part.externalGuid) || fallbackId,
@@ -692,6 +693,8 @@ export function toItemsInputPayload(part: PartRecord): ItemsServiceInputPayload 
     primarySupplierLink: normalizeOptionalString(part.primarySupplierLink),
     imageUrl: normalizeOptionalString(part.imageUrl),
     notes: part.notes ?? null,
+    glCode: normalizeOptionalString(part.glCode),
+    itemSubtype: normalizeOptionalString(part.itemSubtype),
   };
 }
 
@@ -1692,71 +1695,28 @@ export async function fetchReceiptsForOrder(
   return response.data ?? [];
 }
 
-/* ── Notification Preferences ───────────────────────────────────── */
+/* ── Transfer Order Ship / Receive ───────────────────────────────── */
 
-export interface NotificationPreferences {
-  [notificationType: string]: {
-    inApp: boolean;
-    email: boolean;
-    webhook: boolean;
-  };
-}
-
-export async function fetchNotificationPreferences(token: string): Promise<NotificationPreferences> {
-  const response = await apiRequest<{ data: NotificationPreferences }>(
-    "/api/notifications/preferences",
-    { token }
-  );
-  return response.data;
-}
-
-export async function updateNotificationPreferences(
+export async function shipTransferOrder(
   token: string,
-  preferences: NotificationPreferences,
-): Promise<NotificationPreferences> {
-  const response = await apiRequest<{ data: NotificationPreferences }>(
-    "/api/notifications/preferences",
-    {
-      method: "PUT",
-      token,
-      body: { preferences },
-    }
-  );
-  return response.data;
-}
-
-/* ── User Profile ────────────────────────────────────────────────── */
-
-export async function changePassword(
-  token: string,
-  input: { currentPassword: string; newPassword: string },
-): Promise<{ message: string }> {
-  return apiRequest<{ message: string }>("/api/auth/change-password", {
-    method: "POST",
+  id: string,
+  input: { lines: Array<{ lineId: string; quantityShipped: number }> },
+): Promise<TransferOrder> {
+  return apiRequest(`/api/orders/transfer-orders/${encodeURIComponent(id)}/ship`, {
+    method: "PATCH",
     token,
     body: input,
   });
 }
 
-export async function uploadAvatar(
+export async function receiveTransferOrder(
   token: string,
-  file: File,
-): Promise<{ url: string }> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const response = await fetch(buildApiUrl("/api/upload/avatar"), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    body: formData,
+  id: string,
+  input: { lines: Array<{ lineId: string; quantityReceived: number }> },
+): Promise<TransferOrder> {
+  return apiRequest(`/api/orders/transfer-orders/${encodeURIComponent(id)}/receive`, {
+    method: "PATCH",
+    token,
+    body: input,
   });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new ApiError(response.status, error || "Upload failed");
-  }
-
-  return response.json() as Promise<{ url: string }>;
 }

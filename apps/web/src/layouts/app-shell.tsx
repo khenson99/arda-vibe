@@ -190,12 +190,9 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
                   variant="ghost"
                   size="icon"
                   className="relative h-8 w-8 text-muted-foreground"
-                  asChild
                 >
-                  <Link to="/notifications">
-                    <Bell className="h-4 w-4" />
-                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />
-                  </Link>
+                  <Bell className="h-4 w-4" />
+                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />
                 </Button>
                 <Button variant="outline" size="sm" onClick={onSignOut}>
                   <LogOut className="h-4 w-4" />

@@ -19,9 +19,9 @@ import {
   RefreshCw,
   Package,
   TruckIcon,
-  CheckCircle2,
   XCircle,
   MapPin,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -256,6 +256,7 @@ export function TODetailRoute({ session, onUnauthorized }: Props) {
   }
 
   const badge = STATUS_BADGE[to.status] ?? { label: to.status, variant: "secondary" as const };
+  const canEdit = to.status === "draft";
   const canShip = validTransitions.includes("shipped") || validTransitions.includes("in_transit");
   const canReceive = validTransitions.includes("received");
 
@@ -327,6 +328,11 @@ export function TODetailRoute({ session, onUnauthorized }: Props) {
 
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2">
+            {canEdit && (
+              <Button size="sm" variant="outline" onClick={() => navigate(`/orders/to/${to.id}/edit`)}>
+                <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
+              </Button>
+            )}
             {canShip && (
               <Button size="sm" onClick={handleShipClick} disabled={transitioning}>
                 <TruckIcon className="mr-1.5 h-3.5 w-3.5" /> Ship

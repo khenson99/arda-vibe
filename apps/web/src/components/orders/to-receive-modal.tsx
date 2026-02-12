@@ -1,8 +1,8 @@
 /**
  * TOReceiveModal — Receive transfer order
  *
- * Allows confirming receipt of line items, flagging exceptions,
- * and transitioning the transfer order to "received" status.
+ * Calls PATCH /transfer-orders/:id/receive with per-line received quantities.
+ * The backend auto-transitions to "received" when all lines are fully received.
  */
 
 import * as React from "react";
@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Package, AlertCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import { isUnauthorized, parseApiError, updateTransferOrderStatus, createReceipt } from "@/lib/api-client";
+import { isUnauthorized, parseApiError, receiveTransferOrder } from "@/lib/api-client";
 import type { TransferOrder } from "@/types";
 
 // ─── Props ───────────────────────────────────────────────────────────
@@ -29,9 +29,8 @@ export interface TOReceiveModalProps {
 }
 
 interface LineReceiptState {
-  quantityAccepted: number;
-  quantityDamaged: number;
-  quantityRejected: number;
+  quantityReceived: number;
+  quantityExpected: number;
   hasException: boolean;
   notes: string;
 }
@@ -57,9 +56,8 @@ export function TOReceiveModal({
       transferOrder.lines?.forEach((line) => {
         const expectedQty = line.quantityShipped > 0 ? line.quantityShipped : line.quantityRequested;
         initial[line.id] = {
-          quantityAccepted: expectedQty,
-          quantityDamaged: 0,
-          quantityRejected: 0,
+          quantityReceived: expectedQty,
+          quantityExpected: expectedQty,
           hasException: false,
           notes: "",
         };
@@ -71,52 +69,44 @@ export function TOReceiveModal({
   }, [open, transferOrder.lines]);
 
   const handleLineUpdate = (lineId: string, updates: Partial<LineReceiptState>) => {
-    setLineStates((prev) => ({
-      ...prev,
-      [lineId]: { ...prev[lineId], ...updates },
-    }));
+    setLineStates((prev) => {
+      const current = prev[lineId];
+      const next = { ...current, ...updates };
+      // Auto-flag exception when received differs from expected
+      if ("quantityReceived" in updates) {
+        next.hasException = next.quantityReceived !== next.quantityExpected;
+      }
+      return { ...prev, [lineId]: next };
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Validate that at least one line has accepted quantity
-    const hasAccepted = Object.values(lineStates).some((state) => state.quantityAccepted > 0);
-    if (!hasAccepted) {
-      setError("At least one line item must have an accepted quantity greater than 0");
+    // Validate that at least one line has received quantity
+    const hasReceived = Object.values(lineStates).some((state) => state.quantityReceived > 0);
+    if (!hasReceived) {
+      setError("At least one line item must have a received quantity greater than 0");
       return;
     }
 
     setSubmitting(true);
     try {
-      // Create receipt for the transfer order
-      const receiptLines = transferOrder.lines
-        ?.map((line) => {
+      // Build receive lines payload matching backend contract:
+      // PATCH /transfer-orders/:id/receive with { lines: [{ lineId, quantityReceived }] }
+      const receiveLines = (transferOrder.lines ?? [])
+        .map((line) => {
           const state = lineStates[line.id];
           if (!state) return null;
           return {
-            partId: line.partId,
-            quantityAccepted: state.quantityAccepted,
-            quantityDamaged: state.quantityDamaged,
-            quantityRejected: state.quantityRejected,
-            notes: state.notes || undefined,
+            lineId: line.id,
+            quantityReceived: state.quantityReceived,
           };
         })
-        .filter((l): l is NonNullable<typeof l> => l !== null) ?? [];
+        .filter((l): l is NonNullable<typeof l> => l !== null);
 
-      await createReceipt(token, {
-        orderId: transferOrder.id,
-        orderType: "transfer_order",
-        lines: receiptLines,
-        notes: receivingNotes || undefined,
-      });
-
-      // Transition to "received" status
-      await updateTransferOrderStatus(token, transferOrder.id, {
-        status: "received",
-        reason: receivingNotes || "Received from UI",
-      });
+      await receiveTransferOrder(token, transferOrder.id, { lines: receiveLines });
 
       toast.success("Transfer order received");
       onReceived();
@@ -176,7 +166,7 @@ export function TOReceiveModal({
             <div className="rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 px-4 py-3 text-sm flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
               <span className="text-yellow-600 dark:text-yellow-400">
-                One or more line items have exceptions. Please review damaged or rejected quantities.
+                One or more line items have a received quantity that differs from the expected amount.
               </span>
             </div>
           )}
@@ -189,71 +179,33 @@ export function TOReceiveModal({
                 const state = lineStates[line.id];
                 if (!state) return null;
 
-                const expectedQty = line.quantityShipped > 0 ? line.quantityShipped : line.quantityRequested;
-                const totalReceived = state.quantityAccepted + state.quantityDamaged + state.quantityRejected;
-                const hasDiscrepancy = totalReceived !== expectedQty;
-
                 return (
                   <Card key={line.id} className="rounded-lg">
                     <CardContent className="p-3 space-y-3">
-                      <div>
-                        <p className="font-semibold text-sm">{line.partName ?? line.partId}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Expected: {expectedQty} {hasDiscrepancy && <span className="text-yellow-600 font-semibold">· Received: {totalReceived}</span>}
-                        </p>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="space-y-1">
-                          <Label htmlFor={`${line.id}_accepted`} className="text-xs">Accepted</Label>
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm truncate">{line.partName ?? line.partId}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Shipped: {line.quantityShipped} | Expected: {state.quantityExpected}
+                          </p>
+                        </div>
+                        <div className="w-24">
+                          <Label htmlFor={`${line.id}_received`} className="sr-only">Received</Label>
                           <Input
-                            id={`${line.id}_accepted`}
+                            id={`${line.id}_received`}
                             type="number"
                             min={0}
-                            value={state.quantityAccepted}
+                            max={line.quantityShipped}
+                            value={state.quantityReceived}
                             onChange={(e) =>
-                              handleLineUpdate(line.id, { quantityAccepted: parseInt(e.target.value, 10) || 0 })
+                              handleLineUpdate(line.id, { quantityReceived: parseInt(e.target.value, 10) || 0 })
                             }
-                            className="text-center h-9"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`${line.id}_damaged`} className="text-xs">Damaged</Label>
-                          <Input
-                            id={`${line.id}_damaged`}
-                            type="number"
-                            min={0}
-                            value={state.quantityDamaged}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value, 10) || 0;
-                              handleLineUpdate(line.id, {
-                                quantityDamaged: val,
-                                hasException: val > 0 || state.quantityRejected > 0,
-                              });
-                            }}
-                            className="text-center h-9"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor={`${line.id}_rejected`} className="text-xs">Rejected</Label>
-                          <Input
-                            id={`${line.id}_rejected`}
-                            type="number"
-                            min={0}
-                            value={state.quantityRejected}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value, 10) || 0;
-                              handleLineUpdate(line.id, {
-                                quantityRejected: val,
-                                hasException: val > 0 || state.quantityDamaged > 0,
-                              });
-                            }}
-                            className="text-center h-9"
+                            className="text-center"
                           />
                         </div>
                       </div>
 
-                      {(state.hasException || hasDiscrepancy) && (
+                      {state.hasException && (
                         <div className="space-y-1">
                           <Label htmlFor={`${line.id}_notes`} className="text-xs">Exception Notes</Label>
                           <Input

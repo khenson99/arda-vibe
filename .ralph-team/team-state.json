@@ -1,40 +1,11 @@
 {
-  "tickets": {
-    "114": {
-      "status": "in-progress",
-      "agent": "frontend-engineer"
-    }
-  },
+  "tickets": {},
   "agents": {
-    "architect": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "backend": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "frontend": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "qa": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "design-enforcer": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "frontend-engineer": {
-      "status": "working",
-      "current_ticket": 114
-    }
+    "architect": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "backend": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "frontend": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "qa": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "design-enforcer": { "status": "idle", "current_ticket": null, "iterations": 0 }
   },
   "sprint": {
     "status": "not_started",

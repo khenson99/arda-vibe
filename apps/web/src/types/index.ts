@@ -294,6 +294,8 @@ export interface ItemsServiceInputPayload {
   primarySupplierLink: string | null;
   imageUrl: string | null;
   notes?: string | null;
+  glCode?: string | null;
+  itemSubtype?: string | null;
 }
 
 /* ── Orders ───────────────────────────────────────────────────── */
@@ -404,7 +406,10 @@ export interface KanbanLoop {
   createdAt: string;
   updatedAt: string;
   partName?: string;
+  partNumber?: string;
   facilityName?: string;
+  primarySupplierName?: string | null;
+  sourceFacilityName?: string | null;
 }
 
 export interface KanbanCard {
@@ -422,9 +427,11 @@ export interface KanbanCard {
   /* Joined/denormalized data (may come from API) */
   loopType?: LoopType;
   partId?: string;
+  partNumber?: string;
   partName?: string;
   facilityId?: string;
   facilityName?: string;
+  supplierName?: string;
   minQuantity?: number;
   orderQuantity?: number;
   numberOfCards?: number;
