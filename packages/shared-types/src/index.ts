@@ -475,6 +475,50 @@ export interface LeadTimeAnalyticsResponse {
   };
 }
 
+// ─── Lead Time Aggregate Statistics ─────────────────────────────────
+export interface LeadTimeAggregateStats {
+  avgLeadTimeDays: number;
+  medianLeadTimeDays: number;
+  p90LeadTimeDays: number;
+  minLeadTimeDays: number;
+  maxLeadTimeDays: number;
+  transferCount: number;
+}
+
+export interface LeadTimeAggregateQuery {
+  sourceFacilityId?: string;
+  destinationFacilityId?: string;
+  partId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface LeadTimeAggregateResponse {
+  data: LeadTimeAggregateStats;
+}
+
+// ─── Lead Time Trend Types ──────────────────────────────────────────
+export interface LeadTimeTrendDataPoint {
+  period: string;
+  avgLeadTimeDays: number;
+  minLeadTimeDays: number;
+  maxLeadTimeDays: number;
+  transferCount: number;
+}
+
+export interface LeadTimeTrendQuery {
+  sourceFacilityId?: string;
+  destinationFacilityId?: string;
+  partId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  granularity?: 'day' | 'week' | 'month';
+}
+
+export interface LeadTimeTrendResponse {
+  data: LeadTimeTrendDataPoint[];
+}
+
 // ─── Cross-Location Inventory Types ─────────────────────────────────
 export interface CrossLocationInventoryItem {
   partId: string;
