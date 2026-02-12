@@ -16,7 +16,7 @@
  * dependencies, but they exercise the real service code end-to-end.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@arda/config', () => ({
   config: {
