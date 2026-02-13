@@ -117,6 +117,29 @@ vi.mock('@arda/db', () => ({
   schema: schemaMock,
 }));
 
+vi.mock('@arda/config', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+  config: {
+    DATABASE_URL: 'postgres://test:test@localhost:5432/test',
+    REDIS_URL: 'redis://localhost:6379',
+    JWT_SECRET: 'test-secret-that-is-long-enough',
+    JWT_REFRESH_SECRET: 'test-refresh-secret-that-is-long-enough',
+    PORT: 3000,
+    APP_URL: 'http://localhost:3000',
+  },
+}));
+
+// Mock channel-dispatch to avoid its dependency chain (email queue, templates, etc.)
+const dispatchNotificationChannelsMock = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('./channel-dispatch.js', () => ({
+  dispatchNotificationChannels: dispatchNotificationChannelsMock,
+}));
+
 import { startEventListener } from './event-listener.js';
 
 async function dispatchEvent(event: unknown) {
@@ -136,6 +159,7 @@ describe('event-listener service', () => {
     getEventBusMock.mockClear();
     subscribeGlobalMock.mockClear();
     publishMock.mockClear();
+    dispatchNotificationChannelsMock.mockClear();
   });
 
   it('subscribes to global event stream', async () => {

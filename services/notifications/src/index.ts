@@ -11,6 +11,7 @@ import { preferencesRouter } from './routes/preferences.routes.js';
 import { unsubscribeRouter } from './routes/unsubscribe.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startEventListener } from './services/event-listener.js';
+import { createEmailQueue, createEmailWorker } from './workers/email-queue.worker.js';
 
 const log = createLogger('notifications');
 
@@ -66,8 +67,12 @@ const server = app.listen(PORT, () => {
   log.info({ port: PORT }, 'Notifications service started');
 });
 
-// Start event listener
-startEventListener(config.REDIS_URL).catch((err) => {
+// Start email queue and worker
+const emailQueue = createEmailQueue(config.REDIS_URL);
+const emailWorker = createEmailWorker(config.REDIS_URL);
+
+// Start event listener with dispatch context
+startEventListener(config.REDIS_URL, { emailQueue }).catch((err) => {
   log.error({ err }, 'Failed to start event listener');
   process.exit(1);
 });
@@ -94,6 +99,14 @@ async function shutdown(signal: string) {
       resolve();
     });
   });
+
+  try {
+    await emailWorker.close();
+    await emailQueue.close();
+    log.info('Email queue and worker closed');
+  } catch {
+    // Queue/worker may not be fully initialized
+  }
 
   try {
     const eventBus = getEventBus(config.REDIS_URL);
