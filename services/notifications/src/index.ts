@@ -8,6 +8,7 @@ import { getEventBus } from '@arda/events';
 import { authMiddleware } from '@arda/auth-utils';
 import { notificationsRouter } from './routes/notifications.routes.js';
 import { preferencesRouter } from './routes/preferences.routes.js';
+import { unsubscribeRouter } from './routes/unsubscribe.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startEventListener } from './services/event-listener.js';
 
@@ -50,7 +51,10 @@ app.get('/health', async (_req, res) => {
   });
 });
 
-// Routes — all are behind auth via the API gateway
+// Public routes — no auth required (token-based verification)
+app.use('/notifications', unsubscribeRouter);
+
+// Authenticated routes — behind auth via the API gateway
 app.use(authMiddleware);
 app.use('/notifications', notificationsRouter);
 app.use('/preferences', preferencesRouter);
