@@ -541,6 +541,13 @@ function buildRawWhereClause(
     params.push('%' + filters.entityName + '%');
     idx++;
   }
+  if (filters.actorName) {
+    clauses.push(
+      `(u.first_name || ' ' || u.last_name) ILIKE $${idx}`
+    );
+    params.push('%' + filters.actorName + '%');
+    idx++;
+  }
   if (filters.search) {
     clauses.push(
       `(${tableAlias}.action ILIKE $${idx} OR ${tableAlias}.entity_type ILIKE $${idx} OR CAST(${tableAlias}.metadata AS TEXT) ILIKE $${idx})`
@@ -553,9 +560,16 @@ function buildRawWhereClause(
 }
 
 /**
+ * Whether the raw SQL query needs a LEFT JOIN with auth.users.
+ */
+function needsRawUserJoin(filters: AuditFilters): boolean {
+  return !!filters.actorName;
+}
+
+/**
  * UNION ALL query combining audit_log + audit_log_archive with pagination.
- * actorName filter is not supported in archive UNION queries (archive has no
- * user join — actor names come from live data).
+ * When actorName is supplied, both live and archive legs LEFT JOIN auth.users
+ * so the filter is applied consistently.
  */
 async function queryWithArchiveUnion(
   tenantId: string,
@@ -566,11 +580,8 @@ async function queryWithArchiveUnion(
   offset: number,
 ): Promise<{ rows: unknown[]; total: number }> {
   const { fragment: liveWhere, params: liveParams } = buildRawWhereClause(tenantId, filters, 'a');
-
-  // Archive uses the same base filters (excluding actorName which requires a JOIN)
-  const archiveFilters = { ...filters, actorName: undefined };
   const { fragment: archiveWhere, params: archiveParams } = buildRawWhereClause(
-    tenantId, archiveFilters, 'a'
+    tenantId, filters, 'a'
   );
 
   // Build parameterized UNION query. Archive params are offset by live param count.
@@ -585,19 +596,24 @@ async function queryWithArchiveUnion(
   const offsetIdx = allParams.length + 2;
   allParams.push(limit, offset);
 
+  // When actorName filter is active, both legs need a LEFT JOIN with auth.users
+  const userJoin = needsRawUserJoin(filters)
+    ? 'LEFT JOIN auth.users u ON a.user_id = u.id'
+    : '';
+
   const countSql = `
     SELECT CAST(COUNT(*) AS INTEGER) AS count FROM (
-      SELECT a.id FROM audit.audit_log a WHERE ${liveWhere}
+      SELECT a.id FROM audit.audit_log a ${userJoin} WHERE ${liveWhere}
       UNION ALL
-      SELECT a.id FROM audit.audit_log_archive a WHERE ${reindexedArchiveWhere}
+      SELECT a.id FROM audit.audit_log_archive a ${userJoin} WHERE ${reindexedArchiveWhere}
     ) combined
   `;
 
   const dataSql = `
     SELECT * FROM (
-      SELECT a.* FROM audit.audit_log a WHERE ${liveWhere}
+      SELECT a.* FROM audit.audit_log a ${userJoin} WHERE ${liveWhere}
       UNION ALL
-      SELECT a.* FROM audit.audit_log_archive a WHERE ${reindexedArchiveWhere}
+      SELECT a.* FROM audit.audit_log_archive a ${userJoin} WHERE ${reindexedArchiveWhere}
     ) combined
     ORDER BY "timestamp" DESC
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
