@@ -594,16 +594,36 @@ export async function createProcurementDrafts(
   token: string,
   input: CreateProcurementDraftsInput,
 ): Promise<CreateProcurementDraftsResult> {
-  const response = await apiRequest<{
-    success: boolean;
-    data: CreateProcurementDraftsResult;
-  }>("/api/orders/queue/procurement/create-drafts", {
-    method: "POST",
-    token,
-    body: input,
-  });
+  try {
+    const response = await apiRequest<{
+      success: boolean;
+      data: CreateProcurementDraftsResult;
+    }>("/api/orders/queue/procurement/create-drafts", {
+      method: "POST",
+      token,
+      body: input,
+    });
 
-  return response.data;
+    return response.data;
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.status === 404 &&
+      error.message.includes("/queue/procurement/create-drafts")
+    ) {
+      const fallbackResponse = await apiRequest<{
+        success: boolean;
+        data: CreateProcurementDraftsResult;
+      }>("/api/orders/queue/create-drafts", {
+        method: "POST",
+        token,
+        body: input,
+      });
+      return fallbackResponse.data;
+    }
+
+    throw error;
+  }
 }
 
 export async function verifyProcurementDrafts(
@@ -1215,7 +1235,18 @@ export async function fetchLoopCardSummary(
   token: string,
   loopId: string,
 ): Promise<LoopCardSummary> {
-  return apiRequest(`/api/kanban/lifecycle/loops/${encodeURIComponent(loopId)}/card-summary`, { token });
+  const response = await apiRequest<{
+    loopId: string;
+    totalCards: number;
+    byStage?: Partial<Record<CardStage, number>>;
+    stageCounts?: Partial<Record<CardStage, number>>;
+  }>(`/api/kanban/lifecycle/loops/${encodeURIComponent(loopId)}/card-summary`, { token });
+
+  return {
+    loopId: response.loopId,
+    totalCards: response.totalCards,
+    byStage: response.byStage ?? response.stageCounts ?? {},
+  };
 }
 
 export async function fetchLoopVelocity(
