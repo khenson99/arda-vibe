@@ -1881,3 +1881,80 @@ export async function fetchKpiTrend(
     { token },
   );
 }
+
+/* ── Audit APIs ────────────────────────────────────────────────── */
+
+import type {
+  AuditListFilters,
+  AuditListResponse,
+  AuditSummaryFilters,
+  AuditSummaryResponse,
+  AuditLogEntry,
+  AuditPagination,
+} from "@/types";
+
+export async function fetchAuditLogs(
+  token: string,
+  filters: AuditListFilters = {},
+): Promise<AuditListResponse> {
+  const params = new URLSearchParams();
+  if (filters.page) params.set("page", String(filters.page));
+  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.action) params.set("action", filters.action);
+  if (filters.entityType) params.set("entityType", filters.entityType);
+  if (filters.entityId) params.set("entityId", filters.entityId);
+  if (filters.userId) params.set("userId", filters.userId);
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.actorName) params.set("actorName", filters.actorName);
+  if (filters.entityName) params.set("entityName", filters.entityName);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.includeArchived) params.set("includeArchived", "true");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiRequest<AuditListResponse>(`/api/audit${suffix}`, { token });
+}
+
+export async function fetchAuditSummary(
+  token: string,
+  filters: AuditSummaryFilters = {},
+): Promise<AuditSummaryResponse> {
+  const params = new URLSearchParams();
+  if (filters.action) params.set("action", filters.action);
+  if (filters.entityType) params.set("entityType", filters.entityType);
+  if (filters.entityId) params.set("entityId", filters.entityId);
+  if (filters.userId) params.set("userId", filters.userId);
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.granularity) params.set("granularity", filters.granularity);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiRequest<AuditSummaryResponse>(`/api/audit/summary${suffix}`, { token });
+}
+
+export async function fetchAuditActions(
+  token: string,
+): Promise<{ data: string[] }> {
+  return apiRequest<{ data: string[] }>("/api/audit/actions", { token });
+}
+
+export async function fetchAuditEntityTypes(
+  token: string,
+): Promise<{ data: string[] }> {
+  return apiRequest<{ data: string[] }>("/api/audit/entity-types", { token });
+}
+
+export async function fetchEntityActivity(
+  token: string,
+  entityType: string,
+  entityId: string,
+  page = 1,
+  limit = 20,
+): Promise<{ data: AuditLogEntry[]; pagination: AuditPagination }> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("limit", String(limit));
+  const suffix = `?${params.toString()}`;
+  return apiRequest<{ data: AuditLogEntry[]; pagination: AuditPagination }>(
+    `/api/audit/entity/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}${suffix}`,
+    { token },
+  );
+}
