@@ -27,3 +27,100 @@ Learnings:
   - All routes require tenant_admin role via requireRole() middleware
   - Gateway routing: both /api/users and /api/integrations proxy to auth service
   - Test patterns: mock crypto functions would require vi.mock('crypto'), accepted test behavior for actual crypto use
+
+--- Backend Agent Iteration 1 | Issue #250 ---
+Timestamp: 2026-02-12T01:50:00Z
+Status: completed
+Changes:
+  - packages/db/src/schema/audit.ts (added hashChain, previousHash, sequenceNumber columns + 2 new indexes)
+  - packages/db/drizzle/0008_audit_hash_chain.sql (new — 3-phase migration: add columns → backfill → enforce constraints)
+  - packages/db/drizzle/meta/_journal.json (registered migration 0008)
+  - packages/db/src/migrations/audit-hash-chain.test.ts (new — 14 tests for idempotency, structure, hash computation, schema exports)
+Tests: 14 new migration tests + 5 existing audit route tests, all passing (19 total)
+Learnings:
+  - Hash-chain columns: hash_chain (varchar 64, NOT NULL), previous_hash (varchar 64, nullable), sequence_number (bigint, NOT NULL)
+  - Migration pattern: 3-phase for safe production deploy (nullable add → backfill → enforce NOT NULL + indexes)
+  - Backfill uses recursive CTE to chain SHA-256 hashes sequentially per tenant
+  - Deterministic tie-breaker ordering: (timestamp ASC, id ASC) prevents non-repeatable sequence assignment
+  - First row per tenant uses 'GENESIS' sentinel instead of NULL for hash input consistency
+  - Hash input format: tenant_id|seq|action|entity_type|entity_id|timestamp|previous_hash (pipe-delimited)
+  - COALESCE(entity_id::text, '') handles NULL entity_id in hash computation
+  - Idempotency: IF NOT EXISTS for columns/indexes, WHERE IS NULL for backfill targeting
+  - Drizzle bigint mode: 'number' for sequence_number (JS safe integer range sufficient)
+  - Index: (tenant_id, sequence_number DESC) for efficient latest-first per-tenant queries
+  - Unique index on hash_chain ensures tamper-evidence
+  - Existing GET /api/audit routes unaffected — new columns are additive in SELECT * responses
+  - Rollback SQL documented in migration header comments
+
+--- Backend Agent Iteration 2 | Issue #251 ---
+Timestamp: 2026-02-12T02:00:00Z
+Status: completed
+Changes:
+  - packages/db/src/schema/audit.ts (added auditLogArchive table with full schema parity to auditLog)
+  - packages/db/src/schema/tenants.ts (added auditRetentionDays, auditArchiveEnabled to TenantSettings)
+  - packages/db/drizzle/0009_audit_log_archive.sql (new — 3-phase: create partitioned table → attach 24 monthly partitions → create indexes)
+  - packages/db/drizzle/meta/_journal.json (registered migration 0009)
+  - packages/db/src/migrations/audit-log-archive.test.ts (new — 35 tests for schema parity, partitioning, indexes, idempotency)
+Tests: 35 new migration tests + 22 existing, all 57 passing
+PR: https://github.com/khenson99/arda-v2/pull/382
+Learnings:
+  - PostgreSQL range partitioning requires partition key in PK → composite PK (id, timestamp)
+  - Drizzle doesn't model partitioning natively — all partition DDL must live in raw SQL migrations
+  - DO $$ blocks with pg_catalog lookups enable idempotent partition creation
+  - Partition naming convention: audit_log_archive_YYYY_MM for monthly partitions
+  - Archive table id column uses plain uuid (no defaultRandom) — UUIDs are preserved from source
+  - PostgreSQL auto-propagates indexes from partitioned parent to child partitions
+  - 24 partitions (12 back + 12 forward) provides good coverage; cron/maintenance can extend
+  - TenantSettings is a JSONB type interface — adding optional fields is non-breaking
+  - Pre-existing frontend test failures in apps/web api-client.test.ts (2 tests) are unrelated to backend changes
+
+--- Architect Iteration 2 ---
+Timestamp: 2026-02-12T10:00:00Z
+Tickets assigned: none (CI blocker must be resolved first)
+Tickets completed: #251 code done, PR #382 open
+Tickets blocked: #250 PR #381, #251 PR #382 — both failing CI (Lint & Typecheck)
+Decisions made: ADR-003 (fix CI before proceeding to #252)
+Learnings:
+  - PRs #381 and #382 both fail CI: 30x TS2769 errors in @arda/orders-service
+  - All errors are "No overload matches this call" in Drizzle query calls within orders service
+  - Root cause: adding columns to audit schema in packages/db changed inferred Drizzle types, breaking orders service overload resolution
+  - Main branch is green — errors are introduced by the audit schema changes
+  - Files affected: order-queue.routes.ts, transfer-orders.routes.ts, 10 service files in services/orders
+  - Fix: backend-engineer must update orders service type annotations to accommodate new audit columns
+  - Both PRs share the same base issue; fix on #250 branch, rebase #251 on top
+  - #252 (writeAuditEntry) can proceed in parallel on the same branch stack once CI fix is pushed
+
+--- Backend Agent Iteration 3 | Issue #252 ---
+Timestamp: 2026-02-12T14:00:00Z
+Status: completed
+Changes:
+  - packages/db/src/schema/audit.ts (added .default('PENDING') / .default(0) to hashChain/sequenceNumber)
+  - packages/db/drizzle/0010_audit_hash_chain_defaults.sql (new — adds SQL defaults for backward compat)
+  - packages/db/drizzle/meta/_journal.json (registered migration 0010)
+  - packages/db/src/audit-writer.ts (new — writeAuditEntry + writeAuditEntries with advisory lock, hash chain, sequence)
+  - packages/db/src/audit-writer.test.ts (new — 24 tests: hash computation, DB interaction, batch writes, exports)
+  - packages/db/src/index.ts (re-export writeAuditEntry, writeAuditEntries, AuditEntryInput, AuditEntryResult)
+  - packages/db/package.json (added ./audit-writer export path)
+  - packages/auth-utils/src/audit-context.ts (new — auditContextMiddleware for IP/UA extraction)
+  - packages/auth-utils/src/audit-context.test.ts (new — 9 tests: IP extraction, user-agent, X-Forwarded-For, edge cases)
+  - packages/auth-utils/src/index.ts (re-export auditContextMiddleware, AuditContext, AuditContextRequest)
+Tests: 24 new audit-writer tests + 9 new audit-context tests = 33 new tests, all passing
+  - db package: 78 total tests, all passing
+  - auth-utils audit-context: 9/9 passing
+  - orders service: 442/445 passing (3 pre-existing integration test failures)
+  - kanban service: 256 passing (1 pre-existing auth-guards test file failure)
+CI Fix:
+  - Root cause: hashChain and sequenceNumber were NOT NULL with no default in Drizzle schema
+  - Adding .default('PENDING') and .default(0) makes them optional in Drizzle's insert type
+  - Migration 0010 adds matching SQL DEFAULTs for backward compat
+  - All 30 TS2769 errors in orders service resolved without touching any service file
+Learnings:
+  - Advisory lock per tenant: pg_advisory_xact_lock(bigint) using first 16 hex of tenant UUID
+  - Lock is transaction-scoped — auto-releases on commit/rollback
+  - Hash input uses Date.toISOString() (JS-side) vs ::text (SQL-side) — important distinction
+  - writeAuditEntries (batch) acquires lock + reads latest once, then chains sequentially
+  - Drizzle .default() on NOT NULL columns makes the field optional in insert types
+  - SQL DEFAULT + Drizzle .default() must match to keep schema and runtime in sync
+  - 'PENDING' sentinel allows identifying legacy inserts that bypassed writeAuditEntry
+  - auditContextMiddleware extracts IP from X-Forwarded-For (first entry) or socket.remoteAddress
+  - Pattern: middleware attaches req.auditContext, route handlers spread it into writeAuditEntry call

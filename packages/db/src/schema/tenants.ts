@@ -51,4 +51,8 @@ export interface TenantSettings {
   webhookUrl?: string;
   webhookSecret?: string;
   webhookEvents?: string[];
+  /** Number of days to retain audit logs before archiving. Default: 365. */
+  auditRetentionDays?: number;
+  /** Whether automatic audit log archiving is enabled. Default: false. */
+  auditArchiveEnabled?: boolean;
 }

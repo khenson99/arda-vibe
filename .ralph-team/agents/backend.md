@@ -74,11 +74,38 @@ patterns, gotchas, and conventions.
 
 ## Stack-Specific Notes
 
+### Migrations
+- Hand-written SQL migrations in `packages/db/drizzle/`, numbered 0000+
+- Journal at `packages/db/drizzle/meta/_journal.json` — must register each new migration
+- 3-phase pattern for adding NOT NULL columns to existing tables: add nullable → backfill → enforce NOT NULL
+- Use `IF NOT EXISTS` / `WHERE ... IS NULL` guards for idempotency
+- Rollback notes in migration header comments
+- Recursive CTE pattern for sequential backfills (hash chains) where each row depends on the previous
+- PostgreSQL range partitioning: partition key must be in PK → use composite PK (id, timestamp)
+- Drizzle doesn't model partitioning natively — all partition DDL goes in raw SQL migrations
+- Idempotent partition creation: use `DO $$` blocks with `pg_catalog.pg_class` existence checks
+- Partition naming: `<table>_YYYY_MM` for monthly range partitions
+- PostgreSQL auto-propagates indexes from partitioned parent to child partitions
+- Archive table id: use plain uuid (no defaultRandom) when IDs are preserved from source table
+
 ### Drizzle ORM
 - Query API: `db.query.users.findFirst({ where: eq(...) })`
 - Insert/Update: `.insert(...).values(...).returning()` / `.update(...).set(...).where(...).returning()`
 - Never expose `passwordHash` in API responses (exclude in query or omit in response object)
 - Use `.returning()` to get created/updated records in one query
+- Adding NOT NULL columns to existing Drizzle tables: must add `.default()` to keep insert type optional
+- SQL DEFAULT + Drizzle `.default()` must match — otherwise Drizzle type and DB constraint diverge
+- `DbOrTransaction` type accepts both `db` and transaction `tx` — use for utility functions called inside transactions
+
+### Audit System
+- `writeAuditEntry(dbOrTx, entry)` — write a single hash-chained audit entry (in `@arda/db`)
+- `writeAuditEntries(dbOrTx, tenantId, entries)` — batch write with sequential chaining
+- Advisory lock: `pg_advisory_xact_lock(BigInt(tenantUUID.slice(0,16)))` — per-tenant, transaction-scoped
+- Hash format: `tenant_id|seq|action|entity_type|entity_id|timestamp|previous_hash` (pipe-delimited SHA-256)
+- First entry per tenant uses 'GENESIS' sentinel for previous_hash
+- 'PENDING' hash_chain value = legacy insert that bypassed writeAuditEntry (temporary during migration)
+- `auditContextMiddleware` (in `@arda/auth-utils`) extracts IP/UA and attaches `req.auditContext`
+- Middleware order: authMiddleware → auditContextMiddleware → tenantContext → routes
 
 ### Express Routes
 - Register routers in service index.ts with `app.use(prefix, router)`

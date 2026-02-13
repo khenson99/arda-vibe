@@ -1,17 +1,64 @@
 {
-  "tickets": {},
+  "tickets": {
+    "250": {
+      "status": "in-progress",
+      "agent": "backend-engineer"
+    },
+    "251": {
+      "status": "pr-open",
+      "agent": "backend-engineer",
+      "pr_number": 382,
+      "reviewed": false,
+      "review_decision": null,
+      "reviewed_at": "",
+      "ci_status": "failing",
+      "ci_blocker": "Same 30x TS2769 as #250 — inherits issue since branch stacks on #250"
+    },
+    "252": {
+      "status": "ready",
+      "agent": "backend-engineer",
+      "notes": "Next: writeAuditEntry utility + middleware. Depends on #250 schema. BLOCKED until CI fix lands."
+    }
+  },
   "agents": {
-    "architect": { "status": "idle", "current_ticket": null, "iterations": 0 },
-    "backend": { "status": "idle", "current_ticket": null, "iterations": 0 },
-    "frontend": { "status": "idle", "current_ticket": null, "iterations": 0 },
-    "qa": { "status": "idle", "current_ticket": null, "iterations": 0 },
-    "design-enforcer": { "status": "idle", "current_ticket": null, "iterations": 0 }
+    "architect": {
+      "status": "working",
+      "current_ticket": null,
+      "iterations": 2
+    },
+    "backend": {
+      "status": "idle",
+      "current_ticket": null,
+      "iterations": 0
+    },
+    "frontend": {
+      "status": "idle",
+      "current_ticket": null,
+      "iterations": 0
+    },
+    "qa": {
+      "status": "idle",
+      "current_ticket": null,
+      "iterations": 0
+    },
+    "design-enforcer": {
+      "status": "idle",
+      "current_ticket": null,
+      "iterations": 0
+    },
+    "backend-engineer": {
+      "status": "working",
+      "current_ticket": 250,
+      "iterations": 2,
+      "last_completed": 251
+    }
   },
   "sprint": {
-    "status": "not_started",
-    "total_tickets": 0,
+    "status": "active",
+    "total_tickets": 3,
     "completed_tickets": 0,
     "blocked_tickets": 0,
-    "iteration": 0
+    "iteration": 2,
+    "focus": "MVP-18 Audit Trail Foundation (T1-T3)"
   }
 }

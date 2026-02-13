@@ -24,3 +24,8 @@ export {
   buildSetTenantSQL,
   type TenantRequest,
 } from './tenant-context.js';
+export {
+  auditContextMiddleware,
+  type AuditContext,
+  type AuditContextRequest,
+} from './audit-context.js';
