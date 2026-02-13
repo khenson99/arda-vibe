@@ -13,10 +13,29 @@
 
 import { db, schema } from '@arda/db';
 import { eq, and, ne, gt, sql } from 'drizzle-orm';
-import { createLogger } from '@arda/config';
+import * as configModule from '@arda/config';
 import type { SourceRecommendation } from '@arda/shared-types';
 
-const log = createLogger('source-recommendation');
+type LoggerLike = {
+  debug: (...args: unknown[]) => void;
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
+};
+
+const fallbackLogger: LoggerLike = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
+
+const createLogger =
+  typeof configModule.createLogger === 'function'
+    ? configModule.createLogger
+    : () => fallbackLogger;
+
+const log = createLogger('source-recommendation') as LoggerLike;
 
 const { inventoryLedger, facilities, leadTimeHistory } = schema;
 
