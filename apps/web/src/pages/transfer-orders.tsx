@@ -1013,6 +1013,7 @@ interface AnalyticsViewProps {
   facilities: any[];
   facilitiesLoading: boolean;
   setActiveTab: (tab: TransferTab) => void;
+  onUnauthorized: () => void;
 }
 
 function AnalyticsView({
@@ -1020,8 +1021,9 @@ function AnalyticsView({
   facilities,
   facilitiesLoading,
   setActiveTab,
+  onUnauthorized,
 }: AnalyticsViewProps) {
-  const analytics = useLeadTimeAnalytics(token, () => {});
+  const analytics = useLeadTimeAnalytics(token, onUnauthorized);
   const [parts, setParts] = React.useState<PartRecord[]>([]);
   const [partsLoading, setPartsLoading] = React.useState(false);
 
@@ -1168,6 +1170,7 @@ export function TransferOrdersRoute({ session, onUnauthorized }: Props) {
           facilities={hook.facilities}
           facilitiesLoading={hook.facilitiesLoading}
           setActiveTab={hook.setActiveTab}
+          onUnauthorized={onUnauthorized}
         />
       )}
     </div>
