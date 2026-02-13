@@ -69,6 +69,13 @@ const routes: RouteConfig[] = [
     pathRewrite: { '^/': '/v1/items/' },
     requiresAuth: true,
   },
+  // ── Public unsubscribe endpoint (token-based auth, no JWT) ──
+  {
+    prefix: '/api/notifications/unsubscribe',
+    target: serviceUrls.notifications,
+    pathRewrite: { '^/': '/notifications/unsubscribe/' },
+    requiresAuth: false,
+  },
   {
     prefix: '/api/notifications',
     target: serviceUrls.notifications,
