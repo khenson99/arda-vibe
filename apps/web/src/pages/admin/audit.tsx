@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertCircle,
+  Download,
+  ShieldCheck,
 } from "lucide-react";
 import {
   Button,
@@ -23,8 +25,11 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { useAuditLogs, useAuditSummary, useAuditFilterOptions } from "@/hooks/use-audit";
+import { useAuditExport, useIntegrityCheck } from "@/hooks/use-audit-export";
 import { AuditEntryRow } from "@/components/audit/audit-entry-row";
 import { AuditFilterBar } from "@/components/audit/audit-filter-bar";
+import { ExportModal } from "@/components/audit/export-modal";
+import { IntegrityCheckBanner } from "@/components/audit/integrity-check-banner";
 import { formatActionLabel, formatEntityType } from "@/lib/audit-utils";
 import type { AuthSession, AuditListFilters, AuditSummaryFilters } from "@/types";
 
@@ -115,6 +120,7 @@ function LogTab({
     page: 1,
     limit: 50,
   });
+  const [exportOpen, setExportOpen] = React.useState(false);
 
   const { entries, pagination, loading, error, refresh } = useAuditLogs({
     token,
@@ -125,14 +131,62 @@ function LogTab({
   const { actions, entityTypes, loading: optionsLoading } =
     useAuditFilterOptions(token, onUnauthorized);
 
+  const exportHook = useAuditExport({ token, onUnauthorized });
+  const integrityHook = useIntegrityCheck({ token, onUnauthorized });
+
   return (
     <div className="space-y-4">
-      <AuditFilterBar
+      {/* Action buttons + filter bar */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <AuditFilterBar
+            filters={filters}
+            onFiltersChange={setFilters}
+            actions={actions}
+            entityTypes={entityTypes}
+            loading={optionsLoading}
+          />
+        </div>
+        <div className="flex items-center gap-2 shrink-0 pt-0.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setExportOpen(true)}
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            Export
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={integrityHook.phase === "running"}
+            onClick={integrityHook.run}
+          >
+            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+            Integrity Check
+          </Button>
+        </div>
+      </div>
+
+      {/* Integrity check banner */}
+      <IntegrityCheckBanner
+        phase={integrityHook.phase}
+        result={integrityHook.result}
+        error={integrityHook.error}
+        onDismiss={integrityHook.dismiss}
+      />
+
+      {/* Export modal */}
+      <ExportModal
+        open={exportOpen}
+        onOpenChange={setExportOpen}
         filters={filters}
-        onFiltersChange={setFilters}
-        actions={actions}
-        entityTypes={entityTypes}
-        loading={optionsLoading}
+        pagination={pagination}
+        phase={exportHook.phase}
+        progress={exportHook.progress}
+        error={exportHook.error}
+        onExport={exportHook.startExport}
+        onReset={exportHook.reset}
       />
 
       {/* Results */}

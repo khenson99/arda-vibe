@@ -852,3 +852,38 @@ export interface AuditSummaryFilters {
   dateTo?: string;
   granularity?: "hour" | "day" | "week" | "month";
 }
+
+/* ── Audit Export ──────────────────────────────────────────────── */
+
+export type AuditExportFormat = "csv" | "json" | "pdf";
+
+export interface AuditExportRequest {
+  format: AuditExportFormat;
+  filters?: Omit<AuditListFilters, "page" | "limit">;
+  includeArchived?: boolean;
+}
+
+export interface AuditExportJobResponse {
+  jobId: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  downloadUrl?: string;
+  error?: string;
+  progress?: number;
+}
+
+/* ── Audit Integrity Check ────────────────────────────────────── */
+
+export interface AuditIntegrityViolation {
+  entryId: string;
+  sequenceNumber: number;
+  expectedHash: string;
+  actualHash: string;
+}
+
+export interface AuditIntegrityCheckResult {
+  valid: boolean;
+  totalChecked: number;
+  violationCount: number;
+  firstInvalidEntry?: string;
+  violations: AuditIntegrityViolation[];
+}
