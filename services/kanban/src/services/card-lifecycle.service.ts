@@ -1,5 +1,5 @@
 import { eq, and, sql, desc, asc } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { getEventBus, type ScanConflictDetectedEvent } from '@arda/events';
 import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
@@ -352,6 +352,25 @@ export async function transitionCard(input: {
       .set(updateData)
       .where(eq(kanbanCards.id, cardId))
       .returning();
+
+    // ── Mirror to central audit log ──
+    await writeAuditEntry(tx, {
+      tenantId,
+      userId: userId ?? null,
+      action: 'card.stage_transitioned',
+      entityType: 'kanban_card',
+      entityId: cardId,
+      previousState: { stage: currentStage, cycleNumber },
+      newState: { stage: toStage, cycleNumber },
+      metadata: {
+        loopId: card.loopId,
+        method,
+        transitionId: transition.id,
+        ...(linkedOrderId ? { linkedOrderId, linkedOrderType } : {}),
+        ...(notes ? { notes } : {}),
+        ...(stageDurationSeconds !== null ? { stageDurationSeconds } : {}),
+      },
+    });
 
     return { card: updatedCard, transition };
   });

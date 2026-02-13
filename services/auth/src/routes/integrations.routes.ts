@@ -1,7 +1,24 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { authMiddleware, requireRole, type AuthRequest } from '@arda/auth-utils';
 import * as integrationService from '../services/integration.service.js';
+import type { AuthAuditContext } from '../services/auth-audit.js';
+
+function extractAuditContext(req: Request): AuthAuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+  const authReq = req as AuthRequest;
+  return {
+    userId: authReq.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 export const integrationsRouter = Router();
 
@@ -30,13 +47,14 @@ integrationsRouter.post(
   async (req: AuthRequest, res, next) => {
     try {
       const input = createApiKeySchema.parse(req.body);
+      const auditCtx = extractAuditContext(req);
       const result = await integrationService.createApiKey({
         tenantId: req.user!.tenantId,
         userId: req.user!.sub,
         name: input.name,
         permissions: input.permissions,
         expiresInDays: input.expiresInDays,
-      });
+      }, auditCtx);
 
       res.status(201).json(result);
     } catch (err) {
@@ -80,7 +98,8 @@ integrationsRouter.put(
         return;
       }
 
-      await integrationService.revokeApiKey(apiKeyId, req.user!.tenantId);
+      const auditCtx = extractAuditContext(req);
+      await integrationService.revokeApiKey(apiKeyId, req.user!.tenantId, req.user!.sub, auditCtx);
       res.json({ success: true, message: 'API key revoked' });
     } catch (err) {
       if (err instanceof Error && err.message.includes('not found')) {

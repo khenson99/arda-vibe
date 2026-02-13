@@ -1,12 +1,29 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { authMiddleware, requireRole, type AuthRequest } from '@arda/auth-utils';
 import * as userManagementService from '../services/user-management.service.js';
+import type { AuthAuditContext } from '../services/auth-audit.js';
 
 export const usersRouter = Router();
 
 // All user management routes require authentication
 usersRouter.use(authMiddleware);
+
+function extractAuditContext(req: Request): AuthAuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+  const authReq = req as AuthRequest;
+  return {
+    userId: authReq.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 // ─── Validation Schemas ───────────────────────────────────────────────
 
@@ -42,13 +59,15 @@ const updateRoleSchema = z.object({
 usersRouter.post('/invite', requireRole('tenant_admin'), async (req: AuthRequest, res, next) => {
   try {
     const input = inviteUserSchema.parse(req.body);
+    const auditCtx = extractAuditContext(req);
     const result = await userManagementService.inviteUser({
       tenantId: req.user!.tenantId,
       email: input.email,
       firstName: input.firstName,
       lastName: input.lastName,
       role: input.role,
-    });
+      performedBy: req.user!.sub,
+    }, auditCtx);
 
     res.status(201).json(result);
   } catch (err) {
@@ -87,11 +106,13 @@ usersRouter.put('/:id/role', requireRole('tenant_admin'), async (req: AuthReques
     }
 
     const input = updateRoleSchema.parse(req.body);
+    const auditCtx = extractAuditContext(req);
     const result = await userManagementService.updateUserRole({
       userId,
       tenantId: req.user!.tenantId,
       role: input.role,
-    });
+      performedBy: req.user!.sub,
+    }, auditCtx);
 
     res.json(result);
   } catch (err) {
@@ -121,10 +142,12 @@ usersRouter.put('/:id/deactivate', requireRole('tenant_admin'), async (req: Auth
       return;
     }
 
+    const auditCtx = extractAuditContext(req);
     const result = await userManagementService.deactivateUser({
       userId,
       tenantId: req.user!.tenantId,
-    });
+      performedBy: req.user!.sub,
+    }, auditCtx);
 
     res.json(result);
   } catch (err) {

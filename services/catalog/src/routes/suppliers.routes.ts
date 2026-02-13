@@ -1,9 +1,24 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, ilike, sql } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
-import type { AuthRequest } from '@arda/auth-utils';
+import { db, schema, writeAuditEntry } from '@arda/db';
+import type { AuthRequest, AuditContext } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
+
+function getRequestAuditContext(req: AuthRequest): AuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+  return {
+    userId: req.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 export const suppliersRouter = Router();
 const { suppliers, supplierParts } = schema;
@@ -89,8 +104,32 @@ suppliersRouter.post('/', async (req: AuthRequest, res, next) => {
   try {
     const input = createSupplierSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
-    const [created] = await db.insert(suppliers).values({ ...input, tenantId }).returning();
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx.insert(suppliers).values({ ...input, tenantId }).returning();
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'supplier.created',
+        entityType: 'supplier',
+        entityId: row.id,
+        newState: {
+          name: row.name,
+          code: row.code,
+          contactName: row.contactName,
+          contactEmail: row.contactEmail,
+          isActive: row.isActive,
+        },
+        metadata: { source: 'suppliers.create' },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
+
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -105,13 +144,47 @@ suppliersRouter.post('/', async (req: AuthRequest, res, next) => {
 suppliersRouter.patch('/:id', async (req: AuthRequest, res, next) => {
   try {
     const input = createSupplierSchema.partial().parse(req.body);
-    const [updated] = await db
-      .update(suppliers)
-      .set({ ...input, updatedAt: new Date() })
-      .where(and(eq(suppliers.id, req.params.id as string), eq(suppliers.tenantId, req.user!.tenantId)))
-      .returning();
+    const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
-    if (!updated) throw new AppError(404, 'Supplier not found');
+    // Read prior state before mutation
+    const existing = await db.query.suppliers.findFirst({
+      where: and(eq(suppliers.id, req.params.id as string), eq(suppliers.tenantId, tenantId)),
+    });
+    if (!existing) throw new AppError(404, 'Supplier not found');
+
+    // Build field-level snapshots for changed fields only
+    const changedFields = Object.keys(input) as (keyof typeof input)[];
+    const previousState: Record<string, unknown> = {};
+    const newState: Record<string, unknown> = {};
+    for (const key of changedFields) {
+      previousState[key] = (existing as Record<string, unknown>)[key];
+      newState[key] = input[key];
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(suppliers)
+        .set({ ...input, updatedAt: new Date() })
+        .where(and(eq(suppliers.id, req.params.id as string), eq(suppliers.tenantId, tenantId)))
+        .returning();
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'supplier.updated',
+        entityType: 'supplier',
+        entityId: row.id,
+        previousState,
+        newState,
+        metadata: { source: 'suppliers.update', supplierName: row.name },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
+
     res.json(updated);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -136,15 +209,38 @@ suppliersRouter.post('/:id/parts', async (req: AuthRequest, res, next) => {
 
     const input = linkSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
-    const [created] = await db
-      .insert(supplierParts)
-      .values({
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(supplierParts)
+        .values({
+          tenantId,
+          supplierId: req.params.id as string,
+          ...input,
+        })
+        .returning();
+
+      await writeAuditEntry(tx, {
         tenantId,
-        supplierId: req.params.id as string,
-        ...input,
-      })
-      .returning();
+        userId: auditContext.userId,
+        action: 'supplier.part_linked',
+        entityType: 'supplier_part',
+        entityId: row.id,
+        newState: {
+          supplierId: req.params.id as string,
+          partId: input.partId,
+          supplierPartNumber: input.supplierPartNumber,
+          unitCost: input.unitCost,
+          isPrimary: input.isPrimary,
+        },
+        metadata: { source: 'suppliers.link_part' },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
 
     res.status(201).json(created);
   } catch (err) {

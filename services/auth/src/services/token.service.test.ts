@@ -82,6 +82,8 @@ const mockAuthUtils = vi.hoisted(() => ({
 vi.mock('@arda/db', () => ({
   db: mockDb,
   schema: mockSchema,
+  writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'mock', sequenceNumber: 1 })),
+  writeAuditEntries: vi.fn(async () => []),
 }));
 
 vi.mock('@arda/auth-utils', () => mockAuthUtils);

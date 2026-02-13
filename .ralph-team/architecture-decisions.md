@@ -73,3 +73,43 @@ ADR format and is referenced by other agents when making implementation choices.
 **Alternatives considered**: (1) Remove rollback comments from migrations — rejected, they're useful documentation. (2) Fix the CI regex to skip comments — out of scope for this sprint, but recommended as a follow-up.
 
 ---
+
+## ADR-007: Make writeAuditEntry self-transactional to enforce advisory lock integrity
+
+**Status**: accepted
+**Date**: 2026-02-13
+**Context**: Reviewer flagged that writeAuditEntry accepts bare db handle, making pg_advisory_xact_lock ineffective. This defect class appears in all 4 PRs — every caller passing db instead of tx has broken hash-chain integrity.
+**Decision**: Modify writeAuditEntry to always wrap its logic in a transaction when given db, reuse existing transaction when given tx. Canonicalize timestamp to ISO string format in both JS and SQL. This cascades the fix to all downstream PRs automatically.
+
+---
+
+## ADR-008: Continue MVP-18 T7-T8 while foundation PRs await merge
+
+**Status**: accepted
+**Date**: 2026-02-12
+**Context**: Backend-engineer has been idle for 4+ consecutive iterations waiting for PRs #382/#385/#386/#387 to be reviewed and merged. All review feedback is resolved, all tests pass, PRs are mergeable. Meanwhile, T7 (#256 — catalog audit) and T8 (#257 — category/facility/notifications audit) are ready to start and only depend on writeAuditEntry (T3), which is available on the stacked branch chain.
+**Decision**: Assign T7 and T8 to backend-engineer on branches stacked off agent/backend/issue-255. Development proceeds using writeAuditEntry from the existing branch chain. Once foundation PRs merge, the new PRs rebase cleanly. This eliminates wasted idle cycles and maintains sprint velocity.
+**Consequences**: Branch chain grows to 6 deep (issue-251 → issue-253 → issue-254 → issue-255 → issue-256 → issue-257). Merge conflicts are possible but manageable since changes target different services. Critical path: merge #382 first to unstack.
+**Alternatives considered**: (1) Wait for merges — rejected, backend-engineer has been idle 4+ iterations already. (2) Start unrelated MVP-19/20 work — rejected, MVP-18 is P0 critical path and should be completed first.
+
+---
+
+## ADR-008: Continue MVP-18 T7-T8 while foundation PRs await merge
+
+**Status**: accepted
+**Date**: 2026-02-13
+**Context**: Backend-engineer idle 4+ consecutive iterations. PRs #382-387 (T1-T6) code-complete with all review feedback resolved. T7 and T8 only need writeAuditEntry available on stacked branches.
+**Decision**: Assign T7 (#256) and T8 (#257) on branches stacked off issue-255. Eliminates idle cycles, maintains sprint velocity. Branch chain grows to 6 deep but changes target different services so conflicts are manageable.
+
+---
+
+## ADR-009: Continue T9-T10 on stacked branches, defer T11-T13 until merges
+
+**Status**: accepted
+**Date**: 2026-02-12
+**Context**: Backend-engineer idle again after completing T7-T8 (PRs #388, #389). All 6 PRs in the chain (#382→#389) are MERGEABLE with no new review feedback. Branch chain is 6 deep. T9 (#258) extends audit query APIs and T10 (#259) adds integrity check — both only need the audit schema and writeAuditEntry available on the chain. T11-T13 (exports, async export, retention) are heavier features that would push the chain to 11 deep.
+**Decision**: Assign T9 and T10 to backend-engineer on stacked branches (chain grows to 8 deep). Defer T11-T13 until the PR chain is merged to avoid excessive depth and merge conflict risk. T9 targets audit.routes.ts (read-only enhancements) and T10 adds a new integrity-check endpoint — both are additive with low conflict potential.
+**Consequences**: Chain depth reaches 8, but T9/T10 touch only audit.routes.ts in the orders service, which has no overlap with T5-T8 changes (auth/kanban/catalog/notifications). Reviewer must still merge sequentially starting with #382.
+**Alternatives considered**: (1) Wait for merges — rejected, backend-engineer already idle multiple iterations. (2) Assign all T9-T13 — rejected, 11-deep chain is too risky. (3) Start non-MVP-18 work — rejected, MVP-18 is P0 critical path.
+
+---

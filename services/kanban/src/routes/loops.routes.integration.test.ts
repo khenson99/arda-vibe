@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const testState = vi.hoisted(() => ({
   existingLoop: null as null | Record<string, unknown>,
   updatedLoop: null as null | Record<string, unknown>,
+  auditEntries: [] as Array<Record<string, unknown>>,
 }));
 
 const { publishMock, getEventBusMock } = vi.hoisted(() => {
@@ -72,9 +73,18 @@ vi.mock('drizzle-orm', () => ({
   gt: vi.fn(() => ({})),
 }));
 
+const mockWriteAuditEntry = vi.hoisted(() =>
+  vi.fn(async (_dbOrTx: unknown, entry: Record<string, unknown>) => {
+    testState.auditEntries.push(entry);
+    return { id: 'audit-' + testState.auditEntries.length, hashChain: 'mock', sequenceNumber: testState.auditEntries.length };
+  })
+);
+
 vi.mock('@arda/db', () => ({
   db: dbMock,
   schema: schemaMock,
+  writeAuditEntry: mockWriteAuditEntry,
+  writeAuditEntries: vi.fn(async () => []),
 }));
 
 vi.mock('@arda/events', () => ({
@@ -173,6 +183,8 @@ describe('loops parameter updates', () => {
     resetDbMocks();
     publishMock.mockReset();
     getEventBusMock.mockClear();
+    testState.auditEntries = [];
+    mockWriteAuditEntry.mockClear();
   });
 
   it('publishes loop.parameters_changed after successful parameter update', async () => {
@@ -258,5 +270,133 @@ describe('loops parameter updates', () => {
         loopId: 'loop-1',
       })
     );
+  });
+});
+
+// ─── Audit Write Assertions ───────────────────────────────────────────
+
+describe('loop audit writes', () => {
+  beforeEach(() => {
+    testState.existingLoop = {
+      id: 'loop-1',
+      tenantId: 'tenant-1',
+      minQuantity: 10,
+      orderQuantity: 20,
+      numberOfCards: 3,
+    };
+    testState.updatedLoop = {
+      id: 'loop-1',
+      tenantId: 'tenant-1',
+      minQuantity: 15,
+      orderQuantity: 20,
+      numberOfCards: 3,
+      cards: [],
+    };
+    resetDbMocks();
+    publishMock.mockReset();
+    getEventBusMock.mockClear();
+    testState.auditEntries = [];
+    mockWriteAuditEntry.mockClear();
+  });
+
+  it('writes loop.created audit entry on POST /loops', async () => {
+    const mockLoop = {
+      id: 'loop-new',
+      tenantId: 'tenant-1',
+      loopType: 'procurement',
+      cardMode: 'single',
+      partId: '11111111-1111-1111-1111-111111111111',
+      facilityId: '22222222-2222-2222-2222-222222222222',
+      minQuantity: 10,
+      orderQuantity: 25,
+      numberOfCards: 1,
+    };
+    const mockCard = { id: 'card-new', loopId: 'loop-new', cardNumber: 1 };
+
+    // Override transaction to return loop and card data
+    (dbMock.transaction as ReturnType<typeof vi.fn>).mockImplementationOnce(async (callback: (tx: unknown) => Promise<unknown>) => {
+      let insertCallCount = 0;
+      const tx = {
+        insert: vi.fn(() => {
+          insertCallCount++;
+          if (insertCallCount === 1) {
+            // Loop insert
+            return { values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([mockLoop]) }) };
+          } else if (insertCallCount === 2) {
+            // Cards insert
+            return { values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([mockCard]) }) };
+          }
+          // Parameter history insert (no returning)
+          return { values: vi.fn().mockResolvedValue(undefined) };
+        }),
+      };
+      return callback(tx);
+    });
+
+    const app = createApp();
+    const response = await postJson(app, '/loops', {
+      partId: '11111111-1111-1111-1111-111111111111',
+      facilityId: '22222222-2222-2222-2222-222222222222',
+      loopType: 'procurement',
+      cardMode: 'single',
+      minQuantity: 10,
+      orderQuantity: 25,
+      numberOfCards: 1,
+      primarySupplierId: '33333333-3333-3333-3333-333333333333',
+    });
+
+    expect(response.status).toBe(201);
+    expect(mockWriteAuditEntry).toHaveBeenCalledTimes(1);
+
+    const entry = testState.auditEntries[0];
+    expect(entry).toBeDefined();
+    expect(entry.action).toBe('loop.created');
+    expect(entry.entityType).toBe('kanban_loop');
+    expect(entry.entityId).toBe('loop-new');
+    expect(entry.tenantId).toBe('tenant-1');
+    expect(entry.userId).toBe('user-1');
+    expect(entry.newState).toEqual(expect.objectContaining({
+      loopType: 'procurement',
+      cardMode: 'single',
+      minQuantity: 10,
+      orderQuantity: 25,
+      numberOfCards: 1,
+      partId: '11111111-1111-1111-1111-111111111111',
+      facilityId: '22222222-2222-2222-2222-222222222222',
+    }));
+    expect(entry.metadata).toEqual(expect.objectContaining({
+      cardsCreated: 1,
+      primarySupplierId: '33333333-3333-3333-3333-333333333333',
+    }));
+  });
+
+  it('writes loop.parameters_changed audit entry on PATCH /loops/:id/parameters', async () => {
+    const app = createApp();
+    const response = await patchJson(app, '/loops/loop-1/parameters', {
+      minQuantity: 15,
+      reason: 'Demand spike adjustment',
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockWriteAuditEntry).toHaveBeenCalledTimes(1);
+
+    const entry = testState.auditEntries[0];
+    expect(entry).toBeDefined();
+    expect(entry.action).toBe('loop.parameters_changed');
+    expect(entry.entityType).toBe('kanban_loop');
+    expect(entry.entityId).toBe('loop-1');
+    expect(entry.tenantId).toBe('tenant-1');
+    expect(entry.userId).toBe('user-1');
+    expect(entry.previousState).toEqual({
+      minQuantity: 10,
+      orderQuantity: 20,
+      numberOfCards: 3,
+    });
+    expect(entry.newState).toEqual({
+      minQuantity: 15,
+      orderQuantity: 20,
+      numberOfCards: 3,
+    });
+    expect(entry.metadata).toEqual({ reason: 'Demand spike adjustment' });
   });
 });

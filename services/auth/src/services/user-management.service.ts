@@ -2,6 +2,11 @@ import { db, schema } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
 import { config, createLogger } from '@arda/config';
 import type { UserRole } from '@arda/shared-types';
+import {
+  AuthAuditAction,
+  writeAuthAuditEntry,
+  type AuthAuditContext,
+} from './auth-audit.js';
 
 const log = createLogger('auth:user-management');
 
@@ -13,17 +18,23 @@ export interface InviteUserInput {
   firstName: string;
   lastName: string;
   role: UserRole;
+  /** The admin user performing the invite (for audit trail). */
+  performedBy?: string;
 }
 
 export interface UpdateUserRoleInput {
   userId: string;
   tenantId: string;
   role: UserRole;
+  /** The admin user performing the role change (for audit trail). */
+  performedBy?: string;
 }
 
 export interface DeactivateUserInput {
   userId: string;
   tenantId: string;
+  /** The admin user performing the deactivation (for audit trail). */
+  performedBy?: string;
 }
 
 // ─── Invite User ──────────────────────────────────────────────────────
@@ -32,7 +43,7 @@ export interface DeactivateUserInput {
  * Create a new user in the tenant (invite flow).
  * Checks seat limits and email uniqueness within the tenant.
  */
-export async function inviteUser(input: InviteUserInput) {
+export async function inviteUser(input: InviteUserInput, auditCtx?: AuthAuditContext) {
   const { tenantId, email, firstName, lastName, role } = input;
 
   // Check seat limit
@@ -76,6 +87,19 @@ export async function inviteUser(input: InviteUserInput) {
 
   log.info({ userId: newUser.id, email: newUser.email, role }, 'User invited');
 
+  // Audit: user invited
+  await writeAuthAuditEntry(db, {
+    tenantId,
+    action: AuthAuditAction.USER_INVITED,
+    entityType: 'user',
+    entityId: newUser.id,
+    userId: input.performedBy ?? auditCtx?.userId ?? null,
+    newState: { email: newUser.email, role: newUser.role },
+    metadata: { invitedEmail: email, assignedRole: role },
+    ipAddress: auditCtx?.ipAddress,
+    userAgent: auditCtx?.userAgent,
+  });
+
   // TODO: Send invitation email
 
   return {
@@ -95,7 +119,7 @@ export async function inviteUser(input: InviteUserInput) {
  * Update a user's role within their tenant.
  * Only tenant_admin can perform this action (enforced by middleware).
  */
-export async function updateUserRole(input: UpdateUserRoleInput) {
+export async function updateUserRole(input: UpdateUserRoleInput, auditCtx?: AuthAuditContext) {
   const { userId, tenantId, role } = input;
 
   // Verify user belongs to the tenant
@@ -107,6 +131,8 @@ export async function updateUserRole(input: UpdateUserRoleInput) {
     throw new Error('User not found in your organization');
   }
 
+  const previousRole = user.role;
+
   // Update role
   const [updated] = await db
     .update(schema.users)
@@ -114,7 +140,21 @@ export async function updateUserRole(input: UpdateUserRoleInput) {
     .where(eq(schema.users.id, userId))
     .returning();
 
-  log.info({ userId, oldRole: user.role, newRole: role }, 'User role updated');
+  log.info({ userId, oldRole: previousRole, newRole: role }, 'User role updated');
+
+  // Audit: user role changed
+  await writeAuthAuditEntry(db, {
+    tenantId,
+    action: AuthAuditAction.USER_ROLE_CHANGED,
+    entityType: 'user',
+    entityId: userId,
+    userId: input.performedBy ?? auditCtx?.userId ?? null,
+    previousState: { role: previousRole },
+    newState: { role: updated.role },
+    metadata: { email: updated.email, previousRole, newRole: role },
+    ipAddress: auditCtx?.ipAddress,
+    userAgent: auditCtx?.userAgent,
+  });
 
   return {
     id: updated.id,
@@ -133,7 +173,7 @@ export async function updateUserRole(input: UpdateUserRoleInput) {
  * Deactivate a user account within the tenant.
  * This prevents login but preserves the user record.
  */
-export async function deactivateUser(input: DeactivateUserInput) {
+export async function deactivateUser(input: DeactivateUserInput, auditCtx?: AuthAuditContext) {
   const { userId, tenantId } = input;
 
   // Verify user belongs to the tenant
@@ -174,6 +214,20 @@ export async function deactivateUser(input: DeactivateUserInput) {
     .update(schema.refreshTokens)
     .set({ revokedAt: new Date() })
     .where(eq(schema.refreshTokens.userId, userId));
+
+  // Audit: user deactivated
+  await writeAuthAuditEntry(db, {
+    tenantId,
+    action: AuthAuditAction.USER_DEACTIVATED,
+    entityType: 'user',
+    entityId: userId,
+    userId: input.performedBy ?? auditCtx?.userId ?? null,
+    previousState: { isActive: true, role: user.role },
+    newState: { isActive: false, role: updated.role },
+    metadata: { email: user.email, tokensRevoked: true },
+    ipAddress: auditCtx?.ipAddress,
+    userAgent: auditCtx?.userAgent,
+  });
 
   return {
     id: updated.id,

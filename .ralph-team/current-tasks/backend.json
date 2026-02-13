@@ -1,1 +1,25 @@
-{}
+{
+  "ticket_number": 258,
+  "ticket_title": "[MVP-18/T9] Backend: Enhance audit query APIs with advanced filters and entity history",
+  "ticket_body": "Enhance audit read APIs for admin filtering and entity drilldown: richer filters on GET /api/audit, plus dedicated actions/entity-types/entity-history endpoints with optional archived inclusion.\n\nAcceptance Criteria:\n- GET /api/audit supports actorName, entityName, search, and includeArchived filters.\n- GET /api/audit/entity/:entityType/:entityId returns complete chronological history for one entity.\n- GET /api/audit/actions returns tenant-scoped distinct action values.\n- GET /api/audit/entity-types returns tenant-scoped distinct entity types.\n- Query paths correctly UNION archive data when includeArchived=true and maintain pagination/sorting behavior.\n\nTechnical Notes:\n- Target file: services/orders/src/routes/audit.routes.ts (and supporting query/service modules).\n- Keep GET /api/audit/summary response contract unchanged.\n- Use indexed predicates to preserve NFR query budgets.",
+  "acceptance_criteria": [
+    "GET /api/audit supports actorName, entityName, search, and includeArchived filters",
+    "GET /api/audit/entity/:entityType/:entityId returns complete chronological history for one entity",
+    "GET /api/audit/actions returns tenant-scoped distinct action values",
+    "GET /api/audit/entity-types returns tenant-scoped distinct entity types",
+    "Query paths correctly UNION archive data when includeArchived=true and maintain pagination/sorting behavior"
+  ],
+  "branch": "agent/backend/issue-258",
+  "base_branch": "agent/backend/issue-257",
+  "dependencies_met": true,
+  "related_tickets": [250, 252, 262],
+  "architectural_notes": "Stack on agent/backend/issue-257 (tip of current chain). The audit schema and writeAuditEntry are available from the chain. Existing audit routes are in services/orders/src/routes/audit.routes.ts — extend them. For includeArchived, UNION with auditLogArchive table (defined in T2/PR #382). Add focused query tests for each new filter. Preserve existing response envelope shapes. Use indexed predicates (tenant_id + action, tenant_id + entity_type + entity_id) for performance.",
+  "iteration": 1,
+  "queue_next": {
+    "ticket_number": 259,
+    "ticket_title": "[MVP-18/T10] Backend: Implement hash-chain integrity check endpoint and concurrency guarantees",
+    "branch": "agent/backend/issue-259",
+    "base_branch": "agent/backend/issue-258",
+    "notes": "After completing T9, start T10 on a branch stacked off issue-258. Implement GET /api/audit/integrity-check (tenant_admin only). Recompute hashes using same canonical format as writeAuditEntry. Concurrency test with >=50 parallel writes. Performance target: <2s for 1000 entries."
+  }
+}

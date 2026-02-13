@@ -1,11 +1,15 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
+import { requireRole } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
 
 export const auditRouter = Router();
+
+// ─── Validation Schemas ──────────────────────────────────────────────
 
 const baseAuditFilterSchema = z.object({
   action: z.string().max(100).optional(),
@@ -14,6 +18,14 @@ const baseAuditFilterSchema = z.object({
   userId: z.string().uuid().optional(),
   dateFrom: z.string().datetime().optional(),
   dateTo: z.string().datetime().optional(),
+  actorName: z.string().max(200).optional(),
+  entityName: z.string().max(200).optional(),
+  search: z.string().max(200).optional(),
+  includeArchived: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional()
+    .default('false'),
 });
 
 const listAuditQuerySchema = baseAuditFilterSchema.extend({
@@ -25,10 +37,22 @@ const summaryAuditQuerySchema = baseAuditFilterSchema.extend({
   granularity: z.enum(['day', 'week']).default('day'),
 });
 
+const entityHistoryQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(50),
+  includeArchived: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional()
+    .default('false'),
+});
+
 type AuditFilters = z.infer<typeof baseAuditFilterSchema>;
 
+// ─── Query Helpers ───────────────────────────────────────────────────
+
 function buildAuditConditions(tenantId: string, filters: AuditFilters) {
-  const conditions: any[] = [eq(schema.auditLog.tenantId, tenantId)];
+  const conditions: ReturnType<typeof eq>[] = [eq(schema.auditLog.tenantId, tenantId)];
 
   if (filters.action) {
     conditions.push(eq(schema.auditLog.action, filters.action));
@@ -48,9 +72,42 @@ function buildAuditConditions(tenantId: string, filters: AuditFilters) {
   if (filters.dateTo) {
     conditions.push(sql`${schema.auditLog.timestamp} <= ${new Date(filters.dateTo)}`);
   }
+  if (filters.actorName) {
+    // LEFT JOIN with users is handled at the query level; this adds the ILIKE condition.
+    // The join attaches actor_name as: first_name || ' ' || last_name
+    conditions.push(
+      sql`(${schema.users.firstName} || ' ' || ${schema.users.lastName}) ILIKE ${'%' + filters.actorName + '%'}`
+    );
+  }
+  if (filters.entityName) {
+    // Search across JSONB metadata text representation for entity name fields
+    conditions.push(
+      sql`CAST(${schema.auditLog.metadata} AS TEXT) ILIKE ${'%' + filters.entityName + '%'}`
+    );
+  }
+  if (filters.search) {
+    // General text search across action, entity_type, and metadata
+    const term = '%' + filters.search + '%';
+    conditions.push(
+      sql`(
+        ${schema.auditLog.action} ILIKE ${term}
+        OR ${schema.auditLog.entityType} ILIKE ${term}
+        OR CAST(${schema.auditLog.metadata} AS TEXT) ILIKE ${term}
+      )`
+    );
+  }
 
   return conditions;
 }
+
+/**
+ * Whether any filter requires a LEFT JOIN with auth.users.
+ */
+function needsUserJoin(filters: AuditFilters): boolean {
+  return !!filters.actorName;
+}
+
+// ─── GET / — Paginated audit list with advanced filters ──────────────
 
 auditRouter.get('/', async (req: AuthRequest, res, next) => {
   try {
@@ -59,39 +116,74 @@ auditRouter.get('/', async (req: AuthRequest, res, next) => {
       throw new AppError(401, 'Unauthorized');
     }
 
-    const { page, limit, action, entityType, entityId, userId, dateFrom, dateTo } =
-      listAuditQuerySchema.parse(req.query);
-
+    const parsed = listAuditQuerySchema.parse(req.query);
+    const { page, limit, includeArchived, ...filterFields } = parsed;
     const offset = (page - 1) * limit;
-    const conditions = buildAuditConditions(tenantId, {
-      action,
-      entityType,
-      entityId,
-      userId,
-      dateFrom,
-      dateTo,
-    });
+    const filters: AuditFilters = { ...filterFields, includeArchived };
+    const conditions = buildAuditConditions(tenantId, filters);
+    const joinUsers = needsUserJoin(filters);
 
-    const [countResult] = await db
-      .select({ count: sql<number>`CAST(COUNT(*) AS INTEGER)` })
-      .from(schema.auditLog)
-      .where(and(...conditions));
+    if (includeArchived) {
+      // Use raw SQL UNION ALL to combine live + archive data
+      const { rows, total } = await queryWithArchiveUnion(tenantId, filters, conditions, joinUsers, limit, offset);
+      res.json({
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      });
+      return;
+    }
 
-    const rows = await db
-      .select()
-      .from(schema.auditLog)
-      .where(and(...conditions))
-      .orderBy(desc(schema.auditLog.timestamp))
-      .limit(limit)
-      .offset(offset);
+    // Standard Drizzle query (no UNION needed)
+    let countResult: { count: number } | undefined;
+    let rows: unknown[];
 
+    if (joinUsers) {
+      // actorName filter requires LEFT JOIN with auth.users
+      [countResult] = await (db
+        .select({ count: sql<number>`CAST(COUNT(*) AS INTEGER)` })
+        .from(schema.auditLog)
+        .leftJoin(schema.users, eq(schema.auditLog.userId, schema.users.id))
+        .where(and(...conditions)) as any);
+
+      const rawRows = await db
+        .select()
+        .from(schema.auditLog)
+        .leftJoin(schema.users, eq(schema.auditLog.userId, schema.users.id))
+        .where(and(...conditions))
+        .orderBy(desc(schema.auditLog.timestamp))
+        .limit(limit)
+        .offset(offset);
+
+      // Drizzle returns { audit_log: {...}, users: {...} } shape; flatten to audit row.
+      rows = rawRows.map((r) => r.audit_log);
+    } else {
+      [countResult] = await db
+        .select({ count: sql<number>`CAST(COUNT(*) AS INTEGER)` })
+        .from(schema.auditLog)
+        .where(and(...conditions));
+
+      rows = await db
+        .select()
+        .from(schema.auditLog)
+        .where(and(...conditions))
+        .orderBy(desc(schema.auditLog.timestamp))
+        .limit(limit)
+        .offset(offset);
+    }
+
+    const total = countResult?.count ?? 0;
     res.json({
       data: rows,
       pagination: {
         page,
         limit,
-        total: countResult?.count ?? 0,
-        pages: Math.ceil((countResult?.count ?? 0) / limit),
+        total,
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -101,6 +193,8 @@ auditRouter.get('/', async (req: AuthRequest, res, next) => {
     next(error);
   }
 });
+
+// ─── GET /summary — Unchanged response contract ─────────────────────
 
 auditRouter.get('/summary', async (req: AuthRequest, res, next) => {
   try {
@@ -119,6 +213,7 @@ auditRouter.get('/summary', async (req: AuthRequest, res, next) => {
       userId,
       dateFrom,
       dateTo,
+      includeArchived: false,
     });
 
     const [totalResult] = await db
@@ -290,3 +385,463 @@ auditRouter.get('/summary', async (req: AuthRequest, res, next) => {
     next(error);
   }
 });
+
+// ─── GET /actions — Tenant-scoped distinct action values ─────────────
+
+auditRouter.get('/actions', async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const rows = await db
+      .selectDistinct({ action: schema.auditLog.action })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.tenantId, tenantId))
+      .orderBy(asc(schema.auditLog.action));
+
+    res.json({ data: rows.map((r) => r.action) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── GET /entity-types — Tenant-scoped distinct entity types ─────────
+
+auditRouter.get('/entity-types', async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const rows = await db
+      .selectDistinct({ entityType: schema.auditLog.entityType })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.tenantId, tenantId))
+      .orderBy(asc(schema.auditLog.entityType));
+
+    res.json({ data: rows.map((r) => r.entityType) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── GET /entity/:entityType/:entityId — Entity history ──────────────
+
+auditRouter.get('/entity/:entityType/:entityId', async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const entityType = req.params.entityType as string;
+    const entityId = req.params.entityId as string;
+
+    // Validate entityId is a UUID
+    const uuidSchema = z.string().uuid();
+    const parseResult = uuidSchema.safeParse(entityId);
+    if (!parseResult.success) {
+      throw new AppError(400, 'Invalid entity ID format');
+    }
+
+    const { page, limit, includeArchived } = entityHistoryQuerySchema.parse(req.query);
+    const offset = (page - 1) * limit;
+
+    if (includeArchived) {
+      const { rows, total } = await queryEntityHistoryWithArchive(
+        tenantId, entityType, entityId, limit, offset
+      );
+      res.json({
+        data: rows,
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      });
+      return;
+    }
+
+    const conditions = [
+      eq(schema.auditLog.tenantId, tenantId),
+      eq(schema.auditLog.entityType, entityType),
+      eq(schema.auditLog.entityId, entityId),
+    ];
+
+    const [countResult] = await db
+      .select({ count: sql<number>`CAST(COUNT(*) AS INTEGER)` })
+      .from(schema.auditLog)
+      .where(and(...conditions));
+
+    const rows = await db
+      .select()
+      .from(schema.auditLog)
+      .where(and(...conditions))
+      .orderBy(asc(schema.auditLog.timestamp))
+      .limit(limit)
+      .offset(offset);
+
+    const total = countResult?.count ?? 0;
+    res.json({
+      data: rows,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
+// ─── GET /integrity-check — Hash-chain verification (tenant_admin) ───
+
+const GENESIS_SENTINEL = 'GENESIS';
+const INTEGRITY_BATCH_SIZE = 500;
+
+/**
+ * Recompute the SHA-256 hash for an audit entry using the same canonical
+ * format as writeAuditEntry in @arda/db. This ensures the integrity check
+ * verifies against the exact same algorithm that produced the hashes.
+ *
+ * Format: tenant_id|sequence_number|action|entity_type|entity_id|timestamp|previous_hash
+ */
+function recomputeHash(entry: {
+  tenantId: string;
+  sequenceNumber: number;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  timestamp: Date;
+  previousHash: string | null;
+}): string {
+  const prevHash = entry.previousHash ?? GENESIS_SENTINEL;
+  const entityId = entry.entityId ?? '';
+  const payload = [
+    entry.tenantId,
+    entry.sequenceNumber.toString(),
+    entry.action,
+    entry.entityType,
+    entityId,
+    entry.timestamp.toISOString(),
+    prevHash,
+  ].join('|');
+
+  return createHash('sha256').update(payload).digest('hex');
+}
+
+interface IntegrityViolation {
+  entryId: string;
+  sequenceNumber: number;
+  type: 'hash_mismatch' | 'chain_break' | 'sequence_gap' | 'pending_hash';
+  expected?: string;
+  actual?: string;
+}
+
+auditRouter.get('/integrity-check', requireRole('tenant_admin'), async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const violations: IntegrityViolation[] = [];
+    let totalChecked = 0;
+    let pendingCount = 0;
+    let lastSequence = 0;
+    let lastHash: string | null = null;
+    let hasMore = true;
+    let batchOffset = 0;
+
+    while (hasMore) {
+      const batch = await db
+        .select({
+          id: schema.auditLog.id,
+          tenantId: schema.auditLog.tenantId,
+          action: schema.auditLog.action,
+          entityType: schema.auditLog.entityType,
+          entityId: schema.auditLog.entityId,
+          timestamp: schema.auditLog.timestamp,
+          hashChain: schema.auditLog.hashChain,
+          previousHash: schema.auditLog.previousHash,
+          sequenceNumber: schema.auditLog.sequenceNumber,
+        })
+        .from(schema.auditLog)
+        .where(eq(schema.auditLog.tenantId, tenantId))
+        .orderBy(asc(schema.auditLog.sequenceNumber))
+        .limit(INTEGRITY_BATCH_SIZE)
+        .offset(batchOffset);
+
+      if (batch.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const entry of batch) {
+        totalChecked++;
+
+        // Skip 'PENDING' entries (legacy inserts before writeAuditEntry migration)
+        if (entry.hashChain === 'PENDING') {
+          pendingCount++;
+          lastSequence = entry.sequenceNumber;
+          lastHash = null; // Chain resets after PENDING entries
+          continue;
+        }
+
+        // Check for sequence gaps
+        if (lastSequence > 0 && entry.sequenceNumber !== lastSequence + 1) {
+          violations.push({
+            entryId: entry.id,
+            sequenceNumber: entry.sequenceNumber,
+            type: 'sequence_gap',
+            expected: String(lastSequence + 1),
+            actual: String(entry.sequenceNumber),
+          });
+        }
+
+        // Verify chain link: entry.previousHash should match the last verified hash
+        if (lastHash !== null && entry.previousHash !== lastHash) {
+          violations.push({
+            entryId: entry.id,
+            sequenceNumber: entry.sequenceNumber,
+            type: 'chain_break',
+            expected: lastHash,
+            actual: entry.previousHash ?? 'null',
+          });
+        }
+
+        // Recompute and verify the hash
+        const expected = recomputeHash({
+          tenantId: entry.tenantId,
+          sequenceNumber: entry.sequenceNumber,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          timestamp: entry.timestamp,
+          previousHash: entry.previousHash,
+        });
+
+        if (entry.hashChain !== expected) {
+          violations.push({
+            entryId: entry.id,
+            sequenceNumber: entry.sequenceNumber,
+            type: 'hash_mismatch',
+            expected,
+            actual: entry.hashChain,
+          });
+        }
+
+        lastSequence = entry.sequenceNumber;
+        lastHash = entry.hashChain;
+      }
+
+      batchOffset += INTEGRITY_BATCH_SIZE;
+      if (batch.length < INTEGRITY_BATCH_SIZE) {
+        hasMore = false;
+      }
+    }
+
+    res.json({
+      data: {
+        totalChecked,
+        pendingCount,
+        violationCount: violations.length,
+        valid: violations.length === 0,
+        violations: violations.slice(0, 100), // Cap violations to avoid huge responses
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── Archive UNION Helpers ───────────────────────────────────────────
+
+/**
+ * Build a WHERE clause fragment for raw SQL queries against audit tables.
+ * Returns [sqlFragment, params] for use in parameterized queries.
+ */
+function buildRawWhereClause(
+  tenantId: string,
+  filters: AuditFilters,
+  tableAlias: string,
+): { fragment: string; params: unknown[] } {
+  const clauses: string[] = [`${tableAlias}.tenant_id = $1`];
+  const params: unknown[] = [tenantId];
+  let idx = 2;
+
+  if (filters.action) {
+    clauses.push(`${tableAlias}.action = $${idx}`);
+    params.push(filters.action);
+    idx++;
+  }
+  if (filters.entityType) {
+    clauses.push(`${tableAlias}.entity_type = $${idx}`);
+    params.push(filters.entityType);
+    idx++;
+  }
+  if (filters.entityId) {
+    clauses.push(`${tableAlias}.entity_id = $${idx}`);
+    params.push(filters.entityId);
+    idx++;
+  }
+  if (filters.userId) {
+    clauses.push(`${tableAlias}.user_id = $${idx}`);
+    params.push(filters.userId);
+    idx++;
+  }
+  if (filters.dateFrom) {
+    clauses.push(`${tableAlias}."timestamp" >= $${idx}`);
+    params.push(new Date(filters.dateFrom));
+    idx++;
+  }
+  if (filters.dateTo) {
+    clauses.push(`${tableAlias}."timestamp" <= $${idx}`);
+    params.push(new Date(filters.dateTo));
+    idx++;
+  }
+  if (filters.entityName) {
+    clauses.push(`CAST(${tableAlias}.metadata AS TEXT) ILIKE $${idx}`);
+    params.push('%' + filters.entityName + '%');
+    idx++;
+  }
+  if (filters.search) {
+    clauses.push(
+      `(${tableAlias}.action ILIKE $${idx} OR ${tableAlias}.entity_type ILIKE $${idx} OR CAST(${tableAlias}.metadata AS TEXT) ILIKE $${idx})`
+    );
+    params.push('%' + filters.search + '%');
+    idx++;
+  }
+
+  return { fragment: clauses.join(' AND '), params };
+}
+
+/**
+ * UNION ALL query combining audit_log + audit_log_archive with pagination.
+ * actorName filter is not supported in archive UNION queries (archive has no
+ * user join — actor names come from live data).
+ */
+async function queryWithArchiveUnion(
+  tenantId: string,
+  filters: AuditFilters,
+  _conditions: ReturnType<typeof eq>[],
+  _joinUsers: boolean,
+  limit: number,
+  offset: number,
+): Promise<{ rows: unknown[]; total: number }> {
+  const { fragment: liveWhere, params: liveParams } = buildRawWhereClause(tenantId, filters, 'a');
+
+  // Archive uses the same base filters (excluding actorName which requires a JOIN)
+  const archiveFilters = { ...filters, actorName: undefined };
+  const { fragment: archiveWhere, params: archiveParams } = buildRawWhereClause(
+    tenantId, archiveFilters, 'a'
+  );
+
+  // Build parameterized UNION query. Archive params are offset by live param count.
+  const archiveOffset = liveParams.length;
+  const reindexedArchiveWhere = archiveWhere.replace(
+    /\$(\d+)/g,
+    (_, n) => `$${parseInt(n) + archiveOffset}`
+  );
+
+  const allParams = [...liveParams, ...archiveParams];
+  const limitIdx = allParams.length + 1;
+  const offsetIdx = allParams.length + 2;
+  allParams.push(limit, offset);
+
+  const countSql = `
+    SELECT CAST(COUNT(*) AS INTEGER) AS count FROM (
+      SELECT a.id FROM audit.audit_log a WHERE ${liveWhere}
+      UNION ALL
+      SELECT a.id FROM audit.audit_log_archive a WHERE ${reindexedArchiveWhere}
+    ) combined
+  `;
+
+  const dataSql = `
+    SELECT * FROM (
+      SELECT a.* FROM audit.audit_log a WHERE ${liveWhere}
+      UNION ALL
+      SELECT a.* FROM audit.audit_log_archive a WHERE ${reindexedArchiveWhere}
+    ) combined
+    ORDER BY "timestamp" DESC
+    LIMIT $${limitIdx} OFFSET $${offsetIdx}
+  `;
+
+  const [countRows, dataRows] = await Promise.all([
+    db.execute(sql.raw(buildParameterizedQuery(countSql, allParams))),
+    db.execute(sql.raw(buildParameterizedQuery(dataSql, allParams))),
+  ]);
+
+  const total = (countRows as any)[0]?.count ?? 0;
+  return { rows: dataRows as unknown[], total };
+}
+
+/**
+ * Entity history query with UNION ALL against archive table.
+ */
+async function queryEntityHistoryWithArchive(
+  tenantId: string,
+  entityType: string,
+  entityId: string,
+  limit: number,
+  offset: number,
+): Promise<{ rows: unknown[]; total: number }> {
+  const filters: AuditFilters = { entityType, entityId, includeArchived: true };
+  const { fragment: liveWhere, params: liveParams } = buildRawWhereClause(tenantId, filters, 'a');
+  const { fragment: archiveWhere, params: archiveParams } = buildRawWhereClause(tenantId, filters, 'a');
+
+  const archiveOffset = liveParams.length;
+  const reindexedArchiveWhere = archiveWhere.replace(
+    /\$(\d+)/g,
+    (_, n) => `$${parseInt(n) + archiveOffset}`
+  );
+
+  const allParams = [...liveParams, ...archiveParams];
+  const limitIdx = allParams.length + 1;
+  const offsetIdx = allParams.length + 2;
+  allParams.push(limit, offset);
+
+  const countSql = `
+    SELECT CAST(COUNT(*) AS INTEGER) AS count FROM (
+      SELECT a.id FROM audit.audit_log a WHERE ${liveWhere}
+      UNION ALL
+      SELECT a.id FROM audit.audit_log_archive a WHERE ${reindexedArchiveWhere}
+    ) combined
+  `;
+
+  const dataSql = `
+    SELECT * FROM (
+      SELECT a.* FROM audit.audit_log a WHERE ${liveWhere}
+      UNION ALL
+      SELECT a.* FROM audit.audit_log_archive a WHERE ${reindexedArchiveWhere}
+    ) combined
+    ORDER BY "timestamp" ASC
+    LIMIT $${limitIdx} OFFSET $${offsetIdx}
+  `;
+
+  const [countRows, dataRows] = await Promise.all([
+    db.execute(sql.raw(buildParameterizedQuery(countSql, allParams))),
+    db.execute(sql.raw(buildParameterizedQuery(dataSql, allParams))),
+  ]);
+
+  const total = (countRows as any)[0]?.count ?? 0;
+  return { rows: dataRows as unknown[], total };
+}
+
+/**
+ * Convert a parameterized SQL string ($1, $2, ...) into a raw SQL string
+ * with properly escaped literal values. This is needed because Drizzle's
+ * sql.raw() does not support parameterized queries.
+ *
+ * SECURITY: All values are SQL-escaped. Strings use single-quote escaping,
+ * Dates use ISO format, numbers are validated.
+ */
+function buildParameterizedQuery(query: string, params: unknown[]): string {
+  return query.replace(/\$(\d+)/g, (_, n) => {
+    const val = params[parseInt(n) - 1];
+    if (val === null || val === undefined) return 'NULL';
+    if (typeof val === 'number') return String(val);
+    if (val instanceof Date) return `'${val.toISOString()}'`;
+    // Escape single quotes in string values
+    return `'${String(val).replace(/'/g, "''")}'`;
+  });
+}

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import * as authService from '../services/auth.service.js';
 import { authMiddleware, type AuthRequest } from '@arda/auth-utils';
@@ -7,6 +7,29 @@ import { eq } from 'drizzle-orm';
 import { config } from '@arda/config';
 import crypto from 'crypto';
 import { mobileImportRouter } from './mobile-import.routes.js';
+import { AuthAuditAction, writeAuthAuditEntry, type AuthAuditContext } from '../services/auth-audit.js';
+
+/**
+ * Extract audit context from any request (works for both authenticated and unauthenticated).
+ * For unauthenticated routes (login, register, etc.), this provides IP/UA without userId.
+ */
+function extractAuditContext(req: Request): AuthAuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+
+  const authReq = req as AuthRequest;
+  return {
+    userId: authReq.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 export const authRouter = Router();
 authRouter.use('/mobile-import', mobileImportRouter);
@@ -317,7 +340,8 @@ export async function handleGoogleLinkCallback(req: any, res: any): Promise<void
 authRouter.post('/register', async (req, res, next) => {
   try {
     const input = registerSchema.parse(req.body);
-    const result = await authService.register(input);
+    const auditCtx = extractAuditContext(req);
+    const result = await authService.register(input, auditCtx);
     res.status(201).json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -335,7 +359,8 @@ authRouter.post('/register', async (req, res, next) => {
 authRouter.post('/login', async (req, res, next) => {
   try {
     const input = loginSchema.parse(req.body);
-    const result = await authService.login(input);
+    const auditCtx = extractAuditContext(req);
+    const result = await authService.login(input, auditCtx);
     res.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -353,7 +378,8 @@ authRouter.post('/login', async (req, res, next) => {
 authRouter.post('/refresh', async (req, res, next) => {
   try {
     const input = refreshSchema.parse(req.body);
-    const tokens = await authService.refreshAccessToken(input.refreshToken);
+    const auditCtx = extractAuditContext(req);
+    const tokens = await authService.refreshAccessToken(input.refreshToken, auditCtx);
     res.json(tokens);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -371,7 +397,8 @@ authRouter.post('/refresh', async (req, res, next) => {
 authRouter.post('/forgot-password', async (req, res, next) => {
   try {
     const input = forgotPasswordSchema.parse(req.body);
-    await authService.forgotPassword({ email: input.email });
+    const auditCtx = extractAuditContext(req);
+    await authService.forgotPassword({ email: input.email }, auditCtx);
 
     res.json({
       message:
@@ -393,10 +420,11 @@ authRouter.post('/forgot-password', async (req, res, next) => {
 authRouter.post('/reset-password', async (req, res, next) => {
   try {
     const input = resetPasswordSchema.parse(req.body);
+    const auditCtx = extractAuditContext(req);
     await authService.resetPassword({
       token: input.token,
       newPassword: input.newPassword,
-    });
+    }, auditCtx);
 
     res.json({ message: 'Password reset successful' });
   } catch (err) {
@@ -420,8 +448,9 @@ authRouter.post('/google', async (req, res, next) => {
       idToken: z.string().min(1, 'Google ID token is required'),
     });
     const { idToken } = googleTokenSchema.parse(req.body);
+    const auditCtx = extractAuditContext(req);
     const profile = await authService.verifyGoogleIdToken(idToken);
-    const result = await authService.handleGoogleOAuth(profile);
+    const result = await authService.handleGoogleOAuth(profile, auditCtx);
     res.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -646,6 +675,19 @@ authRouter.post('/logout', authMiddleware, async (req: AuthRequest, res, next) =
       .update(schema.refreshTokens)
       .set({ revokedAt: new Date() })
       .where(eq(schema.refreshTokens.userId, req.user!.sub));
+
+    // Audit: user logout
+    const auditCtx = extractAuditContext(req);
+    await writeAuthAuditEntry(db, {
+      tenantId: req.user!.tenantId,
+      action: AuthAuditAction.USER_LOGOUT,
+      entityType: 'user',
+      entityId: req.user!.sub,
+      userId: req.user!.sub,
+      metadata: { tokensRevoked: true },
+      ipAddress: auditCtx.ipAddress,
+      userAgent: auditCtx.userAgent,
+    });
 
     res.json({ message: 'Logged out successfully' });
   } catch (err) {

@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import {
   hashPassword,
   verifyPassword,
@@ -12,6 +12,11 @@ import { OAuth2Client } from 'google-auth-library';
 import { config } from '@arda/config';
 import crypto from 'crypto';
 import { sendPasswordResetEmail } from './email.service.js';
+import {
+  AuthAuditAction,
+  writeAuthAuditEntry,
+  type AuthAuditContext,
+} from './auth-audit.js';
 
 const { users, tenants, refreshTokens, oauthAccounts, passwordResetTokens } = schema;
 const PASSWORD_RESET_EXPIRY_MINUTES = 60;
@@ -365,7 +370,7 @@ interface OrderHistoryAggregate {
 }
 
 // ─── Register (Creates Tenant + Admin User) ──────────────────────────
-export async function register(input: RegisterInput): Promise<AuthResponse> {
+export async function register(input: RegisterInput, auditCtx?: AuthAuditContext): Promise<AuthResponse> {
   const normalizedEmail = input.email.trim().toLowerCase();
 
   // Check if email already exists across any tenant
@@ -416,6 +421,19 @@ export async function register(input: RegisterInput): Promise<AuthResponse> {
       })
       .returning();
 
+    // Audit: user registered
+    await writeAuthAuditEntry(tx, {
+      tenantId: tenant.id,
+      action: AuthAuditAction.USER_REGISTERED,
+      entityType: 'user',
+      entityId: user.id,
+      userId: user.id,
+      newState: { email: user.email, role: user.role, tenantId: tenant.id },
+      metadata: { method: 'password', companyName: input.companyName },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
+
     return { tenant, user };
   });
 
@@ -437,7 +455,7 @@ export async function register(input: RegisterInput): Promise<AuthResponse> {
 }
 
 // ─── Login ────────────────────────────────────────────────────────────
-export async function login(input: LoginInput): Promise<AuthResponse> {
+export async function login(input: LoginInput, auditCtx?: AuthAuditContext): Promise<AuthResponse> {
   const normalizedEmail = input.email.trim().toLowerCase();
 
   // Find user by email (with tenant data)
@@ -447,15 +465,39 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
   });
 
   if (!user || !user.passwordHash) {
+    // Audit: login failed — unknown email (no tenant context available)
+    // Cannot write audit entry without tenantId; skip audit for unknown accounts.
     throw new AppError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
   }
 
   if (!user.isActive) {
+    // Audit: login failed — account deactivated
+    await writeAuthAuditEntry(db, {
+      tenantId: user.tenantId,
+      action: AuthAuditAction.USER_LOGIN_FAILED,
+      entityType: 'user',
+      entityId: user.id,
+      userId: null,
+      metadata: { email: normalizedEmail, reason: 'account_deactivated' },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
     throw new AppError(403, 'Account is deactivated', 'ACCOUNT_DEACTIVATED');
   }
 
   const isValid = await verifyPassword(input.password, user.passwordHash);
   if (!isValid) {
+    // Audit: login failed — invalid credentials
+    await writeAuthAuditEntry(db, {
+      tenantId: user.tenantId,
+      action: AuthAuditAction.USER_LOGIN_FAILED,
+      entityType: 'user',
+      entityId: user.id,
+      userId: null,
+      metadata: { email: normalizedEmail, reason: 'invalid_credentials' },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
     throw new AppError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
   }
 
@@ -466,6 +508,18 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
     .where(eq(users.id, user.id));
 
   const tokens = await createTokenPair(user.id, user.tenantId, user.email, user.role);
+
+  // Audit: successful login
+  await writeAuthAuditEntry(db, {
+    tenantId: user.tenantId,
+    action: AuthAuditAction.USER_LOGIN,
+    entityType: 'user',
+    entityId: user.id,
+    userId: user.id,
+    metadata: { method: 'password', email: user.email },
+    ipAddress: auditCtx?.ipAddress,
+    userAgent: auditCtx?.userAgent,
+  });
 
   return {
     tokens,
@@ -482,7 +536,7 @@ export async function login(input: LoginInput): Promise<AuthResponse> {
 }
 
 // ─── Forgot Password ──────────────────────────────────────────────────
-export async function forgotPassword(input: ForgotPasswordInput): Promise<void> {
+export async function forgotPassword(input: ForgotPasswordInput, auditCtx?: AuthAuditContext): Promise<void> {
   const normalizedEmail = input.email.trim().toLowerCase();
   const user = await db.query.users.findFirst({
     where: eq(users.email, normalizedEmail),
@@ -514,6 +568,18 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<void> 
       tokenHash,
       expiresAt,
     });
+
+    // Audit: password reset requested
+    await writeAuthAuditEntry(tx, {
+      tenantId: user.tenantId,
+      action: AuthAuditAction.PASSWORD_RESET_REQUESTED,
+      entityType: 'user',
+      entityId: user.id,
+      userId: user.id,
+      metadata: { email: user.email },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
   });
 
   const appUrl = config.APP_URL.replace(/\/+$/, '');
@@ -532,7 +598,7 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<void> 
 }
 
 // ─── Reset Password ───────────────────────────────────────────────────
-export async function resetPassword(input: ResetPasswordInput): Promise<void> {
+export async function resetPassword(input: ResetPasswordInput, auditCtx?: AuthAuditContext): Promise<void> {
   const tokenHash = hashToken(input.token);
   const resetRecord = await db.query.passwordResetTokens.findFirst({
     where: and(
@@ -593,11 +659,23 @@ export async function resetPassword(input: ResetPasswordInput): Promise<void> {
           isNull(refreshTokens.revokedAt)
         )
       );
+
+    // Audit: password reset completed + tokens revoked
+    await writeAuthAuditEntry(tx, {
+      tenantId: user.tenantId,
+      action: AuthAuditAction.PASSWORD_RESET_COMPLETED,
+      entityType: 'user',
+      entityId: user.id,
+      userId: user.id,
+      metadata: { email: user.email, tokensRevoked: true },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
   });
 }
 
 // ─── Refresh Token ────────────────────────────────────────────────────
-export async function refreshAccessToken(token: string): Promise<TokenPair> {
+export async function refreshAccessToken(token: string, auditCtx?: AuthAuditContext): Promise<TokenPair> {
   // Verify the refresh token JWT
   let payload;
   try {
@@ -626,6 +704,24 @@ export async function refreshAccessToken(token: string): Promise<TokenPair> {
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
       .where(eq(refreshTokens.userId, payload.sub));
+
+    // Audit: token replay detected — security event
+    const replayUser = await db.query.users.findFirst({
+      where: eq(users.id, payload.sub),
+    });
+    if (replayUser) {
+      await writeAuthAuditEntry(db, {
+        tenantId: replayUser.tenantId,
+        action: AuthAuditAction.TOKEN_REPLAY_DETECTED,
+        entityType: 'token',
+        entityId: tokenRecord.id,
+        userId: payload.sub,
+        metadata: { reason: 'revoked_token_reuse' },
+        ipAddress: auditCtx?.ipAddress,
+        userAgent: auditCtx?.userAgent,
+      });
+    }
+
     throw new AppError(401, 'Refresh token has been revoked', 'REFRESH_TOKEN_REVOKED');
   }
 
@@ -653,13 +749,27 @@ export async function refreshAccessToken(token: string): Promise<TokenPair> {
       .where(eq(refreshTokens.id, tokenRecord.id));
 
     // Create new token pair
-    return createTokenPair(
+    const pair = await createTokenPair(
       user.id,
       user.tenantId,
       user.email,
       user.role,
       tx as unknown as typeof db
     );
+
+    // Audit: token refreshed
+    await writeAuthAuditEntry(tx, {
+      tenantId: user.tenantId,
+      action: AuthAuditAction.TOKEN_REFRESHED,
+      entityType: 'token',
+      entityId: tokenRecord.id,
+      userId: user.id,
+      metadata: { method: 'refresh' },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
+
+    return pair;
   });
 
   return newTokens;
@@ -702,7 +812,7 @@ export async function handleGoogleOAuth(profile: {
   firstName: string;
   lastName: string;
   avatarUrl?: string;
-}): Promise<AuthResponse> {
+}, auditCtx?: AuthAuditContext): Promise<AuthResponse> {
   // Check if there's an existing OAuth account
   const existingOAuth = await db.query.oauthAccounts.findFirst({
     where: and(
@@ -716,6 +826,17 @@ export async function handleGoogleOAuth(profile: {
     // Existing user — log them in
     const user = existingOAuth.user;
     if (!user.isActive) {
+      // Audit: Google login failed — account deactivated
+      await writeAuthAuditEntry(db, {
+        tenantId: user.tenantId,
+        action: AuthAuditAction.USER_LOGIN_FAILED,
+        entityType: 'user',
+        entityId: user.id,
+        userId: null,
+        metadata: { email: user.email, method: 'google', reason: 'account_deactivated' },
+        ipAddress: auditCtx?.ipAddress,
+        userAgent: auditCtx?.userAgent,
+      });
       throw new AppError(403, 'Account is deactivated', 'ACCOUNT_DEACTIVATED');
     }
 
@@ -725,6 +846,19 @@ export async function handleGoogleOAuth(profile: {
       .where(eq(users.id, user.id));
 
     const tokens = await createTokenPair(user.id, user.tenantId, user.email, user.role);
+
+    // Audit: Google OAuth login (existing account)
+    await writeAuthAuditEntry(db, {
+      tenantId: user.tenantId,
+      action: AuthAuditAction.OAUTH_GOOGLE_LOGIN,
+      entityType: 'user',
+      entityId: user.id,
+      userId: user.id,
+      metadata: { method: 'google', email: user.email },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
+
     return {
       tokens,
       user: {
@@ -759,6 +893,19 @@ export async function handleGoogleOAuth(profile: {
       existingUser.email,
       existingUser.role
     );
+
+    // Audit: Google OAuth linked to existing account + login
+    await writeAuthAuditEntry(db, {
+      tenantId: existingUser.tenantId,
+      action: AuthAuditAction.OAUTH_GOOGLE_LINKED,
+      entityType: 'user',
+      entityId: existingUser.id,
+      userId: existingUser.id,
+      metadata: { method: 'google', email: existingUser.email, autoLinked: true },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
+    });
+
     return {
       tokens,
       user: {
@@ -804,6 +951,19 @@ export async function handleGoogleOAuth(profile: {
       userId: user.id,
       provider: 'google',
       providerAccountId: profile.googleId,
+    });
+
+    // Audit: new user registered via Google OAuth
+    await writeAuthAuditEntry(tx, {
+      tenantId: tenant.id,
+      action: AuthAuditAction.OAUTH_GOOGLE_REGISTERED,
+      entityType: 'user',
+      entityId: user.id,
+      userId: user.id,
+      newState: { email: user.email, role: user.role, tenantId: tenant.id },
+      metadata: { method: 'google', companyName: tenant.name },
+      ipAddress: auditCtx?.ipAddress,
+      userAgent: auditCtx?.userAgent,
     });
 
     return { tenant, user };

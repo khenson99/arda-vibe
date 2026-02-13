@@ -1,7 +1,23 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
+import type { AuditContext } from '@arda/auth-utils';
+
+function getRequestAuditContext(req: Request): AuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : (forwarded as string | undefined)?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+  return {
+    userId: req.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 export const preferencesRouter = Router();
 
@@ -94,8 +110,28 @@ preferencesRouter.put('/', async (req, res, next) => {
   try {
     const userId = req.user!.sub;
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     const body = preferencesBodySchema.parse(req.body);
+
+    // Snapshot previous state before mutation
+    const previousPrefs = await db
+      .select()
+      .from(schema.notificationPreferences)
+      .where(
+        and(
+          eq(schema.notificationPreferences.tenantId, tenantId),
+          eq(schema.notificationPreferences.userId, userId)
+        )
+      );
+
+    const previousState: Record<string, Record<string, boolean>> = {};
+    for (const pref of previousPrefs) {
+      const channel = DB_TO_API_CHANNEL[pref.channel as keyof typeof DB_TO_API_CHANNEL];
+      if (!channel) continue;
+      if (!previousState[pref.notificationType]) previousState[pref.notificationType] = {};
+      previousState[pref.notificationType][channel] = pref.isEnabled;
+    }
 
     const prefs = await db.transaction(async (tx) => {
       // Process each notification type and its channel preferences
@@ -136,6 +172,19 @@ preferencesRouter.put('/', async (req, res, next) => {
           }
         }
       }
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'notification_preference.updated',
+        entityType: 'notification_preference',
+        entityId: null,
+        previousState,
+        newState: body.preferences,
+        metadata: { source: 'preferences.update', targetUserId: userId },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
 
       return tx
         .select()

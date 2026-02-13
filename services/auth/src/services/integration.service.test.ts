@@ -23,6 +23,7 @@ const mockDb = vi.hoisted(() => {
     delete: mockDelete,
     query: {
       apiKeys: {
+        findFirst: vi.fn(),
         findMany: vi.fn().mockResolvedValue([]),
       },
       tenants: {
@@ -65,6 +66,8 @@ const mockSchema = vi.hoisted(() => ({
 vi.mock('@arda/db', () => ({
   db: mockDb,
   schema: mockSchema,
+  writeAuditEntry: vi.fn(async () => ({ id: 'audit-1', hashChain: 'mock', sequenceNumber: 1 })),
+  writeAuditEntries: vi.fn(async () => []),
 }));
 
 vi.mock('@arda/config', () => ({
@@ -196,6 +199,12 @@ describe('Integration Service', () => {
 
   describe('revokeApiKey', () => {
     it('should revoke an API key', async () => {
+      mockDb.query.apiKeys.findFirst.mockResolvedValue({
+        id: 'key-1',
+        keyPrefix: 'arda_abc123',
+        isActive: true,
+      });
+
       const mockRevokedKey = {
         id: 'key-1',
         keyPrefix: 'arda_abc123',
@@ -213,10 +222,22 @@ describe('Integration Service', () => {
     });
 
     it('should throw error when API key not found', async () => {
-      mockDb._mocks.updateReturning.mockResolvedValue([]);
+      mockDb.query.apiKeys.findFirst.mockResolvedValue(null);
 
       await expect(integrationService.revokeApiKey('nonexistent', 'tenant-1')).rejects.toThrow(
         'API key not found'
+      );
+    });
+
+    it('should throw error when API key is already revoked', async () => {
+      mockDb.query.apiKeys.findFirst.mockResolvedValue({
+        id: 'key-1',
+        keyPrefix: 'arda_abc123',
+        isActive: false,
+      });
+
+      await expect(integrationService.revokeApiKey('key-1', 'tenant-1')).rejects.toThrow(
+        'API key is already revoked'
       );
     });
   });
