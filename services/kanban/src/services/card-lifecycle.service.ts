@@ -361,7 +361,7 @@ export async function transitionCard(input: {
       entityType: 'kanban_card',
       entityId: cardId,
       previousState: { stage: currentStage, cycleNumber },
-      newState: { stage: toStage, cycleNumber: updatedCard.completedCycles ?? cycleNumber },
+      newState: { stage: toStage, cycleNumber },
       metadata: {
         loopId: card.loopId,
         method,
