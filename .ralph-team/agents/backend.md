@@ -125,6 +125,31 @@ patterns, gotchas, and conventions.
 - Login with unknown email produces no audit entry (no tenantId available for hash chain)
 - FR-05 action constants: user.login, user.login_failed, user.logout, user.registered, user.password_reset_requested, user.password_reset_completed, token.refreshed, token.replay_detected, token.revoked, user.invited, user.role_changed, user.deactivated, user.reactivated, oauth.google_login, oauth.google_linked, oauth.google_registered, api_key.created, api_key.revoked
 
+### Catalog Audit Pattern
+- Actions: part.created, part.updated, part.deactivated, supplier.created, supplier.updated, supplier.part_linked, bom_line.added, bom_line.removed, category.created, category.updated
+- getRequestAuditContext(req) helper in each route file — extracts IP/UA for audit context
+- Field-level diffs: iterate Object.keys(input) for previousState/newState with only changed fields
+- BOM audit metadata includes parent/child partNumber + partName for context
+- Facilities and storage locations are read-only (GET only) — no audit writes needed
+
+### Notifications Audit Pattern
+- Actions: notification.dismissed, notification_preference.updated
+- notification.dismissed: previousState captures {type, isRead}, metadata includes notificationType
+- notification_preference.updated: entityId is null (bulk update), previousState/newState are preference maps
+- Must import `type Request` from 'express' (not use Express.Request global namespace) for getRequestAuditContext
+
+### Audit Query API Pattern
+- Drizzle `selectDistinct()` for distinct value lookups (available since 0.39+)
+- Drizzle LEFT JOIN changes result shape to `{ table_name: {...}, joined: {...} }` — flatten in response
+- Drizzle has no native UNION support — use `db.execute(sql.raw(...))` for UNION ALL queries
+- Boolean query params: `z.enum(['true','false']).transform(v => v === 'true')` with `.default('false')`
+- `buildParameterizedQuery()` converts $N placeholders to SQL-escaped literals for sql.raw()
+- actorName filter: LEFT JOIN auth.users, ILIKE on `firstName || ' ' || lastName`
+- entityName filter: ILIKE on `CAST(metadata AS TEXT)` searches all JSONB values
+- search filter: OR across action, entityType, and metadata text
+- Entity history endpoint returns chronological ASC order
+- Archive UNION: re-index $N params for second subquery (offset by first query's param count)
+
 ### Express Routes
 - Register routers in service index.ts with `app.use(prefix, router)`
 - Middleware order: helmet → cors → express.json → routes → errorHandler
