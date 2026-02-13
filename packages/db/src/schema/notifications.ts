@@ -7,6 +7,7 @@ import {
   boolean,
   jsonb,
   index,
+  uniqueIndex,
   pgEnum,
   integer,
 } from 'drizzle-orm/pg-core';
@@ -84,6 +85,9 @@ export const notificationPreferences = notificationsSchema.table(
   (table) => [
     index('notif_prefs_user_idx').on(table.userId),
     index('notif_prefs_tenant_idx').on(table.tenantId),
+    uniqueIndex('notif_prefs_unique_idx').on(
+      table.tenantId, table.userId, table.notificationType, table.channel
+    ),
   ]
 );
 
@@ -102,6 +106,9 @@ export const tenantDefaultPreferences = notificationsSchema.table(
   (table) => [
     index('tenant_default_prefs_tenant_idx').on(table.tenantId),
     index('tenant_default_prefs_type_idx').on(table.notificationType),
+    uniqueIndex('tenant_default_prefs_unique_idx').on(
+      table.tenantId, table.notificationType, table.channel
+    ),
   ]
 );
 

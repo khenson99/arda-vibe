@@ -17,6 +17,7 @@ import {
   writeAuthAuditEntry,
   type AuthAuditContext,
 } from './auth-audit.js';
+import { initializeUserNotificationPreferences } from './notification-preference-init.js';
 
 const { users, tenants, refreshTokens, oauthAccounts, passwordResetTokens } = schema;
 const PASSWORD_RESET_EXPIRY_MINUTES = 60;

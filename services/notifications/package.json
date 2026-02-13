@@ -19,6 +19,7 @@
     "@arda/config": "*",
     "@arda/db": "*",
     "@arda/events": "*",
+    "@arda/shared-types": "*",
     "@arda/jobs": "*",
     "@arda/observability": "*",
     "@aws-sdk/client-ses": "^3.600.0",

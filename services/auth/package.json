@@ -19,6 +19,7 @@
     "@arda/config": "*",
     "@arda/db": "*",
     "@arda/observability": "*",
+    "@arda/shared-types": "*",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.39.0",
     "express": "^4.21.0",
