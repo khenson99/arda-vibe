@@ -426,8 +426,10 @@ describe('Guardrails Fault Injection', () => {
       mockRedisGet.mockResolvedValue(null);
 
       const ctx = makeEmailContext({ supplierEmail: 'evil@malicious-site.xyz' });
-      const allowedDomains = new Set(['supplier.com', 'trusted-vendor.org']);
-      const result = await checkOutboundGuardrails(redis, ctx, makeLimits(), allowedDomains);
+      const result = await checkOutboundGuardrails(redis, ctx, {
+        ...makeLimits(),
+        allowedEmailDomains: ['supplier.com', 'trusted-vendor.org'],
+      });
       expect(result.violations.some((v) => v.guardrailId === 'O-01')).toBe(true);
     });
   });

@@ -196,7 +196,7 @@ function setupHappyPath() {
 /** Extract all publish calls matching a given event type */
 function getSecurityEvents(eventType: string) {
   return mockPublish.mock.calls
-    .map(([event]: [Record<string, unknown>]) => event)
+    .map((call) => call[0] as Record<string, unknown>)
     .filter((e) => e.type === eventType);
 }
 
@@ -658,7 +658,7 @@ describe('Security Fault Injection', () => {
       setupHappyPath();
       await orchestrator.executePipeline(makeJob());
 
-      const allCalls = mockPublish.mock.calls.map(([e]: [Record<string, unknown>]) => e);
+      const allCalls = mockPublish.mock.calls.map((call) => call[0] as Record<string, unknown>);
       for (const event of allCalls) {
         if (typeof event.type === 'string' && (event.type as string).startsWith('security.')) {
           expect(event.timestamp).toBeDefined();
