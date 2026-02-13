@@ -24,6 +24,7 @@ import {
 import { ArrowLeft, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { parseApiError } from "@/lib/api-client";
+import { EntityActivitySection } from "@/components/audit/entity-activity-section";
 
 /* ── Props ─────────────────────────────────────────────────── */
 
@@ -34,7 +35,7 @@ interface Props {
 
 /* ── Tab type ──────────────────────────────────────────────── */
 
-type DetailTab = "lines" | "timeline" | "receiving";
+type DetailTab = "lines" | "timeline" | "receiving" | "activity";
 
 /* ── Component ─────────────────────────────────────────────── */
 
@@ -174,6 +175,12 @@ export function PODetailRoute({ session, onUnauthorized }: Props) {
           >
             Receiving{receipts.length > 0 ? ` (${receipts.length})` : ""}
           </TabsTrigger>
+          <TabsTrigger
+            active={activeTab === "activity"}
+            onClick={() => setActiveTab("activity")}
+          >
+            Activity
+          </TabsTrigger>
         </TabsList>
 
         {activeTab === "lines" && (
@@ -191,6 +198,17 @@ export function PODetailRoute({ session, onUnauthorized }: Props) {
         {activeTab === "receiving" && (
           <TabsContent>
             <POReceiving receipts={receipts} loading={receiptsLoading} />
+          </TabsContent>
+        )}
+
+        {activeTab === "activity" && (
+          <TabsContent>
+            <EntityActivitySection
+              token={session.tokens.accessToken}
+              entityType="purchase_order"
+              entityId={id ?? ""}
+              onUnauthorized={onUnauthorized}
+            />
           </TabsContent>
         )}
       </Tabs>

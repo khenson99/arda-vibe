@@ -774,3 +774,81 @@ export interface UnifiedOrder {
   updatedAt: string;
   expectedDate: string | null;
 }
+
+/* ── Audit Log ──────────────────────────────────────────────── */
+
+export interface AuditLogEntry {
+  id: string;
+  tenantId: string;
+  userId: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  previousState: Record<string, unknown> | null;
+  newState: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  timestamp: string;
+  hashChain: string;
+  previousHash: string | null;
+  sequenceNumber: number;
+}
+
+export interface AuditPagination {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+}
+
+export interface AuditListResponse {
+  data: AuditLogEntry[];
+  pagination: AuditPagination;
+}
+
+export interface AuditListFilters {
+  page?: number;
+  limit?: number;
+  action?: string;
+  entityType?: string;
+  entityId?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  actorName?: string;
+  entityName?: string;
+  search?: string;
+  includeArchived?: boolean;
+}
+
+export interface AuditSummaryData {
+  total: number;
+  byAction: Array<{ action: string; count: number }>;
+  byEntityType: Array<{ entityType: string; count: number }>;
+  byTimeBucket: Array<{ bucket: string; count: number }>;
+  topActions: Array<{ action: string; count: number }>;
+  statusTransitionFunnel: Array<{ status: string; count: number }>;
+  recentAnomalies: Array<{
+    action: string;
+    severity: string;
+    previousCount: number;
+    currentCount: number;
+    percentChange: number | null;
+  }>;
+}
+
+export interface AuditSummaryResponse {
+  data: AuditSummaryData;
+  filters: Record<string, unknown>;
+}
+
+export interface AuditSummaryFilters {
+  action?: string;
+  entityType?: string;
+  entityId?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  granularity?: "hour" | "day" | "week" | "month";
+}
