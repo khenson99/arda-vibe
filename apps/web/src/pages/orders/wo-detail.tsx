@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner";
 import { parseApiError } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { EntityActivitySection } from "@/components/audit/entity-activity-section";
 
 /* ── Props ─────────────────────────────────────────────────── */
 
@@ -88,7 +89,7 @@ function formatDateTime(iso: string | null): string {
 
 /* ── Tab type ──────────────────────────────────────────────── */
 
-type DetailTab = "overview" | "routing" | "production";
+type DetailTab = "overview" | "routing" | "production" | "activity";
 
 /* ── Skeleton ─────────────────────────────────────────────── */
 
@@ -352,6 +353,9 @@ export function WODetailRoute({ session, onUnauthorized }: Props) {
           <TabsTrigger active={activeTab === "production"} onClick={() => setActiveTab("production")}>
             Production
           </TabsTrigger>
+          <TabsTrigger active={activeTab === "activity"} onClick={() => setActiveTab("activity")}>
+            Activity
+          </TabsTrigger>
         </TabsList>
 
         {activeTab === "overview" && (
@@ -375,6 +379,17 @@ export function WODetailRoute({ session, onUnauthorized }: Props) {
             <ProductionTab
               wo={wo}
               onReport={reportProduction}
+            />
+          </TabsContent>
+        )}
+
+        {activeTab === "activity" && (
+          <TabsContent>
+            <EntityActivitySection
+              token={session.tokens.accessToken}
+              entityType="work_order"
+              entityId={id ?? ""}
+              onUnauthorized={onUnauthorized}
             />
           </TabsContent>
         )}
