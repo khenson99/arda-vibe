@@ -20,6 +20,8 @@
     "@arda/db": "*",
     "@arda/events": "*",
     "@arda/observability": "*",
+    "@aws-sdk/client-ses": "^3.600.0",
+    "@sendgrid/mail": "^8.1.0",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.39.0",
     "express": "^4.21.0",
