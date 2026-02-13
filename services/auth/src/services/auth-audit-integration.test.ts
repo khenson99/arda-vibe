@@ -87,6 +87,7 @@ const mockDb = vi.hoisted(() => {
         findFirst: vi.fn(),
       },
       apiKeys: {
+        findFirst: vi.fn(),
         findMany: vi.fn().mockResolvedValue([]),
       },
     },
@@ -868,6 +869,12 @@ describe('Auth Audit Integration', () => {
 
   describe('revokeApiKey', () => {
     it('should write api_key.revoked audit entry with state transition', async () => {
+      // findFirst returns existing active key (prior state)
+      mockDb.query.apiKeys.findFirst.mockResolvedValue({
+        id: 'api-key-1',
+        keyPrefix: 'arda_abc12345',
+        isActive: true,
+      });
       mockDb._mocks.updateReturning.mockResolvedValue([{
         id: 'api-key-1',
         keyPrefix: 'arda_abc12345',
@@ -885,6 +892,22 @@ describe('Auth Audit Integration', () => {
       expect(entry!.previousState).toEqual({ isActive: true, keyPrefix: 'arda_abc12345' });
       expect(entry!.newState).toEqual({ isActive: false, keyPrefix: 'arda_abc12345' });
       expect(entry!.ipAddress).toBe('192.168.1.100');
+    });
+
+    it('should throw when revoking an already-revoked key', async () => {
+      mockDb.query.apiKeys.findFirst.mockResolvedValue({
+        id: 'api-key-1',
+        keyPrefix: 'arda_abc12345',
+        isActive: false,
+      });
+
+      await expect(
+        integrationService.revokeApiKey('api-key-1', 'tenant-123', 'admin-user-123', auditCtx),
+      ).rejects.toThrow('API key is already revoked');
+
+      // No audit entry should be written for a no-op revoke
+      const entry = findAuditEntry('api_key.revoked');
+      expect(entry).toBeUndefined();
     });
   });
 });
