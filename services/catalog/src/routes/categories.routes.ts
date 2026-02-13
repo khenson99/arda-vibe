@@ -1,9 +1,24 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
-import type { AuthRequest } from '@arda/auth-utils';
+import { db, schema, writeAuditEntry } from '@arda/db';
+import type { AuthRequest, AuditContext } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
+
+function getRequestAuditContext(req: AuthRequest): AuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+  return {
+    userId: req.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 export const categoriesRouter = Router();
 const { partCategories } = schema;
@@ -33,10 +48,33 @@ categoriesRouter.post('/', async (req: AuthRequest, res, next) => {
       })
       .parse(req.body);
 
-    const [created] = await db
-      .insert(partCategories)
-      .values({ ...input, tenantId: req.user!.tenantId })
-      .returning();
+    const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
+
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(partCategories)
+        .values({ ...input, tenantId })
+        .returning();
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'category.created',
+        entityType: 'category',
+        entityId: row.id,
+        newState: {
+          name: row.name,
+          parentCategoryId: row.parentCategoryId,
+          sortOrder: row.sortOrder,
+        },
+        metadata: { source: 'categories.create' },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
 
     res.status(201).json(created);
   } catch (err) {
@@ -60,15 +98,49 @@ categoriesRouter.patch('/:id', async (req: AuthRequest, res, next) => {
       })
       .parse(req.body);
 
-    const [updated] = await db
-      .update(partCategories)
-      .set({ ...input, updatedAt: new Date() })
-      .where(
-        and(eq(partCategories.id, req.params.id as string), eq(partCategories.tenantId, req.user!.tenantId))
-      )
-      .returning();
+    const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
-    if (!updated) throw new AppError(404, 'Category not found');
+    // Read prior state before mutation
+    const existing = await db.query.partCategories.findFirst({
+      where: and(eq(partCategories.id, req.params.id as string), eq(partCategories.tenantId, tenantId)),
+    });
+    if (!existing) throw new AppError(404, 'Category not found');
+
+    // Build field-level snapshots for changed fields only
+    const changedFields = Object.keys(input) as (keyof typeof input)[];
+    const previousState: Record<string, unknown> = {};
+    const newState: Record<string, unknown> = {};
+    for (const key of changedFields) {
+      previousState[key] = (existing as Record<string, unknown>)[key];
+      newState[key] = input[key];
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(partCategories)
+        .set({ ...input, updatedAt: new Date() })
+        .where(
+          and(eq(partCategories.id, req.params.id as string), eq(partCategories.tenantId, tenantId))
+        )
+        .returning();
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'category.updated',
+        entityType: 'category',
+        entityId: row.id,
+        previousState,
+        newState,
+        metadata: { source: 'categories.update', categoryName: row.name },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
+
     res.json(updated);
   } catch (err) {
     if (err instanceof z.ZodError) {
