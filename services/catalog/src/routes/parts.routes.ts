@@ -1,9 +1,24 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { eq, and, ilike, sql } from 'drizzle-orm';
-import { db, schema } from '@arda/db';
-import type { AuthRequest } from '@arda/auth-utils';
+import { db, schema, writeAuditEntry } from '@arda/db';
+import type { AuthRequest, AuditContext } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
+
+function getRequestAuditContext(req: AuthRequest): AuditContext {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+  return {
+    userId: req.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 export const partsRouter = Router();
 const { parts } = schema;
@@ -131,6 +146,7 @@ partsRouter.post('/', async (req: AuthRequest, res, next) => {
   try {
     const input = createPartSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     // Check for duplicate part number within tenant
     const existing = await db.query.parts.findFirst({
@@ -140,10 +156,33 @@ partsRouter.post('/', async (req: AuthRequest, res, next) => {
       throw new AppError(409, `Part number "${input.partNumber}" already exists`, 'DUPLICATE_PART_NUMBER');
     }
 
-    const [created] = await db
-      .insert(parts)
-      .values({ ...input, tenantId })
-      .returning();
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(parts)
+        .values({ ...input, tenantId })
+        .returning();
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'part.created',
+        entityType: 'part',
+        entityId: row.id,
+        newState: {
+          partNumber: row.partNumber,
+          name: row.name,
+          type: row.type,
+          uom: row.uom,
+          categoryId: row.categoryId,
+          isActive: row.isActive,
+        },
+        metadata: { source: 'parts.create' },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
 
     res.status(201).json(created);
   } catch (err) {
@@ -160,6 +199,7 @@ partsRouter.patch('/:id', async (req: AuthRequest, res, next) => {
   try {
     const input = updatePartSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     // Verify the part exists and belongs to this tenant
     const existing = await db.query.parts.findFirst({
@@ -179,11 +219,37 @@ partsRouter.patch('/:id', async (req: AuthRequest, res, next) => {
       }
     }
 
-    const [updated] = await db
-      .update(parts)
-      .set({ ...input, updatedAt: new Date() })
-      .where(and(eq(parts.id, req.params.id as string), eq(parts.tenantId, tenantId)))
-      .returning();
+    // Build field-level snapshots for changed fields only
+    const changedFields = Object.keys(input) as (keyof typeof input)[];
+    const previousState: Record<string, unknown> = {};
+    const newState: Record<string, unknown> = {};
+    for (const key of changedFields) {
+      previousState[key] = (existing as Record<string, unknown>)[key];
+      newState[key] = input[key];
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(parts)
+        .set({ ...input, updatedAt: new Date() })
+        .where(and(eq(parts.id, req.params.id as string), eq(parts.tenantId, tenantId)))
+        .returning();
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'part.updated',
+        entityType: 'part',
+        entityId: row.id,
+        previousState,
+        newState,
+        metadata: { source: 'parts.update', partNumber: row.partNumber },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
 
     res.json(updated);
   } catch (err) {
@@ -199,15 +265,42 @@ partsRouter.patch('/:id', async (req: AuthRequest, res, next) => {
 partsRouter.delete('/:id', async (req: AuthRequest, res, next) => {
   try {
     const tenantId = req.user!.tenantId;
-    const [updated] = await db
-      .update(parts)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(and(eq(parts.id, req.params.id as string), eq(parts.tenantId, tenantId)))
-      .returning();
+    const auditContext = getRequestAuditContext(req);
 
-    if (!updated) {
-      throw new AppError(404, 'Part not found');
-    }
+    const updated = await db.transaction(async (tx) => {
+      // Read prior state before mutation
+      const [existing] = await tx
+        .select()
+        .from(parts)
+        .where(and(eq(parts.id, req.params.id as string), eq(parts.tenantId, tenantId)))
+        .limit(1);
+
+      if (!existing) {
+        throw new AppError(404, 'Part not found');
+      }
+
+      const [row] = await tx
+        .update(parts)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(and(eq(parts.id, req.params.id as string), eq(parts.tenantId, tenantId)))
+        .returning();
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'part.deactivated',
+        entityType: 'part',
+        entityId: row.id,
+        previousState: { isActive: true },
+        newState: { isActive: false },
+        metadata: { source: 'parts.deactivate', partNumber: existing.partNumber },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+
+      return row;
+    });
+
     res.json({ message: 'Part deactivated', id: updated.id });
   } catch (err) {
     next(err);
