@@ -150,26 +150,35 @@ export async function revokeApiKey(
   revokedBy?: string,
   auditCtx?: AuthAuditContext,
 ): Promise<void> {
+  // Read prior state before mutation for accurate audit trail
+  const existing = await db.query.apiKeys.findFirst({
+    where: and(eq(schema.apiKeys.id, apiKeyId), eq(schema.apiKeys.tenantId, tenantId)),
+  });
+
+  if (!existing) {
+    throw new Error('API key not found');
+  }
+
+  if (!existing.isActive) {
+    throw new Error('API key is already revoked');
+  }
+
   const [updated] = await db
     .update(schema.apiKeys)
     .set({ isActive: false, updatedAt: new Date() })
     .where(and(eq(schema.apiKeys.id, apiKeyId), eq(schema.apiKeys.tenantId, tenantId)))
     .returning();
 
-  if (!updated) {
-    throw new Error('API key not found');
-  }
-
   log.info({ apiKeyId, keyPrefix: updated.keyPrefix }, 'API key revoked');
 
-  // Audit: API key revoked
+  // Audit: API key revoked — previousState reflects actual persisted state
   await writeAuthAuditEntry(db, {
     tenantId,
     action: AuthAuditAction.API_KEY_REVOKED,
     entityType: 'api_key',
     entityId: apiKeyId,
     userId: revokedBy ?? null,
-    previousState: { isActive: true, keyPrefix: updated.keyPrefix },
+    previousState: { isActive: existing.isActive, keyPrefix: existing.keyPrefix },
     newState: { isActive: false, keyPrefix: updated.keyPrefix },
     metadata: { keyPrefix: updated.keyPrefix },
     ipAddress: auditCtx?.ipAddress,
