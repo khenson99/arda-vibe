@@ -150,6 +150,14 @@ patterns, gotchas, and conventions.
 - Entity history endpoint returns chronological ASC order
 - Archive UNION: re-index $N params for second subquery (offset by first query's param count)
 
+### Audit Integrity Check Pattern
+- recomputeHash() must match writeAuditEntry's canonical format exactly
+- Batch processing (500 entries/batch) for memory efficiency
+- PENDING entries skipped in verification (chain resets after them)
+- Violation types: hash_mismatch, chain_break, sequence_gap, pending_hash
+- Cap violation output at 100 entries for response size limits
+- requireRole('tenant_admin') for admin-only access
+
 ### Express Routes
 - Register routers in service index.ts with `app.use(prefix, router)`
 - Middleware order: helmet → cors → express.json → routes → errorHandler

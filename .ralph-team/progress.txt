@@ -528,3 +528,25 @@ Learnings:
   - Entity history: chronological ASC order (vs DESC for main list) to show timeline
   - Archive UNION: actorName filter excluded from archive subquery (no user JOIN available)
   - Raw SQL for archive UNION: need to re-index $N params for second subquery in UNION
+
+--- Backend Agent Iteration 14 | Issue #259 ---
+Timestamp: 2026-02-12T23:55:00Z
+Status: completed
+Changes:
+  Modified files:
+  - services/orders/src/routes/audit.routes.ts (added GET /audit/integrity-check with requireRole('tenant_admin'), recomputeHash function, batch processing, violation detection)
+  New files:
+  - services/orders/src/routes/audit-integrity.integration.test.ts (14 tests: valid chain, hash_mismatch, chain_break, sequence_gap, PENDING handling, empty tenant, null entityId, batch processing, violation cap, 401 auth, 50+ concurrent hash consistency, different sequence uniqueness, 50-entry chain verification)
+Tests: 493 orders tests passing (14 new + 479 existing), TypeScript clean.
+  - Pre-existing failure: queue-scan-perf.test.ts (needs DATABASE_URL)
+Learnings:
+  - recomputeHash() replicates writeAuditEntry's canonical format exactly: tenant_id|seq|action|entity_type|entity_id|timestamp|previous_hash
+  - GENESIS sentinel for first entry (previousHash is null)
+  - PENDING hash entries are legacy (pre-writeAuditEntry) — skip them in verification, track count
+  - Batch processing with INTEGRITY_BATCH_SIZE (500) prevents memory issues on large chains
+  - Violation types: hash_mismatch (tampered), chain_break (link broken), sequence_gap (numbering skip), pending_hash (legacy)
+  - Cap violation output at 100 to prevent huge responses
+  - requireRole('tenant_admin') middleware restricts endpoint to admin users
+  - Test date generation: use hours offset (Date.UTC(2026,0,1,i,0,0)) instead of day-of-month to avoid invalid dates for n>31
+  - Concurrency test validates determinism: 60 concurrent hash computations must produce identical results
+  - Chain resets after PENDING entries (lastHash = null) since PENDING entries don't participate in chain

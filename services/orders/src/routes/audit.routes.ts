@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
+import { requireRole } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
 
 export const auditRouter = Router();
@@ -487,6 +489,167 @@ auditRouter.get('/entity/:entityType/:entityId', async (req: AuthRequest, res, n
     if (error instanceof z.ZodError) {
       return next(new AppError(400, 'Invalid query parameters'));
     }
+    next(error);
+  }
+});
+
+// ─── GET /integrity-check — Hash-chain verification (tenant_admin) ───
+
+const GENESIS_SENTINEL = 'GENESIS';
+const INTEGRITY_BATCH_SIZE = 500;
+
+/**
+ * Recompute the SHA-256 hash for an audit entry using the same canonical
+ * format as writeAuditEntry in @arda/db. This ensures the integrity check
+ * verifies against the exact same algorithm that produced the hashes.
+ *
+ * Format: tenant_id|sequence_number|action|entity_type|entity_id|timestamp|previous_hash
+ */
+function recomputeHash(entry: {
+  tenantId: string;
+  sequenceNumber: number;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  timestamp: Date;
+  previousHash: string | null;
+}): string {
+  const prevHash = entry.previousHash ?? GENESIS_SENTINEL;
+  const entityId = entry.entityId ?? '';
+  const payload = [
+    entry.tenantId,
+    entry.sequenceNumber.toString(),
+    entry.action,
+    entry.entityType,
+    entityId,
+    entry.timestamp.toISOString(),
+    prevHash,
+  ].join('|');
+
+  return createHash('sha256').update(payload).digest('hex');
+}
+
+interface IntegrityViolation {
+  entryId: string;
+  sequenceNumber: number;
+  type: 'hash_mismatch' | 'chain_break' | 'sequence_gap' | 'pending_hash';
+  expected?: string;
+  actual?: string;
+}
+
+auditRouter.get('/integrity-check', requireRole('tenant_admin'), async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const violations: IntegrityViolation[] = [];
+    let totalChecked = 0;
+    let pendingCount = 0;
+    let lastSequence = 0;
+    let lastHash: string | null = null;
+    let hasMore = true;
+    let batchOffset = 0;
+
+    while (hasMore) {
+      const batch = await db
+        .select({
+          id: schema.auditLog.id,
+          tenantId: schema.auditLog.tenantId,
+          action: schema.auditLog.action,
+          entityType: schema.auditLog.entityType,
+          entityId: schema.auditLog.entityId,
+          timestamp: schema.auditLog.timestamp,
+          hashChain: schema.auditLog.hashChain,
+          previousHash: schema.auditLog.previousHash,
+          sequenceNumber: schema.auditLog.sequenceNumber,
+        })
+        .from(schema.auditLog)
+        .where(eq(schema.auditLog.tenantId, tenantId))
+        .orderBy(asc(schema.auditLog.sequenceNumber))
+        .limit(INTEGRITY_BATCH_SIZE)
+        .offset(batchOffset);
+
+      if (batch.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const entry of batch) {
+        totalChecked++;
+
+        // Skip 'PENDING' entries (legacy inserts before writeAuditEntry migration)
+        if (entry.hashChain === 'PENDING') {
+          pendingCount++;
+          lastSequence = entry.sequenceNumber;
+          lastHash = null; // Chain resets after PENDING entries
+          continue;
+        }
+
+        // Check for sequence gaps
+        if (lastSequence > 0 && entry.sequenceNumber !== lastSequence + 1) {
+          violations.push({
+            entryId: entry.id,
+            sequenceNumber: entry.sequenceNumber,
+            type: 'sequence_gap',
+            expected: String(lastSequence + 1),
+            actual: String(entry.sequenceNumber),
+          });
+        }
+
+        // Verify chain link: entry.previousHash should match the last verified hash
+        if (lastHash !== null && entry.previousHash !== lastHash) {
+          violations.push({
+            entryId: entry.id,
+            sequenceNumber: entry.sequenceNumber,
+            type: 'chain_break',
+            expected: lastHash,
+            actual: entry.previousHash ?? 'null',
+          });
+        }
+
+        // Recompute and verify the hash
+        const expected = recomputeHash({
+          tenantId: entry.tenantId,
+          sequenceNumber: entry.sequenceNumber,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          timestamp: entry.timestamp,
+          previousHash: entry.previousHash,
+        });
+
+        if (entry.hashChain !== expected) {
+          violations.push({
+            entryId: entry.id,
+            sequenceNumber: entry.sequenceNumber,
+            type: 'hash_mismatch',
+            expected,
+            actual: entry.hashChain,
+          });
+        }
+
+        lastSequence = entry.sequenceNumber;
+        lastHash = entry.hashChain;
+      }
+
+      batchOffset += INTEGRITY_BATCH_SIZE;
+      if (batch.length < INTEGRITY_BATCH_SIZE) {
+        hasMore = false;
+      }
+    }
+
+    res.json({
+      data: {
+        totalChecked,
+        pendingCount,
+        violationCount: violations.length,
+        valid: violations.length === 0,
+        violations: violations.slice(0, 100), // Cap violations to avoid huge responses
+      },
+    });
+  } catch (error) {
     next(error);
   }
 });
