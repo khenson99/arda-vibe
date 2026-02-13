@@ -6,6 +6,8 @@ import { db, schema } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
 import { requireRole } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
+import { exportAuditEntries } from '../services/audit-export.service.js';
+import type { AuditEntry, ExportFormat } from '../services/audit-export.service.js';
 
 export const auditRouter = Router();
 
@@ -189,6 +191,88 @@ auditRouter.get('/', async (req: AuthRequest, res, next) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
+// ─── POST /export — Synchronous audit export (CSV/JSON/PDF) ─────────
+
+const exportBodySchema = z.object({
+  format: z.enum(['csv', 'json', 'pdf']),
+  action: z.string().max(100).optional(),
+  entityType: z.string().max(100).optional(),
+  entityId: z.string().uuid().optional(),
+  userId: z.string().uuid().optional(),
+  dateFrom: z.string().datetime().optional(),
+  dateTo: z.string().datetime().optional(),
+  actorName: z.string().max(200).optional(),
+  entityName: z.string().max(200).optional(),
+  search: z.string().max(200).optional(),
+  includeArchived: z.boolean().optional().default(false),
+});
+
+auditRouter.post('/export', async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.sub;
+    if (!tenantId || !userId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const parsed = exportBodySchema.parse(req.body);
+    const { format, includeArchived, ...filterFields } = parsed;
+    const filters: AuditFilters = { ...filterFields, includeArchived };
+    const conditions = buildAuditConditions(tenantId, filters);
+    const joinUsers = needsUserJoin(filters);
+
+    // Fetch ALL matching entries (no pagination for exports)
+    let entries: AuditEntry[];
+
+    if (includeArchived) {
+      const { rows } = await queryWithArchiveUnion(
+        tenantId, filters, conditions, joinUsers, 100000, 0
+      );
+      entries = rows as AuditEntry[];
+    } else if (joinUsers) {
+      const rawRows = await db
+        .select()
+        .from(schema.auditLog)
+        .leftJoin(schema.users, eq(schema.auditLog.userId, schema.users.id))
+        .where(and(...conditions))
+        .orderBy(desc(schema.auditLog.timestamp));
+
+      entries = rawRows.map((r) => r.audit_log) as unknown as AuditEntry[];
+    } else {
+      entries = (await db
+        .select()
+        .from(schema.auditLog)
+        .where(and(...conditions))
+        .orderBy(desc(schema.auditLog.timestamp))) as unknown as AuditEntry[];
+    }
+
+    const result = await exportAuditEntries(
+      format as ExportFormat,
+      entries,
+      tenantId,
+      userId,
+      filters,
+    );
+
+    // Set checksum header
+    res.setHeader('X-Export-Checksum', result.checksum);
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+
+    if (Buffer.isBuffer(result.body)) {
+      res.setHeader('Content-Length', result.body.length);
+      res.send(result.body);
+    } else {
+      res.send(result.body);
+    }
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid export parameters'));
     }
     next(error);
   }
