@@ -1707,39 +1707,22 @@ export async function updateNotificationPreferences(
   );
   return response.data;
 }
-
 /* ── User Profile ────────────────────────────────────────────────── */
 
+// TODO: Backend endpoint POST /api/auth/change-password does not exist yet.
+// Implement in services/auth before enabling this function.
 export async function changePassword(
-  token: string,
-  input: { currentPassword: string; newPassword: string },
+  _token: string,
+  _input: { currentPassword: string; newPassword: string },
 ): Promise<{ message: string }> {
-  return apiRequest<{ message: string }>("/api/auth/change-password", {
-    method: "POST",
-    token,
-    body: input,
-  });
+  throw new Error("Not implemented: backend endpoint POST /api/auth/change-password is not available yet.");
 }
 
+// TODO: Backend endpoint POST /api/upload/avatar does not exist yet.
+// Implement a file-upload service or route before enabling this function.
 export async function uploadAvatar(
-  token: string,
-  file: File,
+  _token: string,
+  _file: File,
 ): Promise<{ url: string }> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const response = await fetch(buildApiUrl("/api/upload/avatar"), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new ApiError(response.status, error || "Upload failed");
-  }
-
-  return response.json() as Promise<{ url: string }>;
+  throw new Error("Not implemented: backend endpoint POST /api/upload/avatar is not available yet.");
 }

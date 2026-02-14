@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-client";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { LoadingState } from "@/components/loading-state";
 import { ErrorBanner } from "@/components/error-banner";
 
@@ -123,27 +124,21 @@ export function NotificationPreferencesForm({
               <div key={type} className="grid grid-cols-4 gap-4 items-center">
                 <Label className="text-sm">{label}</Label>
                 <div className="flex justify-center">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={pref.inApp}
                     onChange={() => handleToggle(type, "inApp")}
-                    className="h-4 w-4 cursor-pointer rounded border-border text-primary focus:ring-2 focus:ring-primary"
                   />
                 </div>
                 <div className="flex justify-center">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={pref.email}
                     onChange={() => handleToggle(type, "email")}
-                    className="h-4 w-4 cursor-pointer rounded border-border text-primary focus:ring-2 focus:ring-primary"
                   />
                 </div>
                 <div className="flex justify-center">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={pref.webhook}
                     onChange={() => handleToggle(type, "webhook")}
-                    className="h-4 w-4 cursor-pointer rounded border-border text-primary focus:ring-2 focus:ring-primary"
                   />
                 </div>
               </div>

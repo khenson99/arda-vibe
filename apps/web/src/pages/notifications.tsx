@@ -189,9 +189,9 @@ export function NotificationsRoute({
               {notification.actionUrl && (
                 <div className="mt-2">
                   <Button variant="link" size="sm" className="h-auto p-0" asChild>
-                    <a href={notification.actionUrl} className="text-[hsl(var(--link))]">
+                    <Link to={notification.actionUrl} className="text-[hsl(var(--link))]">
                       View Details →
-                    </a>
+                    </Link>
                   </Button>
                 </div>
               )}

@@ -1,1 +1,5 @@
 .vercel
+
+# Compiled vite config output
+vite.config.js
+vite.config.d.ts
