@@ -443,7 +443,14 @@ describe('GET /lead-times — aggregate statistics', () => {
 
   it('returns nulls when no data exists', async () => {
     testState.dbSelectResults = [
-      [undefined], // aggregate returns undefined when no rows match
+      [{
+        avgLeadTimeDays: null,
+        medianLeadTimeDays: null,
+        p90LeadTimeDays: null,
+        minLeadTimeDays: null,
+        maxLeadTimeDays: null,
+        transferCount: 0,
+      }], // PostgreSQL aggregate query always returns 1 row with NULL values when no data matches
     ];
 
     const app = createTestApp();
