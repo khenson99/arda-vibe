@@ -491,6 +491,20 @@ describe('GET /lead-times — aggregate statistics', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('rejects invalid fromDate', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times?fromDate=not-a-date');
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid toDate', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times?toDate=not-a-date');
+
+    expect(response.status).toBe(400);
+  });
 });
 
 describe('GET /lead-times/trend — time-series buckets', () => {
@@ -585,6 +599,20 @@ describe('GET /lead-times/trend — time-series buckets', () => {
   it('rejects invalid UUID filter params', async () => {
     const app = createTestApp();
     const response = await getJson(app, '/to/lead-times/trend?partId=bad-uuid');
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid fromDate', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times/trend?fromDate=not-a-date');
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid toDate', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times/trend?toDate=not-a-date');
 
     expect(response.status).toBe(400);
   });

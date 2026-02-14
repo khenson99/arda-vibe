@@ -325,12 +325,24 @@ transferOrdersRouter.get('/recommendations/source', async (req: AuthRequest, res
 
 // ─── Lead-Time Analytics ─────────────────────────────────────────────────
 
+/** Coerce a query-string value to a Date, rejecting anything that produces an Invalid Date. */
+const zDateString = z
+  .string()
+  .transform((val, ctx) => {
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid date' });
+      return z.NEVER;
+    }
+    return d;
+  });
+
 const leadTimeFilterSchema = z.object({
   sourceFacilityId: z.string().uuid().optional(),
   destinationFacilityId: z.string().uuid().optional(),
   partId: z.string().uuid().optional(),
-  fromDate: z.string().optional(),
-  toDate: z.string().optional(),
+  fromDate: zDateString.optional(),
+  toDate: zDateString.optional(),
 });
 
 // GET /lead-times — aggregate lead-time statistics
@@ -352,10 +364,10 @@ transferOrdersRouter.get('/lead-times', async (req: AuthRequest, res, next) => {
       conditions.push(eq(leadTimeHistory.partId, filters.partId));
     }
     if (filters.fromDate) {
-      conditions.push(gte(leadTimeHistory.receivedAt, new Date(filters.fromDate)));
+      conditions.push(gte(leadTimeHistory.receivedAt, filters.fromDate));
     }
     if (filters.toDate) {
-      conditions.push(lte(leadTimeHistory.receivedAt, new Date(filters.toDate)));
+      conditions.push(lte(leadTimeHistory.receivedAt, filters.toDate));
     }
 
     const [result] = await db
@@ -411,10 +423,10 @@ transferOrdersRouter.get('/lead-times/trend', async (req: AuthRequest, res, next
       conditions.push(eq(leadTimeHistory.partId, filters.partId));
     }
     if (filters.fromDate) {
-      conditions.push(gte(leadTimeHistory.receivedAt, new Date(filters.fromDate)));
+      conditions.push(gte(leadTimeHistory.receivedAt, filters.fromDate));
     }
     if (filters.toDate) {
-      conditions.push(lte(leadTimeHistory.receivedAt, new Date(filters.toDate)));
+      conditions.push(lte(leadTimeHistory.receivedAt, filters.toDate));
     }
 
     // Bucket expression — use sql.raw for the interval literal since date_trunc
