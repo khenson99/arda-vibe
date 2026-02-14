@@ -53,7 +53,7 @@ app.get('/health', async (_req, res) => {
 // Routes — all are behind auth via the API gateway
 app.use(authMiddleware);
 app.use('/notifications', notificationsRouter);
-app.use('/preferences', preferencesRouter);
+app.use('/notifications/preferences', preferencesRouter);
 
 app.use(errorHandler);
 
