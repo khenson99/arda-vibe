@@ -17,6 +17,7 @@ import {
   fetchParts,
   fetchTransferOrder,
   createTransferOrder,
+  updateTransferOrder,
   isUnauthorized,
   parseApiError,
 } from "@/lib/api-client";
@@ -95,7 +96,7 @@ export function TOFormPage({ session, onUnauthorized }: Props) {
       setSubmitting(true);
       setSubmitError(null);
       try {
-        const result = await createTransferOrder(token, {
+        const payload = {
           sourceFacilityId: data.sourceFacilityId,
           destinationFacilityId: data.destinationFacilityId,
           notes: data.notes,
@@ -103,11 +104,23 @@ export function TOFormPage({ session, onUnauthorized }: Props) {
             partId: line.partId,
             quantityRequested: line.quantityRequested,
           })),
-        });
+        };
+
+        let resultId: string;
+
+        if (id) {
+          // Edit mode — update existing draft TO
+          const result = await updateTransferOrder(token, id, payload);
+          resultId = result.data.id;
+        } else {
+          // Create mode
+          const result = await createTransferOrder(token, payload);
+          resultId = result.data.id;
+        }
 
         if (!isMountedRef.current) return;
-        toast.success("Transfer order created");
-        navigate(`/orders/to/${result.data.id}`);
+        toast.success(id ? "Transfer order updated" : "Transfer order created");
+        navigate(`/orders/to/${resultId}`);
       } catch (err) {
         if (!isMountedRef.current) return;
         if (isUnauthorized(err)) {
@@ -119,7 +132,7 @@ export function TOFormPage({ session, onUnauthorized }: Props) {
         if (isMountedRef.current) setSubmitting(false);
       }
     },
-    [token, navigate, onUnauthorized],
+    [token, id, navigate, onUnauthorized],
   );
 
   const handleCancel = React.useCallback(() => {

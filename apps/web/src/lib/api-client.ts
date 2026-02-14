@@ -1573,6 +1573,26 @@ export async function createTransferOrder(
   });
 }
 
+export async function updateTransferOrder(
+  token: string,
+  id: string,
+  input: {
+    sourceFacilityId?: string;
+    destinationFacilityId?: string;
+    notes?: string | null;
+    lines?: Array<{
+      partId: string;
+      quantityRequested: number;
+    }>;
+  },
+): Promise<{ data: TransferOrder }> {
+  return apiRequest(`/api/orders/transfer-orders/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    token,
+    body: input,
+  });
+}
+
 export async function updateTransferOrderStatus(
   token: string,
   id: string,

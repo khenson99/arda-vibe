@@ -206,6 +206,18 @@ const createTransferOrderSchema = z.object({
   ).min(1),
 });
 
+const updateTransferOrderSchema = z.object({
+  sourceFacilityId: z.string().uuid().optional(),
+  destinationFacilityId: z.string().uuid().optional(),
+  notes: z.string().optional().nullable(),
+  lines: z.array(
+    z.object({
+      partId: z.string().uuid(),
+      quantityRequested: z.number().int().positive(),
+    })
+  ).min(1).optional(),
+});
+
 const statusTransitionSchema = z.object({
   status: z.enum(['draft', 'requested', 'approved', 'picking', 'shipped', 'in_transit', 'received', 'closed', 'cancelled']),
   reason: z.string().optional(),
@@ -444,6 +456,110 @@ transferOrdersRouter.post('/', async (req: AuthRequest, res, next) => {
     res.status(201).json({
       ...createdOrder,
       lines,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid request body'));
+    }
+    next(error);
+  }
+});
+
+// PUT /:id - Update a draft transfer order
+transferOrdersRouter.put('/:id', async (req: AuthRequest, res, next) => {
+  try {
+    const id = req.params.id as string;
+    const payload = updateTransferOrderSchema.parse(req.body);
+    const tenantId = req.user!.tenantId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    // Fetch existing TO
+    const [existing] = await db
+      .select()
+      .from(transferOrders)
+      .where(and(eq(transferOrders.id, id), eq(transferOrders.tenantId, tenantId)));
+
+    if (!existing) {
+      throw new AppError(404, 'Transfer order not found');
+    }
+
+    // Only allow editing draft TOs
+    if (existing.status !== 'draft') {
+      throw new AppError(400, 'Only draft transfer orders can be edited');
+    }
+
+    const sourceFacilityId = payload.sourceFacilityId ?? existing.sourceFacilityId;
+    const destinationFacilityId = payload.destinationFacilityId ?? existing.destinationFacilityId;
+
+    if (sourceFacilityId === destinationFacilityId) {
+      throw new AppError(400, 'Source and destination facilities must be different');
+    }
+
+    const result = await db.transaction(async (tx) => {
+      // Update the TO header
+      const [updatedOrder] = await tx
+        .update(transferOrders)
+        .set({
+          sourceFacilityId,
+          destinationFacilityId,
+          notes: payload.notes !== undefined ? (payload.notes || null) : existing.notes,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(transferOrders.id, id), eq(transferOrders.tenantId, tenantId)))
+        .returning();
+
+      // If lines are provided, replace all existing lines
+      let lines;
+      if (payload.lines) {
+        // Delete existing lines
+        await tx
+          .delete(transferOrderLines)
+          .where(
+            and(
+              eq(transferOrderLines.transferOrderId, id),
+              eq(transferOrderLines.tenantId, tenantId),
+            )
+          );
+
+        // Insert new lines
+        lines = await tx
+          .insert(transferOrderLines)
+          .values(
+            payload.lines.map((line) => ({
+              tenantId,
+              transferOrderId: id,
+              partId: line.partId,
+              quantityRequested: line.quantityRequested,
+              quantityShipped: 0,
+              quantityReceived: 0,
+              notes: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            }))
+          )
+          .returning();
+      } else {
+        // Fetch existing lines if not replacing
+        lines = await tx
+          .select()
+          .from(transferOrderLines)
+          .where(
+            and(
+              eq(transferOrderLines.transferOrderId, id),
+              eq(transferOrderLines.tenantId, tenantId),
+            )
+          );
+      }
+
+      return { updatedOrder, lines };
+    });
+
+    res.json({
+      ...result.updatedOrder,
+      lines: result.lines,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
