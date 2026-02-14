@@ -67,15 +67,25 @@ const batchAdjustSchema = z.object({
   ).min(1).max(50),
 });
 
+/** Split a comma-separated string of UUIDs and validate each one. */
+const csvUuids = z
+  .string()
+  .optional()
+  .transform((val) =>
+    val
+      ? val.split(',').map((id) => z.string().uuid().parse(id.trim()))
+      : undefined
+  );
+
 const crossLocationMatrixSchema = z.object({
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().max(500).optional(),
-  partIds: z.string().optional().transform((val) => val ? val.split(',') : undefined),
-  facilityIds: z.string().optional().transform((val) => val ? val.split(',') : undefined),
+  partIds: csvUuids,
+  facilityIds: csvUuids,
 });
 
 const crossLocationSummarySchema = z.object({
-  facilityIds: z.string().optional().transform((val) => val ? val.split(',') : undefined),
+  facilityIds: csvUuids,
 });
 
 // ─── GET /facilities/:facilityId/inventory — paginated list ───────────

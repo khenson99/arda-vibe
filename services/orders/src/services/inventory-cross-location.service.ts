@@ -12,10 +12,7 @@
  */
 
 import { db, schema } from '@arda/db';
-import { eq, and, sql, inArray, isNotNull } from 'drizzle-orm';
-import { createLogger } from '@arda/config';
-
-const log = createLogger('inventory-cross-location');
+import { eq, and, sql, inArray } from 'drizzle-orm';
 
 const { inventoryLedger, facilities, parts } = schema;
 
@@ -48,7 +45,11 @@ export interface MatrixCell {
   reorderPoint: number;
   /** True if available <= reorderPoint */
   belowReorder: boolean;
-  /** True if available <= reorderPoint * 1.2 (20% buffer) */
+  /**
+   * True if available is within 20% buffer above reorderPoint but NOT below it.
+   * Exclusive of belowReorder: when belowReorder is true, nearReorder is false.
+   * Range: reorderPoint < available <= reorderPoint * 1.2
+   */
   nearReorder: boolean;
 }
 
@@ -106,8 +107,8 @@ export async function getCrossLocationMatrix(
   const limit = Math.min(pageSize, 500);
   const offset = (page - 1) * limit;
 
-  // Step 1: Get paginated list of parts (with optional filter)
-  const partsConditions = [eq(parts.tenantId, tenantId)];
+  // Step 1: Get paginated list of active parts (with optional filter)
+  const partsConditions = [eq(parts.tenantId, tenantId), eq(parts.isActive, true)];
   if (partIds && partIds.length > 0) {
     partsConditions.push(inArray(parts.id, partIds));
   }
@@ -134,9 +135,10 @@ export async function getCrossLocationMatrix(
     };
   }
 
-  // Step 2: Query inventory ledger for the selected parts × all facilities
+  // Step 2: Query inventory ledger for the selected parts × active facilities
   const matrixConditions = [
     eq(inventoryLedger.tenantId, tenantId),
+    eq(facilities.isActive, true),
     inArray(inventoryLedger.partId, partIdsForPage),
   ];
   if (facilityIds && facilityIds.length > 0) {
@@ -166,7 +168,8 @@ export async function getCrossLocationMatrix(
   const data: MatrixCell[] = rows.map((row) => {
     const available = row.qtyOnHand - row.qtyReserved;
     const belowReorder = available <= row.reorderPoint;
-    const nearReorder = available <= row.reorderPoint * 1.2;
+    // Exclusive: near-reorder means within 20% buffer but NOT below reorder point
+    const nearReorder = !belowReorder && available <= row.reorderPoint * 1.2;
 
     return {
       facilityId: row.facilityId,
@@ -214,7 +217,7 @@ export async function getCrossLocationMatrix(
  *   - pendingTransferCount: count of rows with qtyInTransit > 0
  *   - averageNetworkLeadTimeDays: mocked at 3.5 days (requires order history)
  *   - facilitiesBelowReorderPoint: count where available <= reorderPoint
- *   - facilitiesNearReorderPoint: count where available <= reorderPoint * 1.2
+ *   - facilitiesNearReorderPoint: count where reorderPoint < available <= reorderPoint * 1.2 (exclusive of belowReorder)
  *
  * Performance: Single query with aggregations over inventory_ledger + parts join.
  */
@@ -223,13 +226,13 @@ export async function getCrossLocationSummary(
 ): Promise<CrossLocationSummary> {
   const { tenantId, facilityIds } = input;
 
-  // Build base query with optional facility filter
-  let baseCondition = eq(inventoryLedger.tenantId, tenantId);
+  // Build conditions array with optional facility filter
+  const conditions = [
+    eq(inventoryLedger.tenantId, tenantId),
+    eq(facilities.isActive, true),
+  ];
   if (facilityIds && facilityIds.length > 0) {
-    baseCondition = and(
-      baseCondition,
-      inArray(inventoryLedger.facilityId, facilityIds)
-    ) as any;
+    conditions.push(inArray(inventoryLedger.facilityId, facilityIds));
   }
 
   // Single aggregation query for all KPIs
@@ -252,19 +255,21 @@ export async function getCrossLocationSummary(
       `,
       facilitiesNearReorderPoint: sql<number>`
         COUNT(
-          CASE WHEN (${inventoryLedger.qtyOnHand} - ${inventoryLedger.qtyReserved}) <= (${inventoryLedger.reorderPoint} * 1.2)
+          CASE WHEN (${inventoryLedger.qtyOnHand} - ${inventoryLedger.qtyReserved}) > ${inventoryLedger.reorderPoint}
+            AND (${inventoryLedger.qtyOnHand} - ${inventoryLedger.qtyReserved}) <= (${inventoryLedger.reorderPoint} * 1.2)
           THEN 1 END
         )::int
       `,
     })
     .from(inventoryLedger)
-    .leftJoin(parts, eq(inventoryLedger.partId, parts.id))
-    .where(baseCondition);
+    .innerJoin(facilities, eq(inventoryLedger.facilityId, facilities.id))
+    .innerJoin(parts, eq(inventoryLedger.partId, parts.id))
+    .where(and(...conditions));
 
   const row = result[0];
 
   // MVP: mock average lead time at 3.5 days
-  // TODO: compute from actual transfer order history when available
+  // TODO(MVP-10/T13): compute from actual transfer order history when available
   const averageNetworkLeadTimeDays = 3.5;
 
   return {
