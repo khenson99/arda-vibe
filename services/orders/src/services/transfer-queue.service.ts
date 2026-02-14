@@ -51,6 +51,8 @@ export interface TransferQueueItem {
   partId: string;
   partNumber?: string;
   partName?: string;
+  /** Number of distinct parts/lines on this queue item (> 1 for multi-line TOs). */
+  lineCount?: number;
 
   // Facilities
   sourceFacilityId?: string;
@@ -119,6 +121,55 @@ function computePriorityScore(input: {
   return Math.round(raw * 100 * 100) / 100; // 0-100 scale
 }
 
+// ─── Batch Source Recommendations ─────────────────────────────────────
+
+/**
+ * Batch-load source recommendations for a list of (destinationFacilityId, partId)
+ * pairs, returning a Map keyed by "destFacilityId::partId".
+ */
+async function batchRecommendSources(
+  tenantId: string,
+  requests: Array<{ destinationFacilityId: string; partId: string; minQty?: number }>,
+  limit = 3,
+): Promise<Map<string, SourceRecommendation[]>> {
+  const results = new Map<string, SourceRecommendation[]>();
+  if (requests.length === 0) return results;
+
+  // De-duplicate by key so we don't fetch the same pair twice
+  const uniqueRequests = new Map<string, RecommendSourcesInput>();
+  for (const req of requests) {
+    const key = `${req.destinationFacilityId}::${req.partId}`;
+    if (!uniqueRequests.has(key)) {
+      uniqueRequests.set(key, {
+        tenantId,
+        destinationFacilityId: req.destinationFacilityId,
+        partId: req.partId,
+        minQty: req.minQty,
+        limit,
+      });
+    }
+  }
+
+  // Fire all unique requests in parallel
+  const entries = Array.from(uniqueRequests.entries());
+  const settled = await Promise.allSettled(
+    entries.map(([, input]) => recommendSources(input)),
+  );
+
+  for (let i = 0; i < entries.length; i++) {
+    const [key] = entries[i];
+    const result = settled[i];
+    if (result.status === 'fulfilled') {
+      results.set(key, result.value);
+    } else {
+      log.warn({ error: result.reason, key }, 'Failed to batch-load source recommendation');
+      results.set(key, []);
+    }
+  }
+
+  return results;
+}
+
 // ─── Main Function ────────────────────────────────────────────────────
 
 /**
@@ -159,6 +210,7 @@ export async function getTransferQueue(
       sourceFacilityId: transferOrders.sourceFacilityId,
       destinationFacilityId: transferOrders.destinationFacilityId,
       status: transferOrders.status,
+      priorityScore: transferOrders.priorityScore,
       createdAt: transferOrders.createdAt,
       requestedDate: transferOrders.requestedDate,
       sourceFacility: facilities,
@@ -218,6 +270,16 @@ export async function getTransferQueue(
     linesByTOId.set(line.transferOrderId, existing);
   }
 
+  // Pre-compute filtered draft TOs with their line data for batch recommendation
+  const draftTOsWithLines: Array<{
+    draftTO: (typeof draftTOs)[number];
+    lines: typeof allTOLines;
+    partIds: string[];
+    firstPartId: string;
+    totalQty: number;
+    isExpedited: boolean;
+  }> = [];
+
   for (const draftTO of draftTOs) {
     const lines = linesByTOId.get(draftTO.id) ?? [];
     if (lines.length === 0) continue;
@@ -231,11 +293,27 @@ export async function getTransferQueue(
       continue;
     }
 
+    // Fix #1: Determine expedited status from the TO's priorityScore field
+    // rather than comparing status to 'requested' (which is about workflow state,
+    // not urgency). A non-zero priorityScore indicates the TO was flagged as expedited.
+    const isExpedited = Number(draftTO.priorityScore ?? 0) > 0;
+
+    draftTOsWithLines.push({ draftTO, lines, partIds, firstPartId, totalQty, isExpedited });
+  }
+
+  // Fix #3: Batch-load source recommendations for all draft TOs at once
+  const draftRecommendationRequests = draftTOsWithLines.map(({ draftTO, firstPartId }) => ({
+    destinationFacilityId: draftTO.destinationFacilityId,
+    partId: firstPartId,
+  }));
+  const draftRecsMap = await batchRecommendSources(tenantId, draftRecommendationRequests);
+
+  for (const { draftTO, partIds, firstPartId, totalQty, isExpedited } of draftTOsWithLines) {
     // Compute priority score (drafts have low urgency unless expedited)
     const priorityScore = computePriorityScore({
       daysBelowReorder: 0,
       isKanbanTriggered: false,
-      isExpedited: draftTO.status === 'requested',
+      isExpedited,
     });
 
     // Apply priority filter
@@ -246,32 +324,25 @@ export async function getTransferQueue(
       continue;
     }
 
-    // Get recommended sources (for first part as proxy)
-    let recommendedSources: SourceRecommendation[] = [];
-    try {
-      recommendedSources = await recommendSources({
-        tenantId,
-        destinationFacilityId: draftTO.destinationFacilityId,
-        partId: firstPartId,
-        limit: 3,
-      });
-    } catch (err) {
-      log.warn({ error: err, toId: draftTO.id }, 'Failed to get source recommendations for draft TO');
-    }
+    // Look up pre-fetched recommendations
+    const recKey = `${draftTO.destinationFacilityId}::${firstPartId}`;
+    const recommendedSources = draftRecsMap.get(recKey) ?? [];
 
     items.push({
       id: draftTO.id,
       type: 'draft_to',
       transferOrderId: draftTO.id,
       toNumber: draftTO.toNumber,
-      partId: partIds.length > 1 ? `${firstPartId} (+${partIds.length - 1} more)` : firstPartId,
+      // Fix #2: Always use a valid UUID for partId; expose lineCount for multi-line TOs
+      partId: firstPartId,
+      lineCount: partIds.length > 1 ? partIds.length : undefined,
       sourceFacilityId: draftTO.sourceFacilityId,
       sourceFacilityName: draftTO.sourceFacility?.name ?? 'Unknown',
       destinationFacilityId: draftTO.destinationFacilityId,
       destinationFacilityName: destFacilitiesMap.get(draftTO.destinationFacilityId) ?? 'Unknown',
       quantityRequested: totalQty,
       priorityScore,
-      isExpedited: draftTO.status === 'requested',
+      isExpedited,
       status: draftTO.status,
       createdAt: draftTO.createdAt.toISOString(),
       requestedDate: draftTO.requestedDate?.toISOString(),
@@ -339,12 +410,23 @@ export async function getTransferQueue(
         .then(rows => new Map(rows.map(r => [r.id, r.name])))
     : new Map<string, string>();
 
-  for (const card of kanbanCards_triggered) {
-    // Apply partId filter
+  // Pre-filter Kanban cards and batch-load recommendations
+  const filteredKanbanCards = kanbanCards_triggered.filter(card => {
     if (filters.partId && card.loop.partId !== filters.partId) {
-      continue;
+      return false;
     }
+    return true;
+  });
 
+  // Fix #3: Batch-load source recommendations for all Kanban cards at once
+  const kanbanRecommendationRequests = filteredKanbanCards.map(card => ({
+    destinationFacilityId: card.loop.facilityId,
+    partId: card.loop.partId,
+    minQty: card.loop.orderQuantity,
+  }));
+  const kanbanRecsMap = await batchRecommendSources(tenantId, kanbanRecommendationRequests);
+
+  for (const card of filteredKanbanCards) {
     const sourceFacilityName = card.loop.sourceFacilityId
       ? (kanbanSourceFacMap.get(card.loop.sourceFacilityId) ?? 'Unknown')
       : 'Unknown';
@@ -369,19 +451,9 @@ export async function getTransferQueue(
       continue;
     }
 
-    // Get recommended sources
-    let recommendedSources: SourceRecommendation[] = [];
-    try {
-      recommendedSources = await recommendSources({
-        tenantId,
-        destinationFacilityId: card.loop.facilityId,
-        partId: card.loop.partId,
-        minQty: card.loop.orderQuantity,
-        limit: 3,
-      });
-    } catch (err) {
-      log.warn({ error: err, cardId: card.cardId }, 'Failed to get source recommendations for Kanban card');
-    }
+    // Look up pre-fetched recommendations
+    const recKey = `${card.loop.facilityId}::${card.loop.partId}`;
+    const recommendedSources = kanbanRecsMap.get(recKey) ?? [];
 
     items.push({
       id: card.cardId,
@@ -443,6 +515,14 @@ export async function getTransferQueue(
     .where(and(...belowReorderConditions));
     // No per-source limit — pagination applied at final sort/slice
 
+  // Fix #3: Batch-load source recommendations for all below-reorder rows at once
+  const belowReorderRecommendationRequests = belowReorderRows.map(row => ({
+    destinationFacilityId: row.facilityId,
+    partId: row.partId,
+    minQty: row.reorderQty || (row.reorderPoint - row.qtyOnHand),
+  }));
+  const belowReorderRecsMap = await batchRecommendSources(tenantId, belowReorderRecommendationRequests);
+
   for (const row of belowReorderRows) {
     const available = row.qtyOnHand - row.qtyReserved;
     const deficit = row.reorderPoint - row.qtyOnHand;
@@ -468,18 +548,18 @@ export async function getTransferQueue(
       continue;
     }
 
-    // Get recommended sources
-    let recommendedSources: SourceRecommendation[] = [];
-    try {
-      recommendedSources = await recommendSources({
-        tenantId,
-        destinationFacilityId: row.facilityId,
-        partId: row.partId,
-        minQty: row.reorderQty || deficit,
-        limit: 3,
-      });
-    } catch (err) {
-      log.warn({ error: err, ledgerId: row.id }, 'Failed to get source recommendations for below-reorder inventory');
+    // Look up pre-fetched recommendations
+    const recKey = `${row.facilityId}::${row.partId}`;
+    const recommendedSources = belowReorderRecsMap.get(recKey) ?? [];
+
+    // Fix #4: Apply sourceFacilityId filter to below_reorder items.
+    // Since below_reorder rows don't have a source facility, filter by checking
+    // whether the requested source facility appears in the recommended sources.
+    if (filters.sourceFacilityId) {
+      const matchesSource = recommendedSources.some(
+        rec => rec.facilityId === filters.sourceFacilityId
+      );
+      if (!matchesSource) continue;
     }
 
     items.push({
