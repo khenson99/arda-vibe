@@ -100,13 +100,14 @@ const kpiQuerySchema = z.object({
 
 /**
  * Compute the previous-period date range by shifting back by the same duration.
- * e.g., if range is 30 days, previous period is the 30 days before startDate.
+ * Uses half-open interval: [prevStart, startDate) — consistent with query predicates
+ * that use >= start AND < end, so no overlap at the startDate boundary.
  */
 function computePreviousPeriod(startDate: Date, endDate: Date) {
   const durationMs = endDate.getTime() - startDate.getTime();
   return {
     startDate: new Date(startDate.getTime() - durationMs),
-    endDate: new Date(startDate.getTime()),
+    endDate: startDate,
   };
 }
 
@@ -235,6 +236,11 @@ analyticsRouter.get('/kpis/:kpiName/trend', async (req: AuthRequest, res, next) 
     }
 
     const { window: windowDays, startDate: startStr, endDate: endStr, facilityIds } = parsed.data;
+
+    // Reject partial custom date ranges — require both or neither
+    if ((startStr && !endStr) || (!startStr && endStr)) {
+      return next(new AppError(400, 'Both startDate and endDate are required for custom date ranges'));
+    }
 
     // Determine date range: either window-based or custom range
     let startDate: Date;

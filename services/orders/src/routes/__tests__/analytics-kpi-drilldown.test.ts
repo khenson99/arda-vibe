@@ -64,17 +64,28 @@ const { dbMock, resetDbMockCalls } = vi.hoisted(() => {
   return { dbMock, resetDbMockCalls };
 });
 
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn(() => ({})),
-  and: vi.fn(() => ({})),
-  sql: Object.assign(
-    vi.fn((...args: unknown[]) => ({ raw: vi.fn(() => ({})), toQuery: () => ({ sql: '', params: [] }), append: () => ({}) })),
-    { raw: vi.fn(() => ({})) },
-  ),
-  gte: vi.fn(() => ({})),
-  lte: vi.fn(() => ({})),
-  isNotNull: vi.fn(() => ({})),
-}));
+vi.mock('drizzle-orm', () => {
+  // Build a sql tagged-template mock that preserves the template strings for assertion
+  const sqlFn = (...args: unknown[]) => {
+    // Tagged template call: first arg is the string array
+    const strings = Array.isArray(args[0]) ? (args[0] as string[]).join('??') : '';
+    return {
+      __sqlStrings: strings,
+      raw: vi.fn(() => ({})),
+      toQuery: () => ({ sql: '', params: [] }),
+      append: () => ({}),
+    };
+  };
+  return {
+    eq: vi.fn(() => ({})),
+    and: vi.fn(() => ({})),
+    sql: Object.assign(vi.fn(sqlFn), { raw: vi.fn(() => ({})) }),
+    gte: vi.fn(() => ({})),
+    lte: vi.fn(() => ({})),
+    lt: vi.fn(() => ({})),
+    isNotNull: vi.fn(() => ({})),
+  };
+});
 
 vi.mock('@arda/db', () => ({
   db: dbMock,
@@ -468,6 +479,164 @@ describe('GET /analytics/kpis/:kpiName/drilldown', () => {
         }
       });
     }
+  });
+
+  describe('tenant isolation in SQL joins', () => {
+    it('fill_rate drilldown passes tenantId in all cross-schema joins', async () => {
+      queueDrilldownResults(0, []);
+
+      const app = createTestApp();
+      await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/fill_rate/drilldown?startDate=2026-01-01&endDate=2026-01-31',
+      );
+
+      // The data query is the second db.execute call (first is count query)
+      expect(dbMock.execute).toHaveBeenCalledTimes(2);
+      const dataQueryCall = dbMock.execute.mock.calls[1][0] as { __sqlStrings?: string };
+      const queryStr = dataQueryCall.__sqlStrings ?? '';
+
+      // Verify tenant isolation on purchase_orders join
+      expect(queryStr).toContain('po.tenant_id');
+      // Verify tenant isolation on facilities joins
+      expect(queryStr).toContain('f_po.tenant_id');
+      expect(queryStr).toContain('f_to.tenant_id');
+      // Verify tenant isolation on transfer_orders join
+      expect(queryStr).toContain('tro.tenant_id');
+    });
+
+    it('supplier_otd drilldown passes tenantId on supplier and facility joins', async () => {
+      queueDrilldownResults(0, []);
+
+      const app = createTestApp();
+      await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/supplier_otd/drilldown?startDate=2026-01-01&endDate=2026-01-31',
+      );
+
+      expect(dbMock.execute).toHaveBeenCalledTimes(2);
+      const dataQueryCall = dbMock.execute.mock.calls[1][0] as { __sqlStrings?: string };
+      const queryStr = dataQueryCall.__sqlStrings ?? '';
+
+      expect(queryStr).toContain('s.tenant_id');
+      expect(queryStr).toContain('f.tenant_id');
+    });
+
+    it('stockout_count drilldown passes tenantId on parts and facilities joins', async () => {
+      queueDrilldownResults(0, []);
+
+      const app = createTestApp();
+      await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/stockout_count/drilldown?startDate=2026-01-01&endDate=2026-01-31',
+      );
+
+      expect(dbMock.execute).toHaveBeenCalledTimes(2);
+      const dataQueryCall = dbMock.execute.mock.calls[1][0] as { __sqlStrings?: string };
+      const queryStr = dataQueryCall.__sqlStrings ?? '';
+
+      expect(queryStr).toContain('p.tenant_id');
+      expect(queryStr).toContain('f.tenant_id');
+    });
+
+    it('avg_cycle_time drilldown passes tenantId on parts and facilities joins', async () => {
+      queueDrilldownResults(0, []);
+
+      const app = createTestApp();
+      await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/avg_cycle_time/drilldown?startDate=2026-01-01&endDate=2026-01-31',
+      );
+
+      expect(dbMock.execute).toHaveBeenCalledTimes(2);
+      const dataQueryCall = dbMock.execute.mock.calls[1][0] as { __sqlStrings?: string };
+      const queryStr = dataQueryCall.__sqlStrings ?? '';
+
+      expect(queryStr).toContain('p.tenant_id');
+      expect(queryStr).toContain('f.tenant_id');
+    });
+
+    it('order_accuracy drilldown passes tenantId on parts join', async () => {
+      queueDrilldownResults(0, []);
+
+      const app = createTestApp();
+      await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/order_accuracy/drilldown?startDate=2026-01-01&endDate=2026-01-31',
+      );
+
+      expect(dbMock.execute).toHaveBeenCalledTimes(2);
+      const dataQueryCall = dbMock.execute.mock.calls[1][0] as { __sqlStrings?: string };
+      const queryStr = dataQueryCall.__sqlStrings ?? '';
+
+      expect(queryStr).toContain('p.tenant_id');
+    });
+  });
+
+  describe('fill_rate transfer-order facility resolution', () => {
+    it('resolves facilityName for transfer_order rows via destination facility', async () => {
+      const rows = [
+        {
+          receiptNumber: 'REC-TO-001',
+          orderType: 'transfer_order',
+          orderId: 'to-1',
+          totalLines: 3,
+          fullLines: 3,
+          fillRatePercent: 100,
+          facilityName: 'Destination Warehouse',
+          createdAt: '2026-01-15T10:00:00Z',
+        },
+      ];
+      queueDrilldownResults(1, rows);
+
+      const app = createTestApp();
+      const response = await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/fill_rate/drilldown?startDate=2026-01-01&endDate=2026-01-31',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.rows[0]).toHaveProperty('orderType', 'transfer_order');
+      expect(response.body.data.rows[0]).toHaveProperty('facilityName', 'Destination Warehouse');
+
+      // Verify the SQL includes the transfer-order join path
+      const dataQueryCall = dbMock.execute.mock.calls[1][0] as { __sqlStrings?: string };
+      const queryStr = dataQueryCall.__sqlStrings ?? '';
+      expect(queryStr).toContain('transfer_orders');
+      expect(queryStr).toContain('destination_facility_id');
+    });
+
+    it('query includes COALESCE across both facility join paths', async () => {
+      queueDrilldownResults(0, []);
+
+      const app = createTestApp();
+      await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/fill_rate/drilldown?startDate=2026-01-01&endDate=2026-01-31',
+      );
+
+      const dataQueryCall = dbMock.execute.mock.calls[1][0] as { __sqlStrings?: string };
+      const queryStr = dataQueryCall.__sqlStrings ?? '';
+      // Should COALESCE from both PO facility and TO facility
+      expect(queryStr).toContain('f_po.name');
+      expect(queryStr).toContain('f_to.name');
+    });
+  });
+
+  describe('sort contract consistency', () => {
+    it('accepts orderId as a valid sort column for fill_rate', async () => {
+      queueDrilldownResults(0, []);
+
+      const app = createTestApp();
+      const response = await getJson<DrilldownResponse>(
+        app,
+        '/analytics/kpis/fill_rate/drilldown?startDate=2026-01-01&endDate=2026-01-31&sort=orderId&sortDir=asc',
+      );
+
+      // orderId is in DRILLDOWN_COLUMNS.fill_rate, so it should be accepted without fallback
+      expect(response.status).toBe(200);
+      expect(response.body.data.kpiId).toBe('fill_rate');
+    });
   });
 
   describe('validation errors', () => {

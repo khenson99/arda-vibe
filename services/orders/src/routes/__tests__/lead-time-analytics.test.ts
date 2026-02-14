@@ -632,3 +632,36 @@ describe('GET /lead-times/trend — time-series buckets', () => {
     expect(response.body.data).toHaveLength(1);
   });
 });
+
+describe('invalid date filter rejection', () => {
+  beforeEach(() => {
+    testState.dbSelectResults = [];
+    testState.txSelectResults = [];
+    testState.txInsertedLeadTimeRows = [];
+    resetDbMockCalls();
+  });
+
+  it('rejects invalid fromDate on lead-times aggregate', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times?fromDate=not-a-date');
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid toDate on lead-times aggregate', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times?toDate=not-a-date');
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid fromDate on lead-times trend', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times/trend?fromDate=not-a-date');
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid toDate on lead-times trend', async () => {
+    const app = createTestApp();
+    const response = await getJson(app, '/to/lead-times/trend?toDate=not-a-date');
+    expect(response.status).toBe(400);
+  });
+});

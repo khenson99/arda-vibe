@@ -59,10 +59,11 @@ const SORT_COLUMNS: Record<string, Record<string, string>> = {
   fill_rate: {
     receiptNumber: 'r.receipt_number',
     orderType: 'r.order_type',
+    orderId: 'r.order_id',
     totalLines: 'total_lines',
     fullLines: 'full_lines',
     fillRatePercent: 'fill_rate_percent',
-    facilityName: 'f.name',
+    facilityName: '"facilityName"',
     createdAt: 'r.created_at',
   },
   supplier_otd: {
@@ -128,9 +129,9 @@ async function drilldownFillRate(filters: DrilldownFilters): Promise<DrilldownRe
 
   const facilityFilter = facilityIds?.length
     ? sql` AND r.order_id IN (
-        SELECT id FROM orders.purchase_orders WHERE facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.purchase_orders WHERE tenant_id = ${tenantId} AND facility_id = ANY(${facilityIds})
         UNION ALL
-        SELECT id FROM orders.transfer_orders WHERE destination_facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.transfer_orders WHERE tenant_id = ${tenantId} AND destination_facility_id = ANY(${facilityIds})
       )`
     : sql``;
 
@@ -143,7 +144,7 @@ async function drilldownFillRate(filters: DrilldownFilters): Promise<DrilldownRe
     FROM orders.receipts r
     WHERE r.tenant_id = ${tenantId}
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
-      AND r.created_at <= ${endDate.toISOString()}::timestamptz
+      AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
   `);
   const totalRows = (countResult as unknown as Array<{ total: number }>)[0]?.total ?? 0;
@@ -176,17 +177,19 @@ async function drilldownFillRate(filters: DrilldownFilters): Promise<DrilldownRe
         )::float
         ELSE 0
       END AS "fillRatePercent",
-      COALESCE(f.name, '') AS "facilityName",
+      COALESCE(f_po.name, f_to.name, '') AS "facilityName",
       r.created_at AS "createdAt"
     FROM orders.receipts r
     JOIN orders.receipt_lines rl ON rl.receipt_id = r.id AND rl.tenant_id = ${tenantId}
-    LEFT JOIN orders.purchase_orders po ON po.id = r.order_id AND r.order_type = 'purchase_order'
-    LEFT JOIN locations.facilities f ON f.id = po.facility_id
+    LEFT JOIN orders.purchase_orders po ON po.id = r.order_id AND r.order_type = 'purchase_order' AND po.tenant_id = ${tenantId}
+    LEFT JOIN locations.facilities f_po ON f_po.id = po.facility_id AND f_po.tenant_id = ${tenantId}
+    LEFT JOIN orders.transfer_orders tro ON tro.id = r.order_id AND r.order_type = 'transfer_order' AND tro.tenant_id = ${tenantId}
+    LEFT JOIN locations.facilities f_to ON f_to.id = tro.destination_facility_id AND f_to.tenant_id = ${tenantId}
     WHERE r.tenant_id = ${tenantId}
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
-      AND r.created_at <= ${endDate.toISOString()}::timestamptz
+      AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
-    GROUP BY r.id, r.receipt_number, r.order_type, r.order_id, r.created_at, f.name
+    GROUP BY r.id, r.receipt_number, r.order_type, r.order_id, r.created_at, f_po.name, f_to.name
     ORDER BY ${orderClause}
     LIMIT ${limit} OFFSET ${offset}
   `);
@@ -222,7 +225,7 @@ async function drilldownSupplierOtd(filters: DrilldownFilters): Promise<Drilldow
       AND po.expected_delivery_date IS NOT NULL
       AND po.actual_delivery_date IS NOT NULL
       AND po.actual_delivery_date >= ${startDate.toISOString()}::timestamptz
-      AND po.actual_delivery_date <= ${endDate.toISOString()}::timestamptz
+      AND po.actual_delivery_date < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
   `);
   const totalRows = (countResult as unknown as Array<{ total: number }>)[0]?.total ?? 0;
@@ -237,14 +240,14 @@ async function drilldownSupplierOtd(filters: DrilldownFilters): Promise<Drilldow
       EXTRACT(EPOCH FROM (po.actual_delivery_date - po.expected_delivery_date)) / 86400 AS "varianceDays",
       f.name AS "facilityName"
     FROM orders.purchase_orders po
-    JOIN catalog.suppliers s ON s.id = po.supplier_id
-    LEFT JOIN locations.facilities f ON f.id = po.facility_id
+    JOIN catalog.suppliers s ON s.id = po.supplier_id AND s.tenant_id = ${tenantId}
+    LEFT JOIN locations.facilities f ON f.id = po.facility_id AND f.tenant_id = ${tenantId}
     WHERE po.tenant_id = ${tenantId}
       AND po.status = 'received'
       AND po.expected_delivery_date IS NOT NULL
       AND po.actual_delivery_date IS NOT NULL
       AND po.actual_delivery_date >= ${startDate.toISOString()}::timestamptz
-      AND po.actual_delivery_date <= ${endDate.toISOString()}::timestamptz
+      AND po.actual_delivery_date < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
     ORDER BY ${orderClause}
     LIMIT ${limit} OFFSET ${offset}
@@ -292,8 +295,8 @@ async function drilldownStockoutCount(filters: DrilldownFilters): Promise<Drilld
       il.reorder_point AS "reorderPoint",
       EXTRACT(EPOCH FROM (now() - il.updated_at)) / 86400 AS "daysAtZero"
     FROM locations.inventory_ledger il
-    JOIN catalog.parts p ON p.id = il.part_id
-    JOIN locations.facilities f ON f.id = il.facility_id
+    JOIN catalog.parts p ON p.id = il.part_id AND p.tenant_id = ${tenantId}
+    JOIN locations.facilities f ON f.id = il.facility_id AND f.tenant_id = ${tenantId}
     WHERE il.tenant_id = ${tenantId}
       AND il.qty_on_hand <= 0
       ${facilityFilter}
@@ -332,7 +335,7 @@ async function drilldownAvgCycleTime(filters: DrilldownFilters): Promise<Drilldo
       AND wo.actual_start_date IS NOT NULL
       AND wo.actual_end_date IS NOT NULL
       AND wo.actual_end_date >= ${startDate.toISOString()}::timestamptz
-      AND wo.actual_end_date <= ${endDate.toISOString()}::timestamptz
+      AND wo.actual_end_date < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
   `);
   const totalRows = (countResult as unknown as Array<{ total: number }>)[0]?.total ?? 0;
@@ -346,14 +349,14 @@ async function drilldownAvgCycleTime(filters: DrilldownFilters): Promise<Drilldo
       wo.actual_end_date AS "actualEndDate",
       round(EXTRACT(EPOCH FROM (wo.actual_end_date - wo.actual_start_date))::numeric / 3600, 2)::float AS "cycleTimeHours"
     FROM orders.work_orders wo
-    JOIN catalog.parts p ON p.id = wo.part_id
-    LEFT JOIN locations.facilities f ON f.id = wo.facility_id
+    JOIN catalog.parts p ON p.id = wo.part_id AND p.tenant_id = ${tenantId}
+    LEFT JOIN locations.facilities f ON f.id = wo.facility_id AND f.tenant_id = ${tenantId}
     WHERE wo.tenant_id = ${tenantId}
       AND wo.status = 'completed'
       AND wo.actual_start_date IS NOT NULL
       AND wo.actual_end_date IS NOT NULL
       AND wo.actual_end_date >= ${startDate.toISOString()}::timestamptz
-      AND wo.actual_end_date <= ${endDate.toISOString()}::timestamptz
+      AND wo.actual_end_date < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
     ORDER BY ${orderClause}
     LIMIT ${limit} OFFSET ${offset}
@@ -377,9 +380,9 @@ async function drilldownOrderAccuracy(filters: DrilldownFilters): Promise<Drilld
 
   const facilityFilter = facilityIds?.length
     ? sql` AND r.order_id IN (
-        SELECT id FROM orders.purchase_orders WHERE facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.purchase_orders WHERE tenant_id = ${tenantId} AND facility_id = ANY(${facilityIds})
         UNION ALL
-        SELECT id FROM orders.transfer_orders WHERE destination_facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.transfer_orders WHERE tenant_id = ${tenantId} AND destination_facility_id = ANY(${facilityIds})
       )`
     : sql``;
 
@@ -392,7 +395,7 @@ async function drilldownOrderAccuracy(filters: DrilldownFilters): Promise<Drilld
     JOIN orders.receipts r ON r.id = rl.receipt_id
     WHERE rl.tenant_id = ${tenantId}
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
-      AND r.created_at <= ${endDate.toISOString()}::timestamptz
+      AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
   `);
   const totalRows = (countResult as unknown as Array<{ total: number }>)[0]?.total ?? 0;
@@ -410,10 +413,10 @@ async function drilldownOrderAccuracy(filters: DrilldownFilters): Promise<Drilld
       r.created_at AS "createdAt"
     FROM orders.receipt_lines rl
     JOIN orders.receipts r ON r.id = rl.receipt_id
-    JOIN catalog.parts p ON p.id = rl.part_id
+    JOIN catalog.parts p ON p.id = rl.part_id AND p.tenant_id = ${tenantId}
     WHERE rl.tenant_id = ${tenantId}
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
-      AND r.created_at <= ${endDate.toISOString()}::timestamptz
+      AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityFilter}
     ORDER BY ${orderClause}
     LIMIT ${limit} OFFSET ${offset}
