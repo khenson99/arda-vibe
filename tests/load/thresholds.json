@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_version": "1.0.0",
+  "_description": "Arda V2 SLO threshold config for k6 load tests. Single source of truth consumed by CI performance gate. See docs/ops/slo-budgets.md for full context.",
+  "_updated": "2026-02-14",
+  "_owner": "Platform Team",
+  "_issue": "#284",
+
+  "thresholds": {
+
+    "http_req_duration": [
+      "p(95)<300",
+      "p(99)<1000"
+    ],
+    "http_req_failed": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{api_category:read_single}": [
+      "p(95)<150",
+      "p(99)<500"
+    ],
+    "http_req_failed{api_category:read_single}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{api_category:read_list}": [
+      "p(95)<250",
+      "p(99)<800"
+    ],
+    "http_req_failed{api_category:read_list}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{api_category:write}": [
+      "p(95)<300",
+      "p(99)<1000"
+    ],
+    "http_req_failed{api_category:write}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{api_category:workflow_transition}": [
+      "p(95)<200",
+      "p(99)<600"
+    ],
+    "http_req_failed{api_category:workflow_transition}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{api_category:background_scan}": [
+      "p(95)<300",
+      "p(99)<1000"
+    ],
+    "http_req_failed{api_category:background_scan}": [
+      "rate<0.01"
+    ],
+
+    "http_req_duration{api_category:auth}": [
+      "p(95)<200",
+      "p(99)<600"
+    ],
+    "http_req_failed{api_category:auth}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{api_category:health}": [
+      "p(95)<50",
+      "p(99)<150"
+    ],
+    "http_req_failed{api_category:health}": [
+      "rate<0.001"
+    ],
+
+    "http_req_duration{workflow:fr01}": [
+      "p(95)<250",
+      "p(99)<800"
+    ],
+    "http_req_failed{workflow:fr01}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{workflow:fr02}": [
+      "p(95)<250",
+      "p(99)<800"
+    ],
+    "http_req_failed{workflow:fr02}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{workflow:fr03}": [
+      "p(95)<250",
+      "p(99)<800"
+    ],
+    "http_req_failed{workflow:fr03}": [
+      "rate<0.005"
+    ],
+
+    "http_req_duration{service:catalog}": [
+      "p(95)<250",
+      "p(99)<800"
+    ],
+    "http_req_duration{service:kanban}": [
+      "p(95)<250",
+      "p(99)<800"
+    ],
+    "http_req_duration{service:orders}": [
+      "p(95)<300",
+      "p(99)<1000"
+    ],
+    "http_req_duration{service:auth}": [
+      "p(95)<200",
+      "p(99)<600"
+    ],
+    "http_req_duration{service:notifications}": [
+      "p(95)<250",
+      "p(99)<800"
+    ],
+    "http_req_duration{service:api-gateway}": [
+      "p(95)<300",
+      "p(99)<1000"
+    ]
+  },
+
+  "tags": {
+    "api_category": {
+      "description": "API endpoint category for SLO bucketing",
+      "values": [
+        "read_single",
+        "read_list",
+        "write",
+        "workflow_transition",
+        "background_scan",
+        "auth",
+        "health"
+      ]
+    },
+    "workflow": {
+      "description": "Functional requirement workflow grouping",
+      "values": [
+        "fr01",
+        "fr02",
+        "fr03"
+      ]
+    },
+    "service": {
+      "description": "Backend service name",
+      "values": [
+        "catalog",
+        "kanban",
+        "orders",
+        "auth",
+        "notifications",
+        "api-gateway"
+      ]
+    }
+  },
+
+  "scenarios": {
+    "_description": "Scenario definitions for k6 load test files to reference. Implementation lives in tests/load/scenarios/.",
+    "steady_state": {
+      "executor": "constant-vus",
+      "vus": 100,
+      "duration": "5m",
+      "description": "Sustained load matching NFR-PERF-005 MVP target (100 concurrent users)"
+    },
+    "spike": {
+      "executor": "ramping-vus",
+      "stages": [
+        { "duration": "1m", "target": 50 },
+        { "duration": "2m", "target": 200 },
+        { "duration": "1m", "target": 50 },
+        { "duration": "1m", "target": 0 }
+      ],
+      "description": "Spike test: ramp to 2x steady state, then recover"
+    },
+    "soak": {
+      "executor": "constant-vus",
+      "vus": 50,
+      "duration": "30m",
+      "description": "Soak test: moderate load sustained for 30 minutes to detect memory leaks"
+    }
+  },
+
+  "ci_gate": {
+    "fail_on": "p95_breach",
+    "warn_on": "p99_breach",
+    "error_rate_fail": 0.005,
+    "report_artifact": "tests/load/reports/performance-report.json",
+    "required_scenarios": ["steady_state"],
+    "timeout_minutes": 10
+  }
+}

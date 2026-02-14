@@ -550,3 +550,24 @@ Learnings:
   - Test date generation: use hours offset (Date.UTC(2026,0,1,i,0,0)) instead of day-of-month to avoid invalid dates for n>31
   - Concurrency test validates determinism: 60 concurrent hash computations must produce identical results
   - Chain resets after PENDING entries (lastHash = null) since PENDING entries don't participate in chain
+
+--- Backend Agent Iteration 1 | Issue #284 ---
+Timestamp: 2026-02-14T12:00:00Z
+Status: completed
+Changes:
+  - docs/ops/slo-budgets.md (new — versioned SLO spec covering FR-01, FR-02, FR-03)
+  - tests/load/thresholds.json (new — machine-readable k6/CI threshold config)
+  - tests/load/helpers/tags.js (new — tag helper mapping requests to SLO categories)
+  - tests/load/README.md (new — load test documentation)
+  - tests/load/scenarios/.gitkeep (new — placeholder for future k6 scenarios)
+  - tests/load/reports/.gitkeep (new — placeholder for CI artifact reports)
+  - .gitignore (updated — added load test report exclusion)
+Tests: N/A (this ticket defines budgets/contracts; load harness implementation is separate)
+Learnings:
+  - SLO budgets aligned with existing NFR-PERF-001 through NFR-PERF-006 from docs/spec/nfr/nfr-baseline.md
+  - Prometheus metric names match packages/observability/src/metrics.ts: http_request_duration_seconds, job_processing_duration_seconds, db_query_duration_seconds
+  - k6 threshold naming uses {tag_key:tag_value} syntax compatible with k6 threshold groups
+  - Three tag dimensions: api_category (7 values), workflow (fr01/fr02/fr03), service (6 services)
+  - CI gate contract: p95 breach = FAIL, p99 breach = WARN, error rate >= 0.5% = FAIL
+  - Endpoint-to-category mapping handled by tags.js helper to avoid duplication in scenario files
+  - Monthly review cadence with ownership matrix per SLO scope
