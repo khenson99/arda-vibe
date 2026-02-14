@@ -98,7 +98,7 @@ export async function processTransferQueueEntry(
     // Create transfer order in transaction
     const result = await db.transaction(async (tx) => {
       // Generate TO number
-      const toNumber = await getNextTONumber(tx, tenantId);
+      const toNumber = await getNextTONumber(tenantId, tx);
 
       // Create transfer order
       const [to] = await tx
@@ -227,10 +227,11 @@ export async function processTransferQueueEntry(
  * Start listening to lifecycle.queue_entry events.
  * Call this from the orders service startup.
  */
-export function startTransferAutomationListener(redisUrl: string): void {
+export async function startTransferAutomationListener(redisUrl: string): Promise<void> {
   const eventBus = getEventBus(redisUrl);
 
-  eventBus.subscribe('lifecycle.queue_entry', async (event) => {
+  await eventBus.subscribeGlobal(async (event) => {
+    if (event.type !== 'lifecycle.queue_entry') return;
     const queueEvent = event as LifecycleQueueEntryEvent;
 
     // Only process transfer loops
