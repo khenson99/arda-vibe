@@ -753,3 +753,81 @@ export interface LeadTimeFilters {
   dateFrom?: string; // ISO date string
   dateTo?: string; // ISO date string
 }
+
+// ─── Import Pipeline Types (MVP-21) ────────────────────────────────
+
+export type ImportJobStatus =
+  | 'pending'
+  | 'parsing'
+  | 'matching'
+  | 'review'
+  | 'applying'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type ImportSourceType =
+  | 'csv'
+  | 'xlsx'
+  | 'google_sheets'
+  | 'manual_entry';
+
+export type ImportItemDisposition =
+  | 'new'
+  | 'duplicate'
+  | 'update'
+  | 'skip'
+  | 'error';
+
+export type AiOperationType =
+  | 'field_mapping'
+  | 'deduplication'
+  | 'categorization'
+  | 'enrichment'
+  | 'validation';
+
+export type AiProviderLogStatus =
+  | 'pending'
+  | 'success'
+  | 'error'
+  | 'timeout';
+
+// ─── Import Job State Transitions ───────────────────────────────────
+export const IMPORT_JOB_VALID_TRANSITIONS: Record<ImportJobStatus, ImportJobStatus[]> = {
+  pending: ['parsing', 'cancelled'],
+  parsing: ['matching', 'failed'],
+  matching: ['review', 'failed'],
+  review: ['applying', 'cancelled'],
+  applying: ['completed', 'failed'],
+  completed: [],
+  failed: [],
+  cancelled: [],
+};
+
+// ─── Import Pipeline Interfaces ─────────────────────────────────────
+export interface ImportJobSummary {
+  id: string;
+  tenantId: string;
+  status: ImportJobStatus;
+  sourceType: ImportSourceType;
+  fileName: string;
+  totalRows: number;
+  processedRows: number;
+  newItems: number;
+  duplicateItems: number;
+  updatedItems: number;
+  skippedItems: number;
+  errorItems: number;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface ImportMatchResult {
+  importItemId: string;
+  existingPartId: string | null;
+  matchScore: number;
+  matchMethod: string;
+  disposition: ImportItemDisposition;
+}

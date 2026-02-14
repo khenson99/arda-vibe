@@ -243,3 +243,224 @@ export const bomItemsRelations = relations(bomItems, ({ one }) => ({
     relationName: 'childBom',
   }),
 }));
+
+// --- Import Pipeline Enums (MVP-21) ------------------------------------------
+export const importJobStatusEnum = pgEnum('import_job_status', [
+  'pending',
+  'parsing',
+  'matching',
+  'review',
+  'applying',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+export const importSourceTypeEnum = pgEnum('import_source_type', [
+  'csv',
+  'xlsx',
+  'google_sheets',
+  'manual_entry',
+]);
+
+export const importItemDispositionEnum = pgEnum('import_item_disposition', [
+  'new',
+  'duplicate',
+  'update',
+  'skip',
+  'error',
+]);
+
+export const aiOperationTypeEnum = pgEnum('ai_operation_type', [
+  'field_mapping',
+  'deduplication',
+  'categorization',
+  'enrichment',
+  'validation',
+]);
+
+export const aiProviderLogStatusEnum = pgEnum('ai_provider_log_status', [
+  'pending',
+  'success',
+  'error',
+  'timeout',
+]);
+
+// --- Import Jobs -------------------------------------------------------------
+export const importJobs = catalogSchema.table(
+  'import_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    status: importJobStatusEnum('status').notNull().default('pending'),
+    sourceType: importSourceTypeEnum('source_type').notNull(),
+    fileName: varchar('file_name', { length: 500 }).notNull(),
+    fileUrl: text('file_url'),
+    fileSizeBytes: integer('file_size_bytes'),
+    fieldMapping: jsonb('field_mapping').$type<Record<string, string>>(),
+    totalRows: integer('total_rows').notNull().default(0),
+    processedRows: integer('processed_rows').notNull().default(0),
+    newItems: integer('new_items').notNull().default(0),
+    duplicateItems: integer('duplicate_items').notNull().default(0),
+    updatedItems: integer('updated_items').notNull().default(0),
+    skippedItems: integer('skipped_items').notNull().default(0),
+    errorItems: integer('error_items').notNull().default(0),
+    errorLog: jsonb('error_log').$type<Array<{ row: number; field?: string; message: string }>>(),
+    createdByUserId: uuid('created_by_user_id').notNull(),
+    reviewedByUserId: uuid('reviewed_by_user_id'),
+    appliedByUserId: uuid('applied_by_user_id'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('import_jobs_tenant_idx').on(table.tenantId),
+    index('import_jobs_tenant_status_idx').on(table.tenantId, table.status),
+    index('import_jobs_created_by_idx').on(table.createdByUserId),
+    index('import_jobs_created_at_idx').on(table.tenantId, table.createdAt),
+  ]
+);
+
+// --- Import Items (parsed rows from the source file) -------------------------
+export const importItems = catalogSchema.table(
+  'import_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    importJobId: uuid('import_job_id')
+      .notNull()
+      .references(() => importJobs.id, { onDelete: 'cascade' }),
+    rowNumber: integer('row_number').notNull(),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull(),
+    normalizedData: jsonb('normalized_data').$type<Record<string, unknown>>(),
+    disposition: importItemDispositionEnum('disposition').notNull().default('new'),
+    matchedPartId: uuid('matched_part_id').references(() => parts.id, { onDelete: 'set null' }),
+    validationErrors: jsonb('validation_errors').$type<Array<{ field: string; message: string }>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('import_items_tenant_idx').on(table.tenantId),
+    index('import_items_job_idx').on(table.importJobId),
+    index('import_items_job_disposition_idx').on(table.importJobId, table.disposition),
+    index('import_items_matched_part_idx').on(table.matchedPartId),
+  ]
+);
+
+// --- Import Matches (deduplication match candidates) -------------------------
+export const importMatches = catalogSchema.table(
+  'import_matches',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    importItemId: uuid('import_item_id')
+      .notNull()
+      .references(() => importItems.id, { onDelete: 'cascade' }),
+    existingPartId: uuid('existing_part_id')
+      .notNull()
+      .references(() => parts.id, { onDelete: 'cascade' }),
+    matchScore: numeric('match_score', { precision: 5, scale: 4 }).notNull(),
+    matchMethod: varchar('match_method', { length: 50 }).notNull(),
+    matchDetails: jsonb('match_details').$type<Record<string, unknown>>(),
+    isAccepted: boolean('is_accepted'),
+    reviewedByUserId: uuid('reviewed_by_user_id'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('import_matches_tenant_idx').on(table.tenantId),
+    index('import_matches_item_idx').on(table.importItemId),
+    index('import_matches_existing_part_idx').on(table.existingPartId),
+    index('import_matches_score_idx').on(table.importItemId, table.matchScore),
+  ]
+);
+
+// --- AI Provider Config (per-tenant AI settings) -----------------------------
+export const aiProviderConfig = catalogSchema.table(
+  'ai_provider_config',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    providerName: varchar('provider_name', { length: 100 }).notNull(),
+    operationType: aiOperationTypeEnum('operation_type').notNull(),
+    modelName: varchar('model_name', { length: 100 }).notNull(),
+    apiKeyEncrypted: text('api_key_encrypted'),
+    config: jsonb('config').$type<Record<string, unknown>>().default({}),
+    isEnabled: boolean('is_enabled').notNull().default(true),
+    maxRequestsPerMinute: integer('max_requests_per_minute').default(60),
+    maxTokensPerRequest: integer('max_tokens_per_request').default(4096),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('ai_provider_config_tenant_idx').on(table.tenantId),
+    uniqueIndex('ai_provider_config_tenant_op_idx').on(
+      table.tenantId,
+      table.operationType
+    ),
+  ]
+);
+
+// --- AI Provider Logs (audit trail for AI calls) -----------------------------
+export const aiProviderLogs = catalogSchema.table(
+  'ai_provider_logs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    importJobId: uuid('import_job_id').references(() => importJobs.id, { onDelete: 'set null' }),
+    operationType: aiOperationTypeEnum('operation_type').notNull(),
+    providerName: varchar('provider_name', { length: 100 }).notNull(),
+    modelName: varchar('model_name', { length: 100 }).notNull(),
+    status: aiProviderLogStatusEnum('status').notNull().default('pending'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    latencyMs: integer('latency_ms'),
+    requestPayload: jsonb('request_payload').$type<Record<string, unknown>>(),
+    responsePayload: jsonb('response_payload').$type<Record<string, unknown>>(),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('ai_provider_logs_tenant_idx').on(table.tenantId),
+    index('ai_provider_logs_job_idx').on(table.importJobId),
+    index('ai_provider_logs_tenant_op_idx').on(table.tenantId, table.operationType),
+    index('ai_provider_logs_created_at_idx').on(table.tenantId, table.createdAt),
+  ]
+);
+
+// --- Import Pipeline Relations -----------------------------------------------
+export const importJobsRelations = relations(importJobs, ({ many }) => ({
+  items: many(importItems),
+  aiLogs: many(aiProviderLogs),
+}));
+
+export const importItemsRelations = relations(importItems, ({ one, many }) => ({
+  importJob: one(importJobs, {
+    fields: [importItems.importJobId],
+    references: [importJobs.id],
+  }),
+  matchedPart: one(parts, {
+    fields: [importItems.matchedPartId],
+    references: [parts.id],
+  }),
+  matches: many(importMatches),
+}));
+
+export const importMatchesRelations = relations(importMatches, ({ one }) => ({
+  importItem: one(importItems, {
+    fields: [importMatches.importItemId],
+    references: [importItems.id],
+  }),
+  existingPart: one(parts, {
+    fields: [importMatches.existingPartId],
+    references: [parts.id],
+  }),
+}));
+
+export const aiProviderLogsRelations = relations(aiProviderLogs, ({ one }) => ({
+  importJob: one(importJobs, {
+    fields: [aiProviderLogs.importJobId],
+    references: [importJobs.id],
+  }),
+}));
