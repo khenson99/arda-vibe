@@ -11,31 +11,12 @@
  * The composite score is a weighted sum — higher is better.
  */
 
+import { createLogger } from '@arda/config';
 import { db, schema } from '@arda/db';
 import { eq, and, ne, gt, sql } from 'drizzle-orm';
-import * as configModule from '@arda/config';
 import type { SourceRecommendation } from '@arda/shared-types';
 
-type LoggerLike = {
-  debug: (...args: unknown[]) => void;
-  info: (...args: unknown[]) => void;
-  warn: (...args: unknown[]) => void;
-  error: (...args: unknown[]) => void;
-};
-
-const fallbackLogger: LoggerLike = {
-  debug: () => undefined,
-  info: () => undefined,
-  warn: () => undefined,
-  error: () => undefined,
-};
-
-const createLogger =
-  typeof configModule.createLogger === 'function'
-    ? configModule.createLogger
-    : () => fallbackLogger;
-
-const log = createLogger('source-recommendation') as LoggerLike;
+const log = createLogger('source-recommendation');
 
 const { inventoryLedger, facilities, leadTimeHistory } = schema;
 
