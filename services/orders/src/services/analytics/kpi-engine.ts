@@ -36,6 +36,32 @@ export interface KpiResult {
   lastUpdated: string;
 }
 
+export interface KpiTrendDataPoint {
+  date: string;
+  value: number;
+  facilityId?: string;
+  facilityName?: string;
+}
+
+export interface KpiTrendResult {
+  kpiId: string;
+  period: number;
+  bucket: 'daily' | 'weekly';
+  startDate: string;
+  endDate: string;
+  dataPoints: KpiTrendDataPoint[];
+  facilities: Array<{ id: string; name: string }>;
+}
+
+export interface TrendFilters {
+  tenantId: string;
+  kpiId: string;
+  startDate: Date;
+  endDate: Date;
+  bucket: 'daily' | 'weekly';
+  facilityIds?: string[];
+}
+
 // ─── KPI Metadata ──────────────────────────────────────────────────────
 
 const KPI_META: Record<
@@ -48,6 +74,8 @@ const KPI_META: Record<
   avg_cycle_time: { unit: 'hrs', isNegativeGood: true, threshold: 72 },
   order_accuracy: { unit: '%', isNegativeGood: false, threshold: 98 },
 };
+
+export const VALID_KPI_IDS = Object.keys(KPI_META);
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
@@ -360,4 +388,137 @@ export async function computeAllKpis(filters: KpiFilters): Promise<KpiResult[]> 
   );
 
   return results;
+}
+
+// ─── Trend Computation ──────────────────────────────────────────────
+
+/**
+ * Build date buckets for trend data. Each bucket is a contiguous time range.
+ * Daily: one bucket per day. Weekly: one bucket per 7 days.
+ */
+function buildTrendBuckets(
+  startDate: Date,
+  endDate: Date,
+  bucket: 'daily' | 'weekly',
+): { bucketStart: Date; bucketEnd: Date; date: string }[] {
+  const buckets: { bucketStart: Date; bucketEnd: Date; date: string }[] = [];
+  const stepMs = bucket === 'daily' ? 86_400_000 : 7 * 86_400_000;
+
+  let current = new Date(startDate);
+  while (current < endDate) {
+    const bucketEnd = new Date(Math.min(current.getTime() + stepMs, endDate.getTime()));
+    buckets.push({
+      bucketStart: new Date(current),
+      bucketEnd,
+      date: current.toISOString().slice(0, 10), // YYYY-MM-DD
+    });
+    current = bucketEnd;
+  }
+
+  return buckets;
+}
+
+/**
+ * Look up facility names for the given IDs.
+ */
+async function lookupFacilities(
+  tenantId: string,
+  facilityIds: string[],
+): Promise<Array<{ id: string; name: string }>> {
+  if (!facilityIds.length) return [];
+
+  const result = await db.execute(sql`
+    SELECT id, name
+    FROM locations.facilities
+    WHERE tenant_id = ${tenantId}
+      AND id = ANY(${facilityIds})
+    ORDER BY name
+  `);
+
+  return (result as unknown as Array<{ id: string; name: string }>);
+}
+
+/**
+ * Compute a time-series trend for a single KPI over a date range.
+ * Supports facility overlays: when facilityIds are provided, each data point
+ * is computed per-facility, allowing frontend to render multi-line overlays.
+ */
+export async function computeKpiTrend(filters: TrendFilters): Promise<KpiTrendResult> {
+  const { tenantId, kpiId, startDate, endDate, bucket, facilityIds } = filters;
+  const startTime = Date.now();
+
+  const computeFn = KPI_COMPUTE_FNS[kpiId];
+  if (!computeFn) {
+    throw new KpiNotFoundError(kpiId);
+  }
+
+  const buckets = buildTrendBuckets(startDate, endDate, bucket);
+  const hasFacilityOverlay = facilityIds && facilityIds.length > 1;
+
+  let dataPoints: KpiTrendDataPoint[];
+  let facilities: Array<{ id: string; name: string }> = [];
+
+  if (hasFacilityOverlay) {
+    // Compute per-facility overlays: one series per facility
+    facilities = await lookupFacilities(tenantId, facilityIds);
+    const facilityMap = new Map(facilities.map((f) => [f.id, f.name]));
+
+    dataPoints = (
+      await Promise.all(
+        facilityIds.map(async (facId) => {
+          const points = await Promise.all(
+            buckets.map(async (b) => {
+              const value = await computeFn(tenantId, b.bucketStart, b.bucketEnd, [facId]);
+              return {
+                date: b.date,
+                value,
+                facilityId: facId,
+                facilityName: facilityMap.get(facId) ?? facId,
+              };
+            }),
+          );
+          return points;
+        }),
+      )
+    ).flat();
+  } else {
+    // Single aggregate series (optionally filtered to one facility)
+    dataPoints = await Promise.all(
+      buckets.map(async (b) => {
+        const value = await computeFn(tenantId, b.bucketStart, b.bucketEnd, facilityIds);
+        return { date: b.date, value };
+      }),
+    );
+
+    if (facilityIds?.length === 1) {
+      facilities = await lookupFacilities(tenantId, facilityIds);
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  const periodDays = Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000);
+  log.info(
+    { tenantId, kpiId, periodDays, bucket, pointCount: dataPoints.length, durationMs },
+    'KPI trend computation complete',
+  );
+
+  return {
+    kpiId,
+    period: periodDays,
+    bucket,
+    startDate: startDate.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10),
+    dataPoints,
+    facilities,
+  };
+}
+
+// ─── Error Types ────────────────────────────────────────────────────
+
+export class KpiNotFoundError extends Error {
+  public readonly code = 'KPI_NOT_FOUND';
+  constructor(kpiId: string) {
+    super(`Unknown KPI: '${kpiId}'. Valid KPIs: ${VALID_KPI_IDS.join(', ')}`);
+    this.name = 'KpiNotFoundError';
+  }
 }
