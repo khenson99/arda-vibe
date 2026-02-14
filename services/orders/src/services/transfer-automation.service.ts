@@ -80,6 +80,18 @@ export async function processTransferQueueEntry(
       };
     }
 
+    // Validate loop relation was loaded
+    if (!card.loop) {
+      log.error(
+        { cardId, loopId, tenantId },
+        'Card loop relation not found (loop may have been deleted)'
+      );
+      return {
+        success: false,
+        error: 'Card loop relation not found',
+      };
+    }
+
     // Validate loop has sourceFacilityId
     if (!card.loop.sourceFacilityId) {
       log.error(

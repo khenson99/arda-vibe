@@ -77,8 +77,8 @@ const queueRiskScheduler = startQueueRiskScheduler({
 });
 void queueRiskScheduler.runOnce();
 
-// Start transfer automation listener
-startTransferAutomationListener(config.REDIS_URL);
+// Start transfer automation listener (must complete before accepting requests)
+await startTransferAutomationListener(config.REDIS_URL);
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────
 function shutdown(signal: string) {
