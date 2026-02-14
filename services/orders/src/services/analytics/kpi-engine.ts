@@ -1,5 +1,5 @@
 import { db, schema } from '@arda/db';
-import { eq, and, sql, gte, lte, isNotNull } from 'drizzle-orm';
+import { eq, and, sql, gte, lte, lt, isNotNull } from 'drizzle-orm';
 import { createLogger } from '@arda/config';
 
 const log = createLogger('orders:kpi-engine');
@@ -136,9 +136,9 @@ async function computeFillRate(
   // A receipt is "fully filled" when every receipt line accepted the expected quantity.
   const facilityJoin = facilityIds?.length
     ? sql` AND r.order_id IN (
-        SELECT id FROM orders.purchase_orders WHERE facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.purchase_orders WHERE tenant_id = ${tenantId} AND facility_id = ANY(${facilityIds})
         UNION ALL
-        SELECT id FROM orders.transfer_orders WHERE destination_facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.transfer_orders WHERE tenant_id = ${tenantId} AND destination_facility_id = ANY(${facilityIds})
       )`
     : sql``;
 
@@ -157,7 +157,7 @@ async function computeFillRate(
     JOIN orders.receipt_lines rl ON rl.receipt_id = r.id
     WHERE r.tenant_id = ${tenantId}
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
-      AND r.created_at <= ${endDate.toISOString()}::timestamptz
+      AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityJoin}
   `);
 
@@ -181,7 +181,7 @@ async function computeSupplierOtd(
     isNotNull(schema.purchaseOrders.expectedDeliveryDate),
     isNotNull(schema.purchaseOrders.actualDeliveryDate),
     gte(schema.purchaseOrders.actualDeliveryDate, startDate),
-    lte(schema.purchaseOrders.actualDeliveryDate, endDate),
+    lt(schema.purchaseOrders.actualDeliveryDate, endDate),
   ];
 
   if (facilityIds?.length) {
@@ -246,7 +246,7 @@ async function computeAvgCycleTime(
     isNotNull(schema.workOrders.actualStartDate),
     isNotNull(schema.workOrders.actualEndDate),
     gte(schema.workOrders.actualEndDate, startDate),
-    lte(schema.workOrders.actualEndDate, endDate),
+    lt(schema.workOrders.actualEndDate, endDate),
   ];
 
   if (facilityIds?.length) {
@@ -276,9 +276,9 @@ async function computeOrderAccuracy(
   // A line is accurate when quantityDamaged = 0 AND quantityRejected = 0
   const facilityJoin = facilityIds?.length
     ? sql` AND r.order_id IN (
-        SELECT id FROM orders.purchase_orders WHERE facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.purchase_orders WHERE tenant_id = ${tenantId} AND facility_id = ANY(${facilityIds})
         UNION ALL
-        SELECT id FROM orders.transfer_orders WHERE destination_facility_id = ANY(${facilityIds})
+        SELECT id FROM orders.transfer_orders WHERE tenant_id = ${tenantId} AND destination_facility_id = ANY(${facilityIds})
       )`
     : sql``;
 
@@ -292,7 +292,7 @@ async function computeOrderAccuracy(
     JOIN orders.receipts r ON r.id = rl.receipt_id
     WHERE rl.tenant_id = ${tenantId}
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
-      AND r.created_at <= ${endDate.toISOString()}::timestamptz
+      AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityJoin}
   `);
 
@@ -481,6 +481,13 @@ export async function computeKpiTrend(filters: TrendFilters): Promise<KpiTrendRe
         }),
       )
     ).flat();
+
+    // Sort overlay points chronologically, then by facilityId for deterministic ordering
+    dataPoints.sort((a, b) => {
+      const dateCmp = a.date.localeCompare(b.date);
+      if (dateCmp !== 0) return dateCmp;
+      return (a.facilityId ?? '').localeCompare(b.facilityId ?? '');
+    });
   } else {
     // Single aggregate series (optionally filtered to one facility)
     dataPoints = await Promise.all(

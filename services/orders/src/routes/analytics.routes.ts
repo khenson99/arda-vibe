@@ -142,6 +142,13 @@ analyticsRouter.get('/kpis/:kpiName/trend', async (req: AuthRequest, res, next) 
 
     const { window: windowDays, startDate: startStr, endDate: endStr, facilityIds } = parsed.data;
 
+    // Require both or neither custom date params
+    if ((startStr && !endStr) || (!startStr && endStr)) {
+      return next(
+        new AppError(400, 'Both startDate and endDate must be provided for custom date ranges'),
+      );
+    }
+
     // Determine date range: either window-based or custom range
     let startDate: Date;
     let endDate: Date;
