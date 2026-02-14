@@ -9,6 +9,8 @@
  *   POST   /facilities/:facilityId/inventory          — upsert a row
  *   PATCH  /facilities/:facilityId/inventory/:partId/adjust — adjust quantity
  *   POST   /facilities/:facilityId/inventory/batch-adjust   — batch adjust
+ *   GET    /cross-location                            — facility-part matrix
+ *   GET    /cross-location/summary                    — network KPIs
  */
 
 import { Router } from 'express';
@@ -23,6 +25,10 @@ import {
   adjustQuantity,
   batchAdjust,
 } from '../services/inventory-ledger.service.js';
+import {
+  getCrossLocationMatrix,
+  getCrossLocationSummary,
+} from '../services/inventory-cross-location.service.js';
 
 export const inventoryRouter = Router();
 
@@ -59,6 +65,27 @@ const batchAdjustSchema = z.object({
       source: z.string().optional(),
     })
   ).min(1).max(50),
+});
+
+/** Split a comma-separated string of UUIDs and validate each one. */
+const csvUuids = z
+  .string()
+  .optional()
+  .transform((val) =>
+    val
+      ? val.split(',').map((id) => z.string().uuid().parse(id.trim()))
+      : undefined
+  );
+
+const crossLocationMatrixSchema = z.object({
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().max(500).optional(),
+  partIds: csvUuids,
+  facilityIds: csvUuids,
+});
+
+const crossLocationSummarySchema = z.object({
+  facilityIds: csvUuids,
 });
 
 // ─── GET /facilities/:facilityId/inventory — paginated list ───────────
@@ -200,6 +227,59 @@ inventoryRouter.post('/facilities/:facilityId/inventory/batch-adjust', async (re
   } catch (error) {
     if (error instanceof z.ZodError) {
       return next(new AppError(400, 'Invalid request body'));
+    }
+    next(error);
+  }
+});
+
+// ─── GET /cross-location — facility-part matrix ───────────────────────
+
+inventoryRouter.get('/cross-location', async (req: AuthRequest, res, next) => {
+  try {
+    const { page, pageSize, partIds, facilityIds } = crossLocationMatrixSchema.parse(req.query);
+    const tenantId = req.user!.tenantId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const result = await getCrossLocationMatrix({
+      tenantId,
+      page: page ?? 1,
+      pageSize: pageSize ?? 50,
+      partIds,
+      facilityIds,
+    });
+
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
+// ─── GET /cross-location/summary — network KPIs ───────────────────────
+
+inventoryRouter.get('/cross-location/summary', async (req: AuthRequest, res, next) => {
+  try {
+    const { facilityIds } = crossLocationSummarySchema.parse(req.query);
+    const tenantId = req.user!.tenantId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const result = await getCrossLocationSummary({
+      tenantId,
+      facilityIds,
+    });
+
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid query parameters'));
     }
     next(error);
   }
