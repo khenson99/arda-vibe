@@ -34,6 +34,9 @@ const kpiQuerySchema = z.object({
 /**
  * Compute the previous-period date range by shifting back by the same duration.
  * e.g., if range is 30 days, previous period is the 30 days before startDate.
+ *
+ * All KPI queries use half-open intervals [start, end), so setting
+ * previousEnd = startDate guarantees no overlap with the current period.
  */
 function computePreviousPeriod(startDate: Date, endDate: Date) {
   const durationMs = endDate.getTime() - startDate.getTime();
