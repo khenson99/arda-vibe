@@ -669,7 +669,7 @@ auditRouter.get('/integrity-check', requireRole('tenant_admin'), async (req: Aut
 // ─── POST /export — Audit log export (sync for small, async for large) ──
 
 const exportRequestSchema = z.object({
-  format: z.enum(['csv', 'json', 'pdf']).default('csv'),
+  format: z.enum(['csv', 'json']).default('csv'),
   action: z.string().max(100).optional(),
   entityType: z.string().max(100).optional(),
   entityId: z.string().uuid().optional(),
@@ -780,7 +780,7 @@ async function countAuditEntries(
 auditRouter.post('/export', async (req: AuthRequest, res, next) => {
   try {
     const tenantId = req.user?.tenantId;
-    const userId = req.user?.userId;
+    const userId = req.user?.sub;
     if (!tenantId || !userId) {
       throw new AppError(401, 'Unauthorized');
     }
