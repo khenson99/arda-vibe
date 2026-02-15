@@ -63,11 +63,26 @@ const routes: RouteConfig[] = [
     pathRewrite: {},
     requiresAuth: true,
   },
+
+
   // ── Sales domain (proxied to orders service) ──
   {
     prefix: '/api/sales/customers',
     target: serviceUrls.orders,
     pathRewrite: { '^/': '/customers/' },
+    requiresAuth: true,
+  },
+  {
+    prefix: '/api/sales/orders',
+    target: serviceUrls.orders,
+    pathRewrite: { '^/': '/sales-orders/' },
+    requiresAuth: true,
+  },
+  // ── Inventory ETA (proxied to orders service) ──
+  {
+    prefix: '/api/inventory/eta',
+    target: serviceUrls.orders,
+    pathRewrite: { '^/': '/restock-eta/' },
     requiresAuth: true,
   },
   {

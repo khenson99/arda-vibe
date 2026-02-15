@@ -22,6 +22,8 @@ import { analyticsRouter } from './routes/analytics.routes.js';
 import { orderHistoryRouter } from './routes/order-history.routes.js';
 import { emailOrdersRouter } from './routes/email-orders.routes.js';
 import { customersRouter } from './routes/customers.routes.js';
+import { salesOrdersRouter } from './routes/sales-orders.routes.js';
+import { restockEtaRouter, salesOrderEtaRouter } from './routes/restock-eta.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startQueueRiskScheduler } from './services/queue-risk-scheduler.service.js';
 import { startTransferAutomationListener, type TransferAutomationListener } from './services/transfer-automation-listener.js';
@@ -75,6 +77,9 @@ app.use('/analytics', analyticsRouter);
 app.use('/order-history', orderHistoryRouter);
 app.use('/email-orders', emailOrdersRouter);
 app.use('/customers', customersRouter);
+app.use('/sales-orders', salesOrdersRouter);
+app.use('/restock-eta', restockEtaRouter);
+app.use('/sales-orders', salesOrderEtaRouter);
 
 app.use(errorHandler);
 
