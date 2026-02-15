@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { createLogger } from '@arda/config';
+import { randomBytes } from 'node:crypto';
 
 const log = createLogger('event-bus');
 
@@ -469,6 +470,7 @@ export type ArdaEvent =
 
 // ─── Event Channel Names ────────────────────────────────────────────
 const CHANNEL_PREFIX = 'arda:events';
+const STREAM_PREFIX = 'arda:stream';
 
 export function getTenantChannel(tenantId: string): string {
   return `${CHANNEL_PREFIX}:${tenantId}`;
@@ -478,8 +480,53 @@ export function getGlobalChannel(): string {
   return `${CHANNEL_PREFIX}:global`;
 }
 
+export function getTenantStream(tenantId: string): string {
+  return `${STREAM_PREFIX}:${tenantId}`;
+}
+
 function hasTenantScope(event: ArdaEvent): event is ArdaEvent & { tenantId: string } {
   return 'tenantId' in event && typeof event.tenantId === 'string' && event.tenantId.length > 0;
+}
+
+function isEventEnvelope(value: unknown): value is EventEnvelope {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === 'string'
+    && typeof candidate.schemaVersion === 'number'
+    && typeof candidate.source === 'string'
+    && typeof candidate.timestamp === 'string'
+    && typeof candidate.event === 'object'
+    && candidate.event !== null
+  );
+}
+
+function generateUuidV7(nowMs: number = Date.now()): string {
+  const bytes = randomBytes(16);
+  const ts = BigInt(nowMs);
+
+  // 48-bit unix timestamp in milliseconds
+  bytes[0] = Number((ts >> 40n) & 0xffn);
+  bytes[1] = Number((ts >> 32n) & 0xffn);
+  bytes[2] = Number((ts >> 24n) & 0xffn);
+  bytes[3] = Number((ts >> 16n) & 0xffn);
+  bytes[4] = Number((ts >> 8n) & 0xffn);
+  bytes[5] = Number(ts & 0xffn);
+
+  // Version 7
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  // RFC 4122 variant
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Buffer.from(bytes).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+function normalizeEventTimestamp(event: ArdaEvent, timestamp: string): ArdaEvent {
+  if ('timestamp' in event) {
+    return { ...event, timestamp } as ArdaEvent;
+  }
+  return event;
 }
 
 // ─── Event Bus (Redis Pub/Sub) ──────────────────────────────────────
@@ -494,7 +541,8 @@ export class EventBus {
 
     this.subscriber.on('message', (channel, message) => {
       try {
-        const event = JSON.parse(message) as ArdaEvent;
+        const parsed = JSON.parse(message) as unknown;
+        const event = isEventEnvelope(parsed) ? parsed.event : (parsed as ArdaEvent);
         const channelHandlers = this.handlers.get(channel);
         if (channelHandlers) {
           for (const handler of channelHandlers) {
@@ -507,17 +555,59 @@ export class EventBus {
     });
   }
 
-  /** Publish an event to a tenant's channel */
-  async publish(event: ArdaEvent): Promise<void> {
-    const message = JSON.stringify(event);
-
-    const publishOps: Array<Promise<number>> = [this.publisher.publish(getGlobalChannel(), message)];
-
-    if (hasTenantScope(event)) {
-      publishOps.push(this.publisher.publish(getTenantChannel(event.tenantId), message));
+  /** Publish an event (with optional metadata envelope) */
+  async publish(event: ArdaEvent): Promise<void>;
+  async publish(event: ArdaEvent, meta: EventMeta): Promise<void>;
+  async publish(event: ArdaEvent, meta?: EventMeta): Promise<void> {
+    if (!meta) {
+      log.warn(
+        { eventType: event.type },
+        'Deprecated publish(event) call: pass EventMeta with source',
+      );
     }
 
-    await Promise.all(publishOps);
+    const timestamp = meta?.timestamp ?? new Date().toISOString();
+    const normalizedEvent = normalizeEventTimestamp(event, timestamp);
+    const envelope: EventEnvelope = {
+      id: meta?.id ?? generateUuidV7(),
+      schemaVersion: 1,
+      source: meta?.source ?? 'unknown',
+      correlationId: meta?.correlationId,
+      timestamp,
+      replayed: meta?.replayed,
+      event: normalizedEvent,
+    };
+    const message = JSON.stringify(envelope);
+    const globalChannel = getGlobalChannel();
+
+    if (!hasTenantScope(normalizedEvent)) {
+      await this.publisher.publish(globalChannel, message);
+      return;
+    }
+
+    const tenantChannel = getTenantChannel(normalizedEvent.tenantId);
+    const streamKey = getTenantStream(normalizedEvent.tenantId);
+
+    await this.publisher
+      .multi()
+      .publish(globalChannel, message)
+      .publish(tenantChannel, message)
+      .xadd(
+        streamKey,
+        'MAXLEN',
+        '~',
+        '10000',
+        '*',
+        'envelope',
+        message,
+        'type',
+        normalizedEvent.type,
+        'source',
+        envelope.source,
+        'timestamp',
+        timestamp,
+      )
+      .exec();
   }
 
   /** Subscribe to events for a specific tenant */

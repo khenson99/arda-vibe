@@ -19,9 +19,37 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ─── Hoisted mocks ──────────────────────────────────────────────────
 
-const { mockPublish, mockSubscribe, mockUnsubscribe, mockPing, mockQuit, messageListeners } =
+const {
+  mockPublish,
+  mockSubscribe,
+  mockUnsubscribe,
+  mockPing,
+  mockQuit,
+  mockWarn,
+  mockMulti,
+  multiCalls,
+  messageListeners,
+} =
   vi.hoisted(() => {
+    type MockMultiCall = {
+      publish: ReturnType<typeof vi.fn>;
+      xadd: ReturnType<typeof vi.fn>;
+      exec: ReturnType<typeof vi.fn>;
+    };
+
     const messageListeners = new Map<string, (channel: string, message: string) => void>();
+    const multiCalls: MockMultiCall[] = [];
+    const mockMulti = vi.fn(() => {
+      const call: MockMultiCall = {
+        publish: vi.fn(),
+        xadd: vi.fn(),
+        exec: vi.fn().mockResolvedValue([]),
+      };
+      call.publish.mockReturnValue(call);
+      call.xadd.mockReturnValue(call);
+      multiCalls.push(call);
+      return call;
+    });
 
     return {
       mockPublish: vi.fn().mockResolvedValue(1),
@@ -29,6 +57,9 @@ const { mockPublish, mockSubscribe, mockUnsubscribe, mockPing, mockQuit, message
       mockUnsubscribe: vi.fn().mockResolvedValue('OK'),
       mockPing: vi.fn().mockResolvedValue('PONG'),
       mockQuit: vi.fn().mockResolvedValue('OK'),
+      mockWarn: vi.fn(),
+      mockMulti,
+      multiCalls,
       messageListeners,
     };
   });
@@ -45,6 +76,7 @@ vi.mock('ioredis', () => {
       }
 
       publish = mockPublish;
+      multi = mockMulti;
       subscribe = mockSubscribe;
       unsubscribe = mockUnsubscribe;
       ping = mockPing;
@@ -64,7 +96,7 @@ vi.mock('ioredis', () => {
 vi.mock('@arda/config', () => ({
   createLogger: () => ({
     info: vi.fn(),
-    warn: vi.fn(),
+    warn: mockWarn,
     error: vi.fn(),
     debug: vi.fn(),
   }),
@@ -72,14 +104,15 @@ vi.mock('@arda/config', () => ({
 
 // ─── Import after mocks ─────────────────────────────────────────────
 
-import { EventBus, getEventBus, getTenantChannel, getGlobalChannel } from '../../index.js';
-import type { ArdaEvent, CardTransitionEvent, OrderCreatedEvent } from '../../index.js';
+import { EventBus, getEventBus, getTenantChannel, getGlobalChannel, getTenantStream } from '../../index.js';
+import type { ArdaEvent, CardTransitionEvent, EventEnvelope, OrderCreatedEvent } from '../../index.js';
 
 // ─── Constants ───────────────────────────────────────────────────────
 
 const TENANT = 'tenant-01';
 const GLOBAL_CHANNEL = 'arda:events:global';
 const TENANT_CHANNEL = `arda:events:${TENANT}`;
+const TENANT_STREAM = `arda:stream:${TENANT}`;
 
 function buildCardTransition(overrides: Partial<CardTransitionEvent> = {}): CardTransitionEvent {
   return {
@@ -116,6 +149,15 @@ function simulateMessage(channel: string, message: string) {
   }
 }
 
+function getLastTenantEnvelope<T extends ArdaEvent = ArdaEvent>(): EventEnvelope<T> {
+  const lastMulti = multiCalls[multiCalls.length - 1];
+  const tenantPublishCall = lastMulti.publish.mock.calls.find((call) => call[0] === TENANT_CHANNEL);
+  if (!tenantPublishCall) {
+    throw new Error('No tenant publish call found');
+  }
+  return JSON.parse(tenantPublishCall[1] as string) as EventEnvelope<T>;
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────
 
 describe('EventBus — Resilience / Fault Injection', () => {
@@ -124,6 +166,7 @@ describe('EventBus — Resilience / Fault Injection', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     messageListeners.clear();
+    multiCalls.length = 0;
 
     // Re-apply default resolved values after reset
     mockPublish.mockResolvedValue(1);
@@ -131,6 +174,18 @@ describe('EventBus — Resilience / Fault Injection', () => {
     mockUnsubscribe.mockResolvedValue('OK');
     mockPing.mockResolvedValue('PONG');
     mockQuit.mockResolvedValue('OK');
+    mockWarn.mockReset();
+    mockMulti.mockImplementation(() => {
+      const call = {
+        publish: vi.fn(),
+        xadd: vi.fn(),
+        exec: vi.fn().mockResolvedValue([]),
+      };
+      call.publish.mockReturnValue(call);
+      call.xadd.mockReturnValue(call);
+      multiCalls.push(call);
+      return call;
+    });
 
     bus = new EventBus('redis://localhost:6379');
   });
@@ -142,33 +197,122 @@ describe('EventBus — Resilience / Fault Injection', () => {
   // ── 1. Redis Connection Failures — Publish ─────────────────────────
 
   describe('Redis publish failures', () => {
-    it('propagates error when publisher.publish throws on global channel', async () => {
-      mockPublish.mockRejectedValueOnce(new Error('ECONNREFUSED'));
-
+    it('propagates error when multi.exec throws for tenant-scoped publish', async () => {
       const event = buildCardTransition();
+      mockMulti.mockImplementationOnce(() => {
+        const call = {
+          publish: vi.fn(),
+          xadd: vi.fn(),
+          exec: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+        };
+        call.publish.mockReturnValue(call);
+        call.xadd.mockReturnValue(call);
+        multiCalls.push(call);
+        return call;
+      });
 
       await expect(bus.publish(event)).rejects.toThrow('ECONNREFUSED');
     });
 
-    it('propagates error when publisher.publish throws on tenant channel', async () => {
-      // First call (global) succeeds, second call (tenant) fails
-      mockPublish
-        .mockResolvedValueOnce(1)
-        .mockRejectedValueOnce(new Error('Redis write timeout'));
-
-      const event = buildCardTransition();
+    it('propagates error when global-only publish throws', async () => {
+      const event = {
+        type: 'card.transition',
+        cardId: 'card-001',
+        loopId: 'loop-001',
+        fromStage: 'idle',
+        toStage: 'procurement_queue',
+        method: 'scan',
+        timestamp: new Date().toISOString(),
+      } as unknown as ArdaEvent;
+      mockPublish.mockRejectedValueOnce(new Error('Redis write timeout'));
 
       await expect(bus.publish(event)).rejects.toThrow('Redis write timeout');
     });
 
-    it('publishes to both global and tenant channels for tenant-scoped events', async () => {
+    it('publishes to both global and tenant channels and appends stream for tenant events', async () => {
       const event = buildCardTransition();
 
       await bus.publish(event);
 
-      expect(mockPublish).toHaveBeenCalledTimes(2);
-      expect(mockPublish).toHaveBeenCalledWith(GLOBAL_CHANNEL, JSON.stringify(event));
-      expect(mockPublish).toHaveBeenCalledWith(TENANT_CHANNEL, JSON.stringify(event));
+      expect(mockPublish).not.toHaveBeenCalled();
+      expect(mockMulti).toHaveBeenCalledTimes(1);
+      expect(multiCalls[0].publish).toHaveBeenCalledWith(GLOBAL_CHANNEL, expect.any(String));
+      expect(multiCalls[0].publish).toHaveBeenCalledWith(TENANT_CHANNEL, expect.any(String));
+      expect(multiCalls[0].xadd).toHaveBeenCalledWith(
+        TENANT_STREAM,
+        'MAXLEN',
+        '~',
+        '10000',
+        '*',
+        'envelope',
+        expect.any(String),
+        'type',
+        event.type,
+        'source',
+        'unknown',
+        'timestamp',
+        expect.any(String),
+      );
+      expect(multiCalls[0].exec).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('publish envelope metadata', () => {
+    it('supports publish(event, meta) with explicit source and correlationId', async () => {
+      const event = buildCardTransition();
+      const metaTimestamp = '2026-02-15T00:00:00.000Z';
+
+      await bus.publish(event, {
+        id: '018f3e94-4d3c-7f87-a41a-a4c43a58e7ee',
+        schemaVersion: 1,
+        source: 'orders-service',
+        correlationId: 'corr-123',
+        timestamp: metaTimestamp,
+      });
+
+      const envelope = getLastTenantEnvelope<CardTransitionEvent>();
+      expect(envelope.id).toBe('018f3e94-4d3c-7f87-a41a-a4c43a58e7ee');
+      expect(envelope.schemaVersion).toBe(1);
+      expect(envelope.source).toBe('orders-service');
+      expect(envelope.correlationId).toBe('corr-123');
+      expect(envelope.timestamp).toBe(metaTimestamp);
+      expect(envelope.event.timestamp).toBe(metaTimestamp);
+      expect(mockWarn).not.toHaveBeenCalled();
+    });
+
+    it('logs deprecation warning for publish(event) fallback and sets source=unknown', async () => {
+      const event = buildCardTransition();
+      await bus.publish(event);
+
+      const envelope = getLastTenantEnvelope<CardTransitionEvent>();
+      expect(envelope.source).toBe('unknown');
+      expect(mockWarn).toHaveBeenCalledTimes(1);
+    });
+
+    it('applies stream capping args on every tenant publish', async () => {
+      const events = Array.from({ length: 20 }, (_, i) =>
+        buildCardTransition({ cardId: `stream-card-${i}` }),
+      );
+
+      await Promise.all(events.map((event) => bus.publish(event)));
+
+      for (const call of multiCalls) {
+        expect(call.xadd).toHaveBeenCalledWith(
+          TENANT_STREAM,
+          'MAXLEN',
+          '~',
+          '10000',
+          '*',
+          'envelope',
+          expect.any(String),
+          'type',
+          'card.transition',
+          'source',
+          'unknown',
+          'timestamp',
+          expect.any(String),
+        );
+      }
     });
   });
 
@@ -443,7 +587,11 @@ describe('EventBus — Resilience / Fault Injection', () => {
 
       // Only global channel should be called
       expect(mockPublish).toHaveBeenCalledTimes(1);
-      expect(mockPublish).toHaveBeenCalledWith(GLOBAL_CHANNEL, JSON.stringify(eventWithoutTenant));
+      const envelope = JSON.parse(mockPublish.mock.calls[0][1] as string) as EventEnvelope<CardTransitionEvent>;
+      expect(mockPublish).toHaveBeenCalledWith(GLOBAL_CHANNEL, expect.any(String));
+      expect(envelope.source).toBe('unknown');
+      expect(envelope.event.type).toBe(eventWithoutTenant.type);
+      expect(envelope.event.timestamp).toBe(envelope.timestamp);
     });
 
     it('publishes only to global when tenantId is empty string', async () => {
@@ -452,7 +600,9 @@ describe('EventBus — Resilience / Fault Injection', () => {
       await bus.publish(event);
 
       expect(mockPublish).toHaveBeenCalledTimes(1);
-      expect(mockPublish).toHaveBeenCalledWith(GLOBAL_CHANNEL, JSON.stringify(event));
+      const envelope = JSON.parse(mockPublish.mock.calls[0][1] as string) as EventEnvelope<CardTransitionEvent>;
+      expect(mockPublish).toHaveBeenCalledWith(GLOBAL_CHANNEL, expect.any(String));
+      expect(envelope.event.tenantId).toBe('');
     });
 
     it('publishes to both channels when tenantId is present', async () => {
@@ -460,9 +610,25 @@ describe('EventBus — Resilience / Fault Injection', () => {
 
       await bus.publish(event);
 
-      expect(mockPublish).toHaveBeenCalledTimes(2);
-      expect(mockPublish).toHaveBeenCalledWith(GLOBAL_CHANNEL, expect.any(String));
-      expect(mockPublish).toHaveBeenCalledWith('arda:events:tenant-42', expect.any(String));
+      expect(mockPublish).toHaveBeenCalledTimes(0);
+      expect(mockMulti).toHaveBeenCalledTimes(1);
+      expect(multiCalls[0].publish).toHaveBeenCalledWith(GLOBAL_CHANNEL, expect.any(String));
+      expect(multiCalls[0].publish).toHaveBeenCalledWith('arda:events:tenant-42', expect.any(String));
+      expect(multiCalls[0].xadd).toHaveBeenCalledWith(
+        getTenantStream('tenant-42'),
+        'MAXLEN',
+        '~',
+        '10000',
+        '*',
+        'envelope',
+        expect.any(String),
+        'type',
+        event.type,
+        'source',
+        'unknown',
+        'timestamp',
+        expect.any(String),
+      );
     });
   });
 
@@ -476,6 +642,10 @@ describe('EventBus — Resilience / Fault Injection', () => {
 
     it('getGlobalChannel returns correct value', () => {
       expect(getGlobalChannel()).toBe('arda:events:global');
+    });
+
+    it('getTenantStream returns correct value', () => {
+      expect(getTenantStream('T1')).toBe('arda:stream:T1');
     });
   });
 
@@ -499,17 +669,23 @@ describe('EventBus — Resilience / Fault Injection', () => {
 
       await Promise.all(events.map((e) => bus.publish(e)));
 
-      // 10 events × 2 channels = 20 publish calls
-      expect(mockPublish).toHaveBeenCalledTimes(20);
+      expect(mockPublish).toHaveBeenCalledTimes(0);
+      expect(mockMulti).toHaveBeenCalledTimes(10);
+      expect(multiCalls.every((call) => call.xadd.mock.calls.length === 1)).toBe(true);
     });
 
     it('propagates first failure in concurrent publishes', async () => {
-      // Make every other publish fail
-      for (let i = 0; i < 10; i++) {
-        mockPublish
-          .mockResolvedValueOnce(1) // global
-          .mockRejectedValueOnce(new Error(`Fail-${i}`)); // tenant
-      }
+      mockMulti.mockImplementation(() => {
+        const call = {
+          publish: vi.fn(),
+          xadd: vi.fn(),
+          exec: vi.fn().mockRejectedValue(new Error('Fail')),
+        };
+        call.publish.mockReturnValue(call);
+        call.xadd.mockReturnValue(call);
+        multiCalls.push(call);
+        return call;
+      });
 
       const events = Array.from({ length: 10 }, (_, i) =>
         buildCardTransition({ cardId: `card-${i}` }),
@@ -525,20 +701,20 @@ describe('EventBus — Resilience / Fault Injection', () => {
   // ── 12. Event Serialization ────────────────────────────────────────
 
   describe('event serialization', () => {
-    it('publishes event as JSON string', async () => {
+    it('publishes envelope JSON string to channels', async () => {
       const event = buildOrderCreated();
 
       await bus.publish(event);
 
-      const publishedMessage = mockPublish.mock.calls[0][1] as string;
-      const parsed = JSON.parse(publishedMessage);
+      const envelope = getLastTenantEnvelope<OrderCreatedEvent>();
 
-      expect(parsed.type).toBe('order.created');
-      expect(parsed.tenantId).toBe(TENANT);
-      expect(parsed.orderId).toBe('po-001');
+      expect(envelope.event.type).toBe('order.created');
+      expect(envelope.event.tenantId).toBe(TENANT);
+      expect(envelope.event.orderId).toBe('po-001');
+      expect(envelope.event.timestamp).toBe(envelope.timestamp);
     });
 
-    it('preserves all event fields through serialization', async () => {
+    it('preserves fields in envelope.event while normalizing timestamp', async () => {
       const event = buildCardTransition({
         userId: 'user-123',
         fromStage: 'idle',
@@ -547,10 +723,14 @@ describe('EventBus — Resilience / Fault Injection', () => {
 
       await bus.publish(event);
 
-      const publishedMessage = mockPublish.mock.calls[0][1] as string;
-      const parsed = JSON.parse(publishedMessage);
+      const envelope = getLastTenantEnvelope<CardTransitionEvent>();
 
-      expect(parsed).toEqual(event);
+      expect(envelope.event.type).toBe(event.type);
+      expect(envelope.event.cardId).toBe(event.cardId);
+      expect(envelope.event.userId).toBe(event.userId);
+      expect(envelope.event.fromStage).toBe(event.fromStage);
+      expect(envelope.event.toStage).toBe(event.toStage);
+      expect(envelope.event.timestamp).toBe(envelope.timestamp);
     });
   });
 });
