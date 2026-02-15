@@ -289,6 +289,19 @@ async function patchJson(app: express.Express, path: string, body: object) {
   }
 }
 
+function createSelectBuilder(rows: Array<Record<string, unknown>>) {
+  const builder: Record<string, unknown> = {};
+  builder.from = () => builder;
+  builder.where = () => builder;
+  builder.orderBy = () => builder;
+  builder.groupBy = () => builder;
+  builder.limit = () => builder;
+  builder.offset = () => builder;
+  builder.then = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+    Promise.resolve(rows).then(resolve, reject);
+  return builder;
+}
+
 // ═════════════════════════════════════════════════════════════════════
 
 describe('Demand Signals API', () => {
@@ -601,6 +614,136 @@ describe('Demand Signals API', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('Validation error');
+    });
+  });
+
+  // ─── Director Analytics ────────────────────────────────────────────
+  describe('GET /demand-signals/analytics/signals', () => {
+    it('returns aggregated demand signals for ecommerce director', async () => {
+      dbSetup.dbMock.select.mockImplementation(() =>
+        createSelectBuilder([
+          {
+            partId: '00000000-0000-0000-0000-000000000001',
+            signalType: 'sales_order',
+            totalDemanded: 120,
+            totalFulfilled: 80,
+            unfulfilledQuantity: 40,
+            signalCount: 2,
+          },
+        ]) as any,
+      );
+
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'director-1',
+        role: 'ecommerce_director',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/signals');
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect((res.body.meta as Record<string, unknown>).rangeDays).toBe(30);
+    });
+
+    it('returns 403 for non-director role', async () => {
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'user-4',
+        role: 'inventory_manager',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/signals');
+
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 400 for unsupported rangeDays', async () => {
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'director-1',
+        role: 'ecommerce_director',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/signals?rangeDays=45');
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation error');
+    });
+  });
+
+  describe('GET /demand-signals/analytics/top-products', () => {
+    it('returns top products with trend direction fields', async () => {
+      dbSetup.dbMock.select
+        .mockImplementationOnce(() =>
+          createSelectBuilder([
+            {
+              partId: '00000000-0000-0000-0000-000000000001',
+              totalDemanded: 200,
+              signalCount: 6,
+            },
+            {
+              partId: '00000000-0000-0000-0000-000000000002',
+              totalDemanded: 50,
+              signalCount: 2,
+            },
+          ]) as any,
+        )
+        .mockImplementationOnce(() =>
+          createSelectBuilder([
+            {
+              partId: '00000000-0000-0000-0000-000000000001',
+              totalDemanded: 100,
+            },
+            {
+              partId: '00000000-0000-0000-0000-000000000002',
+              totalDemanded: 70,
+            },
+          ]) as any,
+        );
+
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'director-1',
+        role: 'ecommerce_director',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/top-products?rangeDays=30&limit=2');
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(2);
+      const top = (res.body.data as Array<Record<string, unknown>>)[0];
+      const second = (res.body.data as Array<Record<string, unknown>>)[1];
+      expect(top.trendDirection).toBe('up');
+      expect(second.trendDirection).toBe('down');
+    });
+  });
+
+  describe('GET /demand-signals/analytics/trends', () => {
+    it('returns daily/weekly trend series for charting', async () => {
+      dbSetup.dbMock.select.mockImplementation(() =>
+        createSelectBuilder([
+          {
+            periodStart: '2026-02-01T00:00:00.000Z',
+            totalDemanded: 90,
+            totalFulfilled: 60,
+            signalCount: 3,
+          },
+          {
+            periodStart: '2026-02-08T00:00:00.000Z',
+            totalDemanded: 120,
+            totalFulfilled: 95,
+            signalCount: 4,
+          },
+        ]) as any,
+      );
+
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'director-1',
+        role: 'ecommerce_director',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/trends?rangeDays=30&granularity=weekly');
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(2);
+      expect((res.body.meta as Record<string, unknown>).granularity).toBe('weekly');
     });
   });
 });

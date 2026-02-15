@@ -70,11 +70,33 @@ const summaryQuerySchema = z.object({
   signalType: z.enum(signalTypeValues).optional(),
 });
 
+const analyticsRangeQuerySchema = z.object({
+  rangeDays: z.enum(['7', '30', '90']).default('30').transform((v) => Number(v)),
+  signalType: z.enum(signalTypeValues).optional(),
+  partId: z.string().uuid().optional(),
+  facilityId: z.string().uuid().optional(),
+});
+
+const analyticsTopProductsQuerySchema = analyticsRangeQuerySchema.extend({
+  limit: z.coerce.number().min(1).max(50).default(10),
+});
+
+const analyticsTrendsQuerySchema = analyticsRangeQuerySchema.extend({
+  granularity: z.enum(['daily', 'weekly']).default('daily'),
+});
+
+function computeWindow(rangeDays: number) {
+  const endDate = new Date();
+  const startDate = new Date(endDate.getTime() - rangeDays * 86_400_000);
+  return { startDate, endDate };
+}
+
 // ─── RBAC ────────────────────────────────────────────────────────────
 // inventory_manager, purchasing_manager, production_manager, salesperson, ecommerce_director
 // (tenant_admin is implicitly allowed by requireRole)
 const canRead = requireRole('inventory_manager', 'purchasing_manager', 'production_manager', 'salesperson', 'ecommerce_director');
 const canWrite = requireRole('inventory_manager', 'purchasing_manager', 'salesperson');
+const canDirectorRead = requireRole('ecommerce_director');
 
 export const demandSignalsRouter = Router();
 
@@ -190,6 +212,218 @@ demandSignalsRouter.get('/summary', canRead, async (req: AuthRequest, res, next)
       .orderBy(sql`sum(${demandSignals.quantityDemanded}) DESC`);
 
     res.json({ data: summary });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── GET /analytics/signals — Director demand aggregation ───────────
+demandSignalsRouter.get('/analytics/signals', canDirectorRead, async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const query = analyticsRangeQuerySchema.parse(req.query);
+    const { rangeDays } = query;
+    const { startDate, endDate } = computeWindow(rangeDays);
+
+    const conditions = [
+      eq(demandSignals.tenantId, tenantId),
+      gte(demandSignals.demandDate, startDate),
+      lte(demandSignals.demandDate, endDate),
+    ];
+
+    if (query.signalType) {
+      conditions.push(eq(demandSignals.signalType, query.signalType));
+    }
+    if (query.partId) {
+      conditions.push(eq(demandSignals.partId, query.partId));
+    }
+    if (query.facilityId) {
+      conditions.push(eq(demandSignals.facilityId, query.facilityId));
+    }
+
+    const whereClause = and(...conditions);
+
+    const data = await db
+      .select({
+        partId: demandSignals.partId,
+        signalType: demandSignals.signalType,
+        totalDemanded: sql<number>`sum(${demandSignals.quantityDemanded})`,
+        totalFulfilled: sql<number>`sum(${demandSignals.quantityFulfilled})`,
+        unfulfilledQuantity: sql<number>`sum(${demandSignals.quantityDemanded} - ${demandSignals.quantityFulfilled})`,
+        signalCount: sql<number>`count(*)`,
+      })
+      .from(demandSignals)
+      .where(whereClause)
+      .groupBy(demandSignals.partId, demandSignals.signalType)
+      .orderBy(sql`sum(${demandSignals.quantityDemanded}) DESC`);
+
+    res.json({
+      data,
+      meta: {
+        rangeDays,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── GET /analytics/top-products — Director top demand products ─────
+demandSignalsRouter.get('/analytics/top-products', canDirectorRead, async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const query = analyticsTopProductsQuerySchema.parse(req.query);
+    const { rangeDays, limit } = query;
+    const { startDate, endDate } = computeWindow(rangeDays);
+    const previousStartDate = new Date(startDate.getTime() - rangeDays * 86_400_000);
+
+    const currentConditions = [
+      eq(demandSignals.tenantId, tenantId),
+      gte(demandSignals.demandDate, startDate),
+      lte(demandSignals.demandDate, endDate),
+    ];
+    const previousConditions = [
+      eq(demandSignals.tenantId, tenantId),
+      gte(demandSignals.demandDate, previousStartDate),
+      lte(demandSignals.demandDate, startDate),
+    ];
+
+    if (query.signalType) {
+      currentConditions.push(eq(demandSignals.signalType, query.signalType));
+      previousConditions.push(eq(demandSignals.signalType, query.signalType));
+    }
+    if (query.facilityId) {
+      currentConditions.push(eq(demandSignals.facilityId, query.facilityId));
+      previousConditions.push(eq(demandSignals.facilityId, query.facilityId));
+    }
+
+    const [currentRows, previousRows] = await Promise.all([
+      db
+        .select({
+          partId: demandSignals.partId,
+          totalDemanded: sql<number>`sum(${demandSignals.quantityDemanded})`,
+          signalCount: sql<number>`count(*)`,
+        })
+        .from(demandSignals)
+        .where(and(...currentConditions))
+        .groupBy(demandSignals.partId)
+        .orderBy(sql`sum(${demandSignals.quantityDemanded}) DESC`),
+      db
+        .select({
+          partId: demandSignals.partId,
+          totalDemanded: sql<number>`sum(${demandSignals.quantityDemanded})`,
+        })
+        .from(demandSignals)
+        .where(and(...previousConditions))
+        .groupBy(demandSignals.partId),
+    ]);
+
+    const previousByPart = new Map<string, number>(
+      previousRows.map((row) => [row.partId, row.totalDemanded ?? 0]),
+    );
+
+    const data = currentRows
+      .map((row) => {
+        const previousDemanded = previousByPart.get(row.partId) ?? 0;
+        const demandDelta = (row.totalDemanded ?? 0) - previousDemanded;
+        const trendDirection = demandDelta > 0 ? 'up' : demandDelta < 0 ? 'down' : 'flat';
+        const trendPercent =
+          previousDemanded > 0
+            ? Number(((demandDelta / previousDemanded) * 100).toFixed(2))
+            : row.totalDemanded > 0
+              ? 100
+              : 0;
+
+        return {
+          partId: row.partId,
+          totalDemanded: row.totalDemanded ?? 0,
+          signalCount: row.signalCount ?? 0,
+          previousDemanded,
+          demandDelta,
+          trendDirection,
+          trendPercent,
+        };
+      })
+      .sort((a, b) => b.totalDemanded - a.totalDemanded)
+      .slice(0, limit);
+
+    res.json({
+      data,
+      meta: {
+        rangeDays,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ─── GET /analytics/trends — Director demand time series ────────────
+demandSignalsRouter.get('/analytics/trends', canDirectorRead, async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const query = analyticsTrendsQuerySchema.parse(req.query);
+    const { rangeDays, granularity } = query;
+    const { startDate, endDate } = computeWindow(rangeDays);
+
+    const conditions = [
+      eq(demandSignals.tenantId, tenantId),
+      gte(demandSignals.demandDate, startDate),
+      lte(demandSignals.demandDate, endDate),
+    ];
+
+    if (query.signalType) {
+      conditions.push(eq(demandSignals.signalType, query.signalType));
+    }
+    if (query.partId) {
+      conditions.push(eq(demandSignals.partId, query.partId));
+    }
+    if (query.facilityId) {
+      conditions.push(eq(demandSignals.facilityId, query.facilityId));
+    }
+
+    const bucketExpr =
+      granularity === 'weekly'
+        ? sql`date_trunc('week', ${demandSignals.demandDate})`
+        : sql`date_trunc('day', ${demandSignals.demandDate})`;
+
+    const data = await db
+      .select({
+        periodStart: sql<string>`${bucketExpr}::text`,
+        totalDemanded: sql<number>`sum(${demandSignals.quantityDemanded})`,
+        totalFulfilled: sql<number>`sum(${demandSignals.quantityFulfilled})`,
+        signalCount: sql<number>`count(*)`,
+      })
+      .from(demandSignals)
+      .where(and(...conditions))
+      .groupBy(bucketExpr)
+      .orderBy(bucketExpr);
+
+    res.json({
+      data,
+      meta: {
+        granularity,
+        rangeDays,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      },
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation error', details: err.errors });
