@@ -26,6 +26,7 @@ import { CommandPalette } from '@/components/command-palette';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useShopFloorMode } from '@/hooks/use-shop-floor-mode';
 import { cn } from '@/lib/utils';
+import { ShopFloorDashboard } from '@/components/shop-floor/shop-floor-dashboard';
 import type { AuthSession } from '@/types';
 
 interface AppShellProps {
@@ -97,7 +98,16 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
 
   return (
     <ImportContextProvider>
-      <div className="app-shell-backdrop min-h-screen md:grid md:grid-cols-[228px_minmax(0,1fr)]">
+      {/* Shop Floor Mode: full-screen dashboard when on root */}
+      {isShopFloorMode && location.pathname === '/' ? (
+        <ShopFloorDashboard onExitShopFloor={toggleShopFloorMode} />
+      ) : (
+      <div className={cn(
+        "app-shell-backdrop min-h-screen",
+        !isShopFloorMode && "md:grid md:grid-cols-[228px_minmax(0,1fr)]"
+      )}>
+        {/* Hide sidebar in shop floor mode */}
+        {!isShopFloorMode && (
         <aside className="hidden border-r border-sidebar-border/80 bg-[linear-gradient(165deg,hsl(var(--sidebar-background))_16%,#14171f_58%,#060709_100%)] md:flex md:flex-col">
           <div className="border-b border-sidebar-border/70 px-3 py-3">
             <div className="rounded-md border border-white/10 bg-gradient-to-b from-white/10 to-black/45 px-4 py-2 text-center">
@@ -144,6 +154,7 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
             <p className="mt-0.5">{session.user.role.replaceAll('_', ' ')}</p>
           </div>
         </aside>
+        )}
 
         <div className="flex min-h-screen flex-col">
           <header className="sticky top-0 z-20 border-b border-border/70 bg-card/85 px-3 py-1.5 backdrop-blur-md md:px-4">
@@ -314,6 +325,7 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
         />
         <Toaster />
       </div>
+      )}
     </ImportContextProvider>
   );
 }
