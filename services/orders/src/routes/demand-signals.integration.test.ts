@@ -656,6 +656,19 @@ describe('Demand Signals API', () => {
       expect(res.status).toBe(403);
     });
 
+    it('allows tenant_admin for analytics signals', async () => {
+      dbSetup.dbMock.select.mockImplementation(() => createSelectBuilder([]) as any);
+
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'admin-1',
+        role: 'tenant_admin',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/signals');
+
+      expect(res.status).toBe(200);
+    });
+
     it('returns 400 for unsupported rangeDays', async () => {
       const app = createApp({
         tenantId: 'tenant-1',
@@ -713,6 +726,17 @@ describe('Demand Signals API', () => {
       expect(top.trendDirection).toBe('up');
       expect(second.trendDirection).toBe('down');
     });
+
+    it('returns 403 for non-director role', async () => {
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'user-5',
+        role: 'inventory_manager',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/top-products');
+
+      expect(res.status).toBe(403);
+    });
   });
 
   describe('GET /demand-signals/analytics/trends', () => {
@@ -744,6 +768,27 @@ describe('Demand Signals API', () => {
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(2);
       expect((res.body.meta as Record<string, unknown>).granularity).toBe('weekly');
+    });
+
+    it('allows tenant_admin and rejects non-allowed roles', async () => {
+      dbSetup.dbMock.select.mockImplementation(() => createSelectBuilder([]) as any);
+
+      const adminApp = createApp({
+        tenantId: 'tenant-1',
+        sub: 'admin-1',
+        role: 'tenant_admin',
+      });
+      const deniedApp = createApp({
+        tenantId: 'tenant-1',
+        sub: 'user-6',
+        role: 'salesperson',
+      });
+
+      const adminRes = await getJson(adminApp, '/demand-signals/analytics/trends');
+      const deniedRes = await getJson(deniedApp, '/demand-signals/analytics/trends');
+
+      expect(adminRes.status).toBe(200);
+      expect(deniedRes.status).toBe(403);
     });
   });
 });
