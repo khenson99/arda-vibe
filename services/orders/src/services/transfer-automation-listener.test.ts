@@ -28,12 +28,18 @@ import type { ArdaEvent, EventBus, LifecycleQueueEntryEvent } from '@arda/events
 
 // ─── Test Helpers ──────────────────────────────────────────────────────
 
+// EventBus has private fields that can't be mocked directly.
 type MockEventBus = Pick<
   EventBus,
   'subscribeGlobal' | 'subscribeTenant' | 'unsubscribeTenant' | 'publish' | 'ping' | 'shutdown'
 > & {
   simulateEvent: (event: ArdaEvent) => Promise<void>;
 };
+
+/** Cast mock to EventBus for test call sites */
+function asEventBus(mock: MockEventBus): EventBus {
+  return mock as unknown as EventBus;
+}
 
 function createMockEventBus(): MockEventBus {
   let capturedHandler: ((event: ArdaEvent) => void) | null = null;
@@ -81,14 +87,14 @@ describe('startTransferAutomationListener', () => {
   });
 
   it('subscribes to global events on the EventBus', async () => {
-    await startTransferAutomationListener(mockEventBus);
+    await startTransferAutomationListener(asEventBus(mockEventBus));
 
     expect(mockEventBus.subscribeGlobal).toHaveBeenCalledOnce();
     expect(mockEventBus.subscribeGlobal).toHaveBeenCalledWith(expect.any(Function));
   });
 
   it('returns a listener with a stop method', async () => {
-    const listener = await startTransferAutomationListener(mockEventBus);
+    const listener = await startTransferAutomationListener(asEventBus(mockEventBus));
 
     expect(listener).toHaveProperty('stop');
     expect(typeof listener.stop).toBe('function');
@@ -96,7 +102,7 @@ describe('startTransferAutomationListener', () => {
 
   describe('event handling', () => {
     it('calls autoCreateTransferOrder for transfer queue_entry events', async () => {
-      await startTransferAutomationListener(mockEventBus);
+      await startTransferAutomationListener(asEventBus(mockEventBus));
 
       const event = makeQueueEntryEvent();
       await mockEventBus.simulateEvent(event);
@@ -109,7 +115,7 @@ describe('startTransferAutomationListener', () => {
     });
 
     it('ignores non-transfer loopType events', async () => {
-      await startTransferAutomationListener(mockEventBus);
+      await startTransferAutomationListener(asEventBus(mockEventBus));
 
       await mockEventBus.simulateEvent(makeQueueEntryEvent({ loopType: 'procurement' }));
       await mockEventBus.simulateEvent(makeQueueEntryEvent({ loopType: 'production' }));
@@ -118,7 +124,7 @@ describe('startTransferAutomationListener', () => {
     });
 
     it('ignores non-queue_entry event types', async () => {
-      await startTransferAutomationListener(mockEventBus);
+      await startTransferAutomationListener(asEventBus(mockEventBus));
 
       await mockEventBus.simulateEvent({
         type: 'order.created',
@@ -136,7 +142,7 @@ describe('startTransferAutomationListener', () => {
     it('does not crash the listener when autoCreateTransferOrder throws', async () => {
       mockAutoCreateTransferOrder.mockRejectedValueOnce(new Error('DB down'));
 
-      await startTransferAutomationListener(mockEventBus);
+      await startTransferAutomationListener(asEventBus(mockEventBus));
 
       // Should not throw
       await mockEventBus.simulateEvent(makeQueueEntryEvent());
@@ -159,7 +165,7 @@ describe('startTransferAutomationListener', () => {
     });
 
     it('handles duplicate events idempotently (delegates to autoCreateTransferOrder)', async () => {
-      await startTransferAutomationListener(mockEventBus);
+      await startTransferAutomationListener(asEventBus(mockEventBus));
 
       const event = makeQueueEntryEvent();
 
@@ -174,7 +180,7 @@ describe('startTransferAutomationListener', () => {
 
   describe('graceful shutdown', () => {
     it('stop() resolves without error', async () => {
-      const listener = await startTransferAutomationListener(mockEventBus);
+      const listener = await startTransferAutomationListener(asEventBus(mockEventBus));
 
       await expect(listener.stop()).resolves.toBeUndefined();
     });
