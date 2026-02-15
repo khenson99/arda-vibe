@@ -1,7 +1,7 @@
 import { db, schema } from '@arda/db';
 import { eq, and, sql, like } from 'drizzle-orm';
 
-const { purchaseOrders, workOrders, transferOrders } = schema;
+const { purchaseOrders, workOrders, transferOrders, salesOrders } = schema;
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -14,7 +14,7 @@ type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 async function getNextNumber(
   tenantId: string,
-  prefix: 'PO' | 'WO' | 'TO',
+  prefix: 'PO' | 'WO' | 'TO' | 'SO',
   tx?: DbTransaction
 ): Promise<string> {
   const today = new Date();
@@ -59,7 +59,7 @@ async function getNextNumber(
         const last = result[0].woNumber.split('-').pop();
         maxNumber = parseInt(last || '0', 10);
       }
-    } else {
+    } else if (prefix === 'TO') {
       const result = await executor
         .select({ toNumber: transferOrders.toNumber })
         .from(transferOrders)
@@ -71,6 +71,20 @@ async function getNextNumber(
 
       if (result.length > 0) {
         const last = result[0].toNumber.split('-').pop();
+        maxNumber = parseInt(last || '0', 10);
+      }
+    } else {
+      const result = await executor
+        .select({ soNumber: salesOrders.soNumber })
+        .from(salesOrders)
+        .where(
+          and(eq(salesOrders.tenantId, tenantId), like(salesOrders.soNumber, pattern))
+        )
+        .orderBy(sql`${salesOrders.soNumber} DESC`)
+        .limit(1);
+
+      if (result.length > 0) {
+        const last = result[0].soNumber.split('-').pop();
         maxNumber = parseInt(last || '0', 10);
       }
     }
@@ -97,4 +111,8 @@ export async function getNextWONumber(tenantId: string, tx?: DbTransaction) {
 
 export async function getNextTONumber(tenantId: string, tx?: DbTransaction) {
   return getNextNumber(tenantId, 'TO', tx);
+}
+
+export async function getNextSONumber(tenantId: string, tx?: DbTransaction) {
+  return getNextNumber(tenantId, 'SO', tx);
 }
