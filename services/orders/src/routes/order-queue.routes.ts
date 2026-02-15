@@ -23,6 +23,7 @@ const {
   suppliers,
   supplierParts,
   parts,
+  facilities,
   purchaseOrders,
   purchaseOrderLines,
   workOrders,
@@ -769,15 +770,22 @@ orderQueueRouter.get('/', async (req: AuthRequest, res, next) => {
         loopId: kanbanCards.loopId,
         loopType: kanbanLoops.loopType,
         partId: kanbanLoops.partId,
+        partName: parts.name,
+        partNumber: parts.partNumber,
         facilityId: kanbanLoops.facilityId,
+        facilityName: facilities.name,
         primarySupplierId: kanbanLoops.primarySupplierId,
         supplierName: suppliers.name,
+        supplierCode: suppliers.code,
+        supplierContactName: suppliers.contactName,
         supplierRecipient: suppliers.recipient,
         supplierRecipientEmail: suppliers.recipientEmail,
         supplierContactEmail: suppliers.contactEmail,
         supplierContactPhone: suppliers.contactPhone,
+        supplierWebsite: suppliers.website,
         supplierPaymentTerms: suppliers.paymentTerms,
         supplierShippingTerms: suppliers.shippingTerms,
+        supplierLeadTimeDays: suppliers.statedLeadTimeDays,
         supplierUnitCost: supplierParts.unitCost,
         partUnitPrice: parts.unitPrice,
         sourceFacilityId: kanbanLoops.sourceFacilityId,
@@ -803,6 +811,10 @@ orderQueueRouter.get('/', async (req: AuthRequest, res, next) => {
           eq(supplierParts.tenantId, tenantId),
           eq(supplierParts.isActive, true)
         )
+      )
+      .leftJoin(
+        facilities,
+        and(eq(facilities.id, kanbanLoops.facilityId), eq(facilities.tenantId, tenantId))
       )
       .where(and(...conditions))
       .orderBy(asc(kanbanCards.currentStageEnteredAt));
@@ -946,6 +958,166 @@ orderQueueRouter.get('/risk-scan', async (req: AuthRequest, res, next) => {
     if (error instanceof z.ZodError) {
       return next(new AppError(400, 'Invalid query parameters'));
     }
+    next(error);
+  }
+});
+
+// GET /:cardId - Get detail view for a single triggered card in the queue
+// IMPORTANT: This route MUST be registered after all named GET routes (/summary, /risk-scan)
+// to avoid the :cardId param matching those paths.
+orderQueueRouter.get('/:cardId', async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const cardId = Array.isArray(req.params.cardId) ? req.params.cardId[0] : req.params.cardId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Tenant ID not found');
+    }
+
+    if (!cardId) {
+      throw new AppError(400, 'Card ID is required');
+    }
+
+    const results = await db
+      .select({
+        id: kanbanCards.id,
+        cardNumber: kanbanCards.cardNumber,
+        currentStage: kanbanCards.currentStage,
+        currentStageEnteredAt: kanbanCards.currentStageEnteredAt,
+        completedCycles: kanbanCards.completedCycles,
+        linkedPurchaseOrderId: kanbanCards.linkedPurchaseOrderId,
+        linkedWorkOrderId: kanbanCards.linkedWorkOrderId,
+        linkedTransferOrderId: kanbanCards.linkedTransferOrderId,
+        loopId: kanbanCards.loopId,
+        loopType: kanbanLoops.loopType,
+        partId: kanbanLoops.partId,
+        partName: parts.name,
+        partNumber: parts.partNumber,
+        partType: parts.type,
+        partUom: parts.uom,
+        partUnitCost: parts.unitCost,
+        partUnitPrice: parts.unitPrice,
+        facilityId: kanbanLoops.facilityId,
+        facilityName: facilities.name,
+        facilityCode: facilities.code,
+        primarySupplierId: kanbanLoops.primarySupplierId,
+        supplierName: suppliers.name,
+        supplierCode: suppliers.code,
+        supplierContactName: suppliers.contactName,
+        supplierContactEmail: suppliers.contactEmail,
+        supplierContactPhone: suppliers.contactPhone,
+        supplierRecipient: suppliers.recipient,
+        supplierRecipientEmail: suppliers.recipientEmail,
+        supplierWebsite: suppliers.website,
+        supplierPaymentTerms: suppliers.paymentTerms,
+        supplierShippingTerms: suppliers.shippingTerms,
+        supplierLeadTimeDays: suppliers.statedLeadTimeDays,
+        supplierUnitCost: supplierParts.unitCost,
+        supplierPartLeadTimeDays: supplierParts.leadTimeDays,
+        sourceFacilityId: kanbanLoops.sourceFacilityId,
+        orderQuantity: kanbanLoops.orderQuantity,
+        minQuantity: kanbanLoops.minQuantity,
+        numberOfCards: kanbanLoops.numberOfCards,
+        statedLeadTimeDays: kanbanLoops.statedLeadTimeDays,
+      })
+      .from(kanbanCards)
+      .innerJoin(kanbanLoops, eq(kanbanCards.loopId, kanbanLoops.id))
+      .leftJoin(
+        parts,
+        and(eq(parts.id, kanbanLoops.partId), eq(parts.tenantId, tenantId))
+      )
+      .leftJoin(
+        suppliers,
+        and(eq(suppliers.id, kanbanLoops.primarySupplierId), eq(suppliers.tenantId, tenantId))
+      )
+      .leftJoin(
+        supplierParts,
+        and(
+          eq(supplierParts.partId, kanbanLoops.partId),
+          eq(supplierParts.supplierId, kanbanLoops.primarySupplierId),
+          eq(supplierParts.tenantId, tenantId),
+          eq(supplierParts.isActive, true)
+        )
+      )
+      .leftJoin(
+        facilities,
+        and(eq(facilities.id, kanbanLoops.facilityId), eq(facilities.tenantId, tenantId))
+      )
+      .where(
+        and(
+          eq(kanbanCards.id, cardId),
+          eq(kanbanCards.tenantId, tenantId),
+          eq(kanbanCards.isActive, true)
+        )
+      )
+      .execute();
+
+    if (results.length === 0) {
+      throw new AppError(404, 'Card not found');
+    }
+
+    const card = results[0];
+
+    // Structure the response with grouped vendor/part/facility details
+    const data = {
+      id: card.id,
+      cardNumber: card.cardNumber,
+      currentStage: card.currentStage,
+      currentStageEnteredAt: card.currentStageEnteredAt,
+      completedCycles: card.completedCycles,
+      linkedPurchaseOrderId: card.linkedPurchaseOrderId,
+      linkedWorkOrderId: card.linkedWorkOrderId,
+      linkedTransferOrderId: card.linkedTransferOrderId,
+      loopId: card.loopId,
+      loopType: card.loopType,
+      orderQuantity: card.orderQuantity,
+      minQuantity: card.minQuantity,
+      numberOfCards: card.numberOfCards,
+      statedLeadTimeDays: card.statedLeadTimeDays,
+      sourceFacilityId: card.sourceFacilityId,
+      part: card.partId
+        ? {
+            id: card.partId,
+            name: card.partName,
+            partNumber: card.partNumber,
+            type: card.partType,
+            uom: card.partUom,
+            unitCost: card.partUnitCost,
+            unitPrice: card.partUnitPrice,
+          }
+        : null,
+      facility: card.facilityId
+        ? {
+            id: card.facilityId,
+            name: card.facilityName,
+            code: card.facilityCode,
+          }
+        : null,
+      supplier: card.primarySupplierId
+        ? {
+            id: card.primarySupplierId,
+            name: card.supplierName,
+            code: card.supplierCode,
+            contactName: card.supplierContactName,
+            contactEmail: card.supplierContactEmail,
+            contactPhone: card.supplierContactPhone,
+            recipient: card.supplierRecipient,
+            recipientEmail: card.supplierRecipientEmail,
+            website: card.supplierWebsite,
+            paymentTerms: card.supplierPaymentTerms,
+            shippingTerms: card.supplierShippingTerms,
+            statedLeadTimeDays: card.supplierLeadTimeDays,
+            unitCost: card.supplierUnitCost,
+            partLeadTimeDays: card.supplierPartLeadTimeDays,
+          }
+        : null,
+    };
+
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
     next(error);
   }
 });
