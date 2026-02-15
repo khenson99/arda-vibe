@@ -32,6 +32,7 @@ export const facilities = locationsSchema.table(
     latitude: numeric('latitude', { precision: 10, scale: 7 }),
     longitude: numeric('longitude', { precision: 10, scale: 7 }),
     timezone: varchar('timezone', { length: 50 }).default('America/Chicago'),
+    colorHex: varchar('color_hex', { length: 7 }), // for color-coding (#439)
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -55,6 +56,7 @@ export const storageLocations = locationsSchema.table(
     code: varchar('code', { length: 100 }).notNull(), // e.g., "A-01-03" (Aisle-Rack-Bin)
     zone: varchar('zone', { length: 100 }), // logical grouping: "Raw Materials", "Finished Goods"
     description: text('description'),
+    colorHex: varchar('color_hex', { length: 7 }), // for color-coding (#439)
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

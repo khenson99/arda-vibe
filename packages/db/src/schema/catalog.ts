@@ -488,3 +488,110 @@ export const aiProviderLogsRelations = relations(aiProviderLogs, ({ one }) => ({
     references: [importJobs.id],
   }),
 }));
+
+// ─── My Business: Process Shop Elements (#438) ─────────────────────────
+
+// Departments — organizational units (purchasing, production, shipping, etc.)
+export const departments = catalogSchema.table(
+  'departments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    code: varchar('code', { length: 50 }).notNull(),
+    description: text('description'),
+    colorHex: varchar('color_hex', { length: 7 }), // for color-coding (#439)
+    sortOrder: integer('sort_order').default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('departments_tenant_idx').on(table.tenantId),
+    uniqueIndex('departments_tenant_code_idx').on(table.tenantId, table.code),
+  ]
+);
+
+// Item Types — tenant-configurable item type definitions
+export const itemTypes = catalogSchema.table(
+  'item_types',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    code: varchar('code', { length: 50 }).notNull(),
+    description: text('description'),
+    colorHex: varchar('color_hex', { length: 7 }),
+    sortOrder: integer('sort_order').default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('item_types_tenant_idx').on(table.tenantId),
+    uniqueIndex('item_types_tenant_code_idx').on(table.tenantId, table.code),
+  ]
+);
+
+// Item Subtypes — hierarchical under item types
+export const itemSubtypes = catalogSchema.table(
+  'item_subtypes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    itemTypeId: uuid('item_type_id')
+      .notNull()
+      .references(() => itemTypes.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 255 }).notNull(),
+    code: varchar('code', { length: 50 }).notNull(),
+    description: text('description'),
+    colorHex: varchar('color_hex', { length: 7 }),
+    sortOrder: integer('sort_order').default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('item_subtypes_tenant_idx').on(table.tenantId),
+    index('item_subtypes_type_idx').on(table.itemTypeId),
+    uniqueIndex('item_subtypes_tenant_type_code_idx').on(table.tenantId, table.itemTypeId, table.code),
+  ]
+);
+
+// Use Cases — workflow usage patterns for items
+export const useCases = catalogSchema.table(
+  'use_cases',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    code: varchar('code', { length: 50 }).notNull(),
+    description: text('description'),
+    colorHex: varchar('color_hex', { length: 7 }),
+    sortOrder: integer('sort_order').default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('use_cases_tenant_idx').on(table.tenantId),
+    uniqueIndex('use_cases_tenant_code_idx').on(table.tenantId, table.code),
+  ]
+);
+
+// ─── My Business Relations ──────────────────────────────────────────────
+
+export const departmentsRelations = relations(departments, () => ({}));
+
+export const itemTypesRelations = relations(itemTypes, ({ many }) => ({
+  subtypes: many(itemSubtypes),
+}));
+
+export const itemSubtypesRelations = relations(itemSubtypes, ({ one }) => ({
+  itemType: one(itemTypes, {
+    fields: [itemSubtypes.itemTypeId],
+    references: [itemTypes.id],
+  }),
+}));
+
+export const useCasesRelations = relations(useCases, () => ({}));

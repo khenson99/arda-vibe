@@ -160,5 +160,22 @@ patterns, gotchas, and conventions.
 
 ### Express Routes
 - Register routers in service index.ts with `app.use(prefix, router)`
-- Middleware order: helmet → cors → express.json → routes → errorHandler
+- Middleware order: helmet → cors → express.json → correlationMiddleware → health → authMiddleware → userActivityMiddleware → routes → errorHandler
 - Use route-level middleware for RBAC: `router.post('/path', requireRole('admin'), handler)`
+
+### My Business / Process Shop Elements Pattern
+- Business configuration tables (departments, item_types, item_subtypes, use_cases) live in catalog schema
+- All tables include: id, tenantId, name, code, description, colorHex, sortOrder, isActive, timestamps
+- colorHex (varchar 7, nullable) supports tenant color-coding system (#439)
+- Hierarchical relationships: itemSubtypes → itemTypes (FK with CASCADE), storageLocations → facilities (FK with CASCADE)
+- Cascading soft-delete: deactivating parent also deactivates children (same transaction)
+- includeInactive=true query param on list endpoints allows admin to view deactivated elements
+- includeSubtypes=true on GET /item-types uses Drizzle relational query `with: { subtypes: true }`
+- Facilities upgraded from read-only to full CRUD (create, update, deactivate)
+- Storage locations nested under facilities: /facilities/:id/storage-locations
+
+### Migration Safety CI
+- Check regex: `DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM` — even in SQL comments triggers failure
+- Fix: add `migration-approved` label to PR, then re-run failed CI job
+- Re-run specific failed job: `gh run rerun <run-id> --failed`
+- Pure ADD COLUMN / CREATE TABLE migrations don't trigger the check

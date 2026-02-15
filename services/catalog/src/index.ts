@@ -15,6 +15,9 @@ import { facilitiesRouter } from './routes/facilities.routes.js';
 import { bomRouter } from './routes/bom.routes.js';
 import { categoriesRouter } from './routes/categories.routes.js';
 import { supplierPerformanceRouter } from './routes/supplier-performance.routes.js';
+import { departmentsRouter } from './routes/departments.routes.js';
+import { itemTypesRouter } from './routes/item-types.routes.js';
+import { useCasesRouter } from './routes/use-cases.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 // Wire up audit.created event publishing for all writeAuditEntry calls
@@ -57,6 +60,9 @@ app.use('/facilities', facilitiesRouter);
 app.use('/bom', bomRouter);
 app.use('/categories', categoriesRouter);
 app.use('/supplier-performance', supplierPerformanceRouter);
+app.use('/departments', departmentsRouter);
+app.use('/item-types', itemTypesRouter);
+app.use('/use-cases', useCasesRouter);
 
 app.use(errorHandler);
 
