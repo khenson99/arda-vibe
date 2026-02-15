@@ -163,8 +163,8 @@ async function getJson<TBody = Record<string, unknown>>(
  *
  * Total: 5 * 14 = 70 db calls
  *
- * fill_rate and order_accuracy use db.execute (raw SQL).
- * supplier_otd, stockout_count, avg_cycle_time use db.select.
+ * fill_rate, stockout_count, and order_accuracy use db.execute (raw SQL).
+ * supplier_otd and avg_cycle_time use db.select.
  *
  * Because of Promise.all concurrency, call order is NOT guaranteed.
  * We need to provide enough results for all calls.
@@ -206,12 +206,12 @@ function queueStockoutResults(
   previousCount: number,
 ) {
   // Current period
-  testState.dbSelectResults.push([{ stockouts: currentCount }]);
+  testState.dbExecuteResults.push([{ stockout_events: currentCount }]);
   // Previous period
-  testState.dbSelectResults.push([{ stockouts: previousCount }]);
+  testState.dbExecuteResults.push([{ stockout_events: previousCount }]);
   // 12 sparkline buckets
   for (let i = 0; i < 12; i++) {
-    testState.dbSelectResults.push([{ stockouts: currentCount }]);
+    testState.dbExecuteResults.push([{ stockout_events: currentCount }]);
   }
 }
 
@@ -550,10 +550,10 @@ describe('GET /analytics/kpis', () => {
       }
 
       // stockout_count: 0 stockouts
-      testState.dbSelectResults.push([{ stockouts: 0 }]);
-      testState.dbSelectResults.push([{ stockouts: 0 }]);
+      testState.dbExecuteResults.push([{ stockout_events: 0 }]);
+      testState.dbExecuteResults.push([{ stockout_events: 0 }]);
       for (let i = 0; i < 12; i++) {
-        testState.dbSelectResults.push([{ stockouts: 0 }]);
+        testState.dbExecuteResults.push([{ stockout_events: 0 }]);
       }
 
       // avg_cycle_time: null (no completed WOs)

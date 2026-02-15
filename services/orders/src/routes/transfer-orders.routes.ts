@@ -14,6 +14,7 @@ import {
   getValidNextTransferStatuses,
 } from '../services/transfer-lifecycle.service.js';
 import { recommendSources } from '../services/source-recommendation.service.js';
+import { getTransferQueue } from '../services/transfer-queue.service.js';
 
 export const transferOrdersRouter = Router();
 const { transferOrders, transferOrderLines, leadTimeHistory } = schema;
@@ -276,6 +277,63 @@ transferOrdersRouter.get('/', async (req: AuthRequest, res, next) => {
         limit,
         total: count,
         totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
+// ─── Transfer Queue ──────────────────────────────────────────────────
+
+const transferQueueSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  destinationFacilityId: z.string().uuid().optional(),
+  sourceFacilityId: z.string().uuid().optional(),
+  status: z.enum(['draft', 'requested', 'triggered', 'below_reorder']).optional(),
+  partId: z.string().uuid().optional(),
+  minPriorityScore: z.coerce.number().optional(),
+  maxPriorityScore: z.coerce.number().optional(),
+});
+
+// GET /queue - Get aggregated transfer queue with prioritized recommendations
+// NOTE: This route MUST be registered before /:id routes
+transferOrdersRouter.get('/queue', async (req: AuthRequest, res, next) => {
+  try {
+    const params = transferQueueSchema.parse(req.query);
+    const tenantId = req.user!.tenantId;
+
+    if (!tenantId) {
+      throw new AppError(401, 'Unauthorized');
+    }
+
+    const offset = (params.page - 1) * params.limit;
+
+    const result = await getTransferQueue({
+      tenantId,
+      filters: {
+        destinationFacilityId: params.destinationFacilityId,
+        sourceFacilityId: params.sourceFacilityId,
+        status: params.status,
+        partId: params.partId,
+        minPriorityScore: params.minPriorityScore,
+        maxPriorityScore: params.maxPriorityScore,
+      },
+      limit: params.limit,
+      offset,
+    });
+
+    res.json({
+      data: result.items,
+      pagination: {
+        page: params.page,
+        limit: params.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / params.limit),
       },
     });
   } catch (error) {

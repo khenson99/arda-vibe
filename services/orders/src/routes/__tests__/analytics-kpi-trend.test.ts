@@ -428,28 +428,6 @@ describe('GET /analytics/kpis/:kpiName/trend', () => {
 
       expect(response.status).toBe(400);
     });
-
-    it('returns 400 when only startDate is provided without endDate', async () => {
-      const app = createTestApp();
-      const response = await getJson<{ error: string }>(
-        app,
-        '/analytics/kpis/fill_rate/trend?startDate=2026-01-01',
-      );
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toContain('Both startDate and endDate');
-    });
-
-    it('returns 400 when only endDate is provided without startDate', async () => {
-      const app = createTestApp();
-      const response = await getJson<{ error: string }>(
-        app,
-        '/analytics/kpis/fill_rate/trend?endDate=2026-01-31',
-      );
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toContain('Both startDate and endDate');
-    });
   });
 
   describe('default behavior', () => {

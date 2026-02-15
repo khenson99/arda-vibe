@@ -571,40 +571,55 @@ export interface SourceRecommendation {
 }
 
 // ─── Transfer Queue Types ───────────────────────────────────────────
+
+export type TransferQueueStatus = 'draft' | 'requested' | 'triggered' | 'below_reorder';
+
 export interface TransferQueueItem {
   id: string;
-  transferOrderId: string;
-  toNumber: string;
-  sourceFacilityId: string;
-  sourceFacilityName: string;
+  type: 'draft_to' | 'kanban_trigger' | 'below_reorder';
+
+  transferOrderId?: string;
+  toNumber?: string;
+  kanbanCardId?: string;
+  partId: string;
+  partNumber?: string;
+  partName?: string;
+  /** Number of distinct parts/lines on this queue item (> 1 for multi-line TOs). */
+  lineCount?: number;
+
+  sourceFacilityId?: string;
+  sourceFacilityName?: string;
   destinationFacilityId: string;
   destinationFacilityName: string;
-  status: TransferStatus;
+
+  quantityRequested: number;
+  availableQty?: number;
+
   priorityScore: number;
-  requestedDate: string | null;
-  shippedDate: string | null;
-  receivedDate: string | null;
-  approvedByUserId: string | null;
-  approvedAt: string | null;
+  daysBelowReorder?: number;
+  isExpedited: boolean;
+
+  status: string;
   createdAt: string;
-  lineCount?: number;
-  totalQuantity?: number;
+  requestedDate?: string;
+
+  recommendedSources: SourceRecommendation[];
 }
 
 export interface TransferQueueFilters {
-  status?: TransferStatus;
-  sourceFacilityId?: string;
   destinationFacilityId?: string;
+  sourceFacilityId?: string;
+  status?: TransferQueueStatus;
+  partId?: string;
   minPriorityScore?: number;
-  dateFrom?: string;
-  dateTo?: string;
+  maxPriorityScore?: number;
 }
 
 export interface TransferQueueResponse {
   data: TransferQueueItem[];
-  pagination?: {
+  pagination: {
     page: number;
-    pageSize: number;
+    limit: number;
     total: number;
     totalPages: number;
   };
