@@ -3,8 +3,11 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Activity,
   ArrowUpDown,
+  BarChart3,
   Bell,
   Boxes,
+  Building2,
+  ChevronDown,
   CircleHelp,
   ClipboardList,
   CreditCard,
@@ -14,11 +17,17 @@ import {
   LogOut,
   Network,
   PackageCheck,
+  Palette,
   QrCode,
   RefreshCw,
   Repeat2,
   Search,
+  Settings,
+  ShieldCheck,
+  ShoppingCart,
   SquareKanban,
+  TrendingUp,
+  Wrench,
 } from 'lucide-react';
 import { Button, Input, Toaster } from '@/components/ui';
 import { ImportContextProvider, AddItemsFab, ModuleDialog } from '@/components/order-pulse';
@@ -57,6 +66,214 @@ export interface AppShellOutletContext {
   setPageHeaderActions: React.Dispatch<React.SetStateAction<React.ReactNode>>;
 }
 
+/* ─── Nav section types ─────────────────────────────────────────────── */
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: React.ElementType;
+}
+
+interface NavSection {
+  key: string;
+  label: string;
+  icon: React.ElementType;
+  /** A single-page section (no sub-items). `to` is the route path. */
+  to?: string;
+  children?: NavItem[];
+}
+
+const STORAGE_KEY = 'arda:nav:collapsed';
+
+function readCollapsedState(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCollapsedState(state: Record<string, boolean>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+/* ─── Section definitions (the required IA) ─────────────────────────  */
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    key: 'dashboard',
+    label: 'Dashboard',
+    icon: Activity,
+    to: '/',
+  },
+  {
+    key: 'inventory',
+    label: 'Inventory',
+    icon: Boxes,
+    children: [
+      { to: '/parts', label: 'Items', icon: Boxes },
+      { to: '/inventory/cross-location', label: 'Network Inventory', icon: Network },
+    ],
+  },
+  {
+    key: 'orders',
+    label: 'Orders',
+    icon: ShoppingCart,
+    children: [
+      { to: '/queue', label: 'Order Queue', icon: SquareKanban },
+      { to: '/orders', label: 'Order History', icon: ClipboardList },
+    ],
+  },
+  {
+    key: 'production',
+    label: 'Production',
+    icon: Wrench,
+    children: [
+      { to: '/cards', label: 'Cards', icon: CreditCard },
+      { to: '/loops', label: 'Loops', icon: Repeat2 },
+      { to: '/scan', label: 'Scan', icon: QrCode },
+    ],
+  },
+  {
+    key: 'receiving',
+    label: 'Receiving',
+    icon: PackageCheck,
+    to: '/receiving',
+  },
+  {
+    key: 'sales',
+    label: 'Sales',
+    icon: TrendingUp,
+    to: '/sales',
+  },
+  {
+    key: 'analytics',
+    label: 'Analytics',
+    icon: BarChart3,
+    children: [
+      { to: '/analytics', label: 'Dashboards', icon: BarChart3 },
+      { to: '/admin/audit', label: 'Audit Trail', icon: ShieldCheck },
+    ],
+  },
+  {
+    key: 'my-business',
+    label: 'My Business',
+    icon: Building2,
+    to: '/my-business',
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    icon: Settings,
+    children: [
+      { to: '/settings', label: 'General', icon: Settings },
+      { to: '/settings/colors', label: 'Color Coding', icon: Palette },
+    ],
+  },
+];
+
+/* ─── Collapsible Section Component ─────────────────────────────────  */
+
+function SidebarSection({
+  section,
+  collapsed,
+  onToggle,
+  pathname,
+}: {
+  section: NavSection;
+  collapsed: boolean;
+  onToggle: () => void;
+  pathname: string;
+}) {
+  const SectionIcon = section.icon;
+
+  // single-page section (no sub-items)
+  if (section.to && !section.children) {
+    const isActive =
+      section.to === '/'
+        ? pathname === '/'
+        : pathname === section.to || pathname.startsWith(`${section.to}/`);
+
+    return (
+      <NavLink
+        to={section.to}
+        end={section.to === '/'}
+        className={cn('sidebar-nav-item', isActive && 'active')}
+      >
+        <SectionIcon className="h-4 w-4" />
+        <span>{section.label}</span>
+      </NavLink>
+    );
+  }
+
+  // collapsible section with children
+  const isChildActive = section.children?.some(
+    (c) => pathname === c.to || pathname.startsWith(`${c.to}/`),
+  );
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          'sidebar-nav-item w-full justify-between',
+          isChildActive && 'text-sidebar-active-foreground',
+        )}
+      >
+        <span className="flex items-center gap-2">
+          <SectionIcon className="h-4 w-4" />
+          <span>{section.label}</span>
+        </span>
+        <ChevronDown
+          className={cn(
+            'h-3.5 w-3.5 transition-transform duration-200',
+            collapsed && '-rotate-90',
+          )}
+        />
+      </button>
+
+      <div
+        className={cn(
+          'grid transition-[grid-template-rows] duration-200 ease-in-out',
+          collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]',
+        )}
+      >
+        <div className="overflow-hidden">
+          <div className="ml-3 border-l border-sidebar-border/40 pl-2 pt-0.5">
+            {section.children?.map((child) => {
+              const ChildIcon = child.icon;
+              return (
+                <NavLink
+                  key={child.to}
+                  to={child.to}
+                  end
+                  className={({ isActive }) =>
+                    cn(
+                      'sidebar-nav-item text-[13px]',
+                      isActive && 'active',
+                    )
+                  }
+                >
+                  <ChildIcon className="h-3.5 w-3.5" />
+                  <span>{child.label}</span>
+                </NavLink>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── AppShell ──────────────────────────────────────────────────────  */
+
 export function AppShell({ session, onSignOut }: AppShellProps) {
   const location = useLocation();
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
@@ -71,29 +288,33 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
     onFocusSearch: () => setCommandPaletteOpen(true),
   });
 
-  const navItems = React.useMemo(
-    () => [
-      { to: '/', label: 'Dashboard', icon: Activity, section: 'kanban' as const },
-      { to: '/cards', label: 'Cards', icon: CreditCard, section: 'kanban' as const },
-      { to: '/loops', label: 'Loops', icon: Repeat2, section: 'kanban' as const },
-      { to: '/parts', label: 'Items', icon: Boxes, section: 'operations' as const },
-      { to: '/queue', label: 'Order Queue', icon: SquareKanban, section: 'operations' as const },
-      {
-        to: '/orders',
-        label: 'Order History',
-        icon: ClipboardList,
-        section: 'operations' as const,
-      },
-      { to: '/receiving', label: 'Receiving', icon: PackageCheck, section: 'operations' as const },
-      {
-        to: '/inventory/cross-location',
-        label: 'Network Inventory',
-        icon: Network,
-        section: 'operations' as const,
-      },
-    ],
-    [],
+  // ── Collapsed state persisted to localStorage
+  const [collapsedMap, setCollapsedMap] = React.useState<Record<string, boolean>>(() =>
+    readCollapsedState(),
   );
+
+  const toggleSection = React.useCallback((key: string) => {
+    setCollapsedMap((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      writeCollapsedState(next);
+      return next;
+    });
+  }, []);
+
+  // Build flat list for mobile nav
+  const flatNavItems = React.useMemo(() => {
+    const items: NavItem[] = [];
+    for (const s of NAV_SECTIONS) {
+      if (s.to && !s.children) {
+        items.push({ to: s.to, label: s.label, icon: s.icon });
+      } else if (s.children) {
+        for (const c of s.children) {
+          items.push(c);
+        }
+      }
+    }
+    return items;
+  }, []);
 
   return (
     <ImportContextProvider>
@@ -115,26 +336,16 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
             </div>
           </div>
 
-          <nav className="flex-1 px-2 py-3">
-            {navItems.map((item, index) => {
-              const ItemIcon = item.icon;
-              const prevSection = index > 0 ? navItems[index - 1].section : null;
-              const showSeparator = prevSection && prevSection !== item.section;
-
-              return (
-                <React.Fragment key={item.to}>
-                  {showSeparator && <div className="my-2 border-t border-sidebar-border/40" />}
-                  <NavLink
-                    to={item.to}
-                    end={item.to === '/'}
-                    className={({ isActive }) => cn('sidebar-nav-item', isActive && 'active')}
-                  >
-                    <ItemIcon className="h-4 w-4" />
-                    <span>{item.label}</span>
-                  </NavLink>
-                </React.Fragment>
-              );
-            })}
+          <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
+            {NAV_SECTIONS.map((section) => (
+              <SidebarSection
+                key={section.key}
+                section={section}
+                collapsed={!!collapsedMap[section.key]}
+                onToggle={() => toggleSection(section.key)}
+                pathname={location.pathname}
+              />
+            ))}
           </nav>
 
           <div className="border-t border-sidebar-border/70 px-3 py-4 text-xs text-sidebar-muted">
@@ -263,7 +474,7 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
             )}
 
             <div className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5 md:hidden">
-              {navItems.map((item) => {
+              {flatNavItems.map((item) => {
                 const ItemIcon = item.icon;
                 const active =
                   item.to === '/'
