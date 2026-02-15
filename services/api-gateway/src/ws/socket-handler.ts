@@ -5,12 +5,37 @@ import { config, createLogger } from '@arda/config';
 import { getEventBus, type ArdaEvent } from '@arda/events';
 import { db, schema } from '@arda/db';
 import { eq, and } from 'drizzle-orm';
+import { mapBackendEventToWSEvent } from './event-mapper.js';
 
 interface AuthenticatedSocket extends Socket {
   user: JwtPayload;
 }
 
 const log = createLogger('ws');
+
+interface TenantRoomEmitter {
+  to: (room: string) => { emit: (eventName: string, payload: unknown) => void };
+}
+
+interface MappingLogger {
+  debug: (context: Record<string, unknown>, message: string) => void;
+}
+
+export function emitMappedTenantEvent(
+  io: TenantRoomEmitter,
+  room: string,
+  event: ArdaEvent,
+  logger: MappingLogger = log,
+): boolean {
+  const mapped = mapBackendEventToWSEvent(event);
+  if (!mapped) {
+    logger.debug({ eventType: event.type }, 'Ignoring non-forwarded backend event');
+    return false;
+  }
+
+  io.to(room).emit(mapped.type, mapped);
+  return true;
+}
 
 export function setupWebSocket(httpServer: HttpServer, redisUrl: string): SocketServer {
   const io = new SocketServer(httpServer, {
@@ -48,11 +73,12 @@ export function setupWebSocket(httpServer: HttpServer, redisUrl: string): Socket
     log.info({ userId: user.sub, tenantId }, 'Client connected');
 
     // Join tenant room
-    socket.join(`tenant:${tenantId}`);
+    const tenantRoom = `tenant:${tenantId}`;
+    socket.join(tenantRoom);
 
     // Subscribe to tenant events via Redis and forward to Socket.io room
     const handler = (event: ArdaEvent) => {
-      io.to(`tenant:${tenantId}`).emit(event.type, event);
+      emitMappedTenantEvent(io, tenantRoom, event);
     };
 
     eventBus.subscribeTenant(tenantId, handler);
