@@ -704,6 +704,42 @@ export interface InventoryLedgerEntry {
   updatedAt: string;
 }
 
+/* ── Cross-Location Inventory ────────────────────────────────── */
+
+export interface CrossLocationMatrixCell {
+  facilityId: string;
+  facilityName: string;
+  partId: string;
+  partNumber: string;
+  partName: string;
+  qtyOnHand: number;
+  qtyReserved: number;
+  qtyInTransit: number;
+  available: number;
+  reorderPoint: number | null;
+  isBelowReorder: boolean;
+  isNearReorder: boolean;
+}
+
+export interface CrossLocationMatrixResponse {
+  data: CrossLocationMatrixCell[];
+  facilities: Array<{ id: string; name: string }>;
+  parts: Array<{ id: string; partNumber: string; name: string }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface CrossLocationSummary {
+  totalInTransitValue: number;
+  pendingTransferCount: number;
+  averageNetworkLeadTime: number;
+  facilitiesBelowReorder: number;
+}
+
 /* ── Receiving ───────────────────────────────────────────────── */
 
 export type ReceiptStatus = "pending" | "completed" | "rejected";

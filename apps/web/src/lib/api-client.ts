@@ -47,6 +47,8 @@ import type {
   TransferQueueItem,
   SourceRecommendation,
   InventoryLedgerEntry,
+  CrossLocationMatrixResponse,
+  CrossLocationSummary,
   Receipt,
   ReceivingMetrics,
   ReceivingException,
@@ -1818,6 +1820,25 @@ export async function fetchInventoryByFacility(
   if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiRequest(`/api/orders/inventory/facilities/${encodeURIComponent(facilityId)}/inventory${suffix}`, { token });
+}
+
+/* ── Cross-Location Inventory ────────────────────────────────── */
+
+export async function fetchCrossLocationMatrix(
+  token: string,
+  params?: { page?: number; pageSize?: number; partId?: string; facilityId?: string },
+): Promise<CrossLocationMatrixResponse> {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
+  if (params?.partId) qs.set("partId", params.partId);
+  if (params?.facilityId) qs.set("facilityId", params.facilityId);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiRequest(`/api/inventory/cross-location${suffix}`, { token });
+}
+
+export async function fetchCrossLocationSummary(token: string): Promise<CrossLocationSummary> {
+  return apiRequest("/api/inventory/cross-location/summary", { token });
 }
 
 /* ── Receiving ────────────────────────────────────────────────── */

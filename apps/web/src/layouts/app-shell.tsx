@@ -12,6 +12,7 @@ import {
   HardHat,
   Loader2,
   LogOut,
+  Network,
   PackageCheck,
   QrCode,
   RefreshCw,
@@ -84,6 +85,12 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
         section: 'operations' as const,
       },
       { to: '/receiving', label: 'Receiving', icon: PackageCheck, section: 'operations' as const },
+      {
+        to: '/inventory/cross-location',
+        label: 'Network Inventory',
+        icon: Network,
+        section: 'operations' as const,
+      },
     ],
     [],
   );
