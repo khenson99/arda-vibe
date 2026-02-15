@@ -134,6 +134,7 @@ export const suppliers = catalogSchema.table(
     statedLeadTimeDays: integer('stated_lead_time_days'), // supplier-provided lead time
     paymentTerms: varchar('payment_terms', { length: 100 }), // "Net 30", "2/10 Net 30"
     shippingTerms: varchar('shipping_terms', { length: 100 }),
+    orderMethods: jsonb('order_methods').$type<string[]>().default([]), // e.g. ["email","phone","portal","fax"]
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
