@@ -1,6 +1,7 @@
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { db, schema, writeAuditEntry } from '@arda/db';
-import { getEventBus } from '@arda/events';
+import { getEventBus, publishKpiRefreshed } from '@arda/events';
+import { getCorrelationId } from '@arda/observability';
 import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 
@@ -401,6 +402,14 @@ export async function processReceipt(input: ProcessReceiptInput) {
       totalRejected: result.eventPayload.totalRejected,
       exceptionsCreated: result.eventPayload.exceptions.length,
       timestamp,
+    });
+
+    // Publish KPI refresh for receiving completion
+    void publishKpiRefreshed({
+      tenantId: input.tenantId,
+      mutationType: 'receiving.completed',
+      source: 'orders',
+      correlationId: getCorrelationId(),
     });
 
     for (const exc of result.eventPayload.exceptions) {

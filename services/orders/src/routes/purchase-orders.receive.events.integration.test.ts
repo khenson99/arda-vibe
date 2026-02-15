@@ -126,6 +126,12 @@ vi.mock('@arda/db', () => ({
 
 vi.mock('@arda/events', () => ({
   getEventBus: getEventBusMock,
+  publishKpiRefreshed: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@arda/observability', () => ({
+  getCorrelationId: vi.fn(() => 'test-corr-id'),
+  correlationMiddleware: vi.fn(() => (_req: any, _res: any, next: any) => next()),
 }));
 
 vi.mock('@arda/config', () => ({

@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { eq, and, sql, inArray, asc } from 'drizzle-orm';
 import { db, schema, writeAuditEntry, writeAuditEntries } from '@arda/db';
 import type { DbOrTransaction } from '@arda/db';
-import { getEventBus } from '@arda/events';
+import { getEventBus, publishKpiRefreshed } from '@arda/events';
+import { getCorrelationId } from '@arda/observability';
 import { config } from '@arda/config';
 import type { AuthRequest, AuditContext } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
@@ -319,6 +320,14 @@ async function publishOrderCreatedEvent(input: {
       linkedCardIds: input.linkedCardIds,
       timestamp: new Date().toISOString(),
     });
+
+    // Also publish kpi.refreshed
+    void publishKpiRefreshed({
+      tenantId: input.tenantId,
+      mutationType: `${input.orderType}.created`,
+      source: 'orders',
+      correlationId: getCorrelationId(),
+    });
   } catch {
     console.error(
       `[order-queue] Failed to publish order.created event for ${input.orderType} ${input.orderNumber}`
@@ -344,6 +353,14 @@ async function publishOrderStatusChangedEvent(input: {
       fromStatus: input.fromStatus,
       toStatus: input.toStatus,
       timestamp: new Date().toISOString(),
+    });
+
+    // Also publish kpi.refreshed
+    void publishKpiRefreshed({
+      tenantId: input.tenantId,
+      mutationType: 'purchase_order.status_changed',
+      source: 'orders',
+      correlationId: getCorrelationId(),
     });
   } catch {
     console.error(

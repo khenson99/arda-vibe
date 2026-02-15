@@ -2,15 +2,20 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config, createLogger } from '@arda/config';
+import { correlationMiddleware, getCorrelationId } from '@arda/observability';
 
 const log = createLogger('auth');
-import { db } from '@arda/db';
+import { db, onAuditWritten } from '@arda/db';
 import { sql } from 'drizzle-orm';
+import { setupAuditEventPublishing, userActivityMiddleware } from '@arda/events';
 import { authRouter, handleGoogleLinkCallback } from './routes/auth.routes.js';
 import { tenantRouter } from './routes/tenant.routes.js';
 import { usersRouter } from './routes/users.routes.js';
 import { integrationsRouter } from './routes/integrations.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
+
+// Wire up audit.created event publishing for all writeAuditEntry calls
+setupAuditEventPublishing('auth', onAuditWritten, getCorrelationId);
 
 const app = express();
 
@@ -18,6 +23,7 @@ const app = express();
 app.use(helmet());
 app.use(cors({ origin: config.APP_URL, credentials: true }));
 app.use(express.json({ limit: '8mb' }));
+app.use(correlationMiddleware('auth'));
 
 // ─── Health Check ─────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
@@ -47,6 +53,9 @@ app.get('/api/auth/google/callback', handleGoogleLinkCallback);
 app.get('/api/auth/google/link/callback', handleGoogleLinkCallback);
 app.get('/auth/google/callback', handleGoogleLinkCallback);
 app.get('/auth/google/link/callback', handleGoogleLinkCallback);
+
+// user.activity middleware — fires for authenticated mutations
+app.use(userActivityMiddleware('auth', getCorrelationId));
 
 app.use('/auth', authRouter);
 app.use('/api/auth', authRouter);

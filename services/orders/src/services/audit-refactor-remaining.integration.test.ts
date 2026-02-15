@@ -466,8 +466,7 @@ describe('Remaining Service Audit Refactor — writeAuditEntry', () => {
   });
 
   describe('inventory-ledger', () => {
-    it('adjustQuantity emits inventory.adjusted audit', async () => {
-      // Mock transaction: select row for update → update → writeAuditEntry
+    function mockInventoryAdjustmentTx() {
       dbMock.transaction.mockImplementationOnce(async (callback: any) => {
         const tx: any = {};
         tx.select = vi.fn(() => ({
@@ -498,6 +497,10 @@ describe('Remaining Service Audit Refactor — writeAuditEntry', () => {
         }));
         return callback(tx);
       });
+    }
+
+    it('adjustQuantity emits inventory.adjusted audit and realtime events', async () => {
+      mockInventoryAdjustmentTx();
 
       await adjustQuantity({
         tenantId: 'tenant-1',
@@ -508,6 +511,7 @@ describe('Remaining Service Audit Refactor — writeAuditEntry', () => {
         quantity: 50,
         source: 'cycle_count',
         userId: 'user-1',
+        route: '/inventory/facilities/:facilityId/inventory/:partId/adjust',
       });
 
       const audit = auditCalls.find((c) => c.action === 'inventory.adjusted');
@@ -521,6 +525,74 @@ describe('Remaining Service Audit Refactor — writeAuditEntry', () => {
         adjustmentType: 'increment',
         quantity: 50,
         source: 'cycle_count',
+      });
+
+      expect(publishMock).toHaveBeenCalledTimes(4);
+      const publishCalls = publishMock.mock.calls as unknown as Array<
+        [Record<string, unknown>, Record<string, unknown>]
+      >;
+      expect(publishCalls[0][0]).toMatchObject({
+        type: 'inventory:updated',
+        tenantId: 'tenant-1',
+        facilityId: 'fac-1',
+        partId: 'part-1',
+      });
+      expect(publishCalls[1][0]).toMatchObject({
+        type: 'kpi.refreshed',
+        tenantId: 'tenant-1',
+        kpiKey: 'stockout_count',
+        affectedMetrics: ['stockout_count', 'fill_rate'],
+      });
+      expect(publishCalls[2][0]).toMatchObject({
+        type: 'audit.created',
+        tenantId: 'tenant-1',
+        action: 'inventory.adjusted',
+        entityType: 'inventory_ledger',
+      });
+      expect(publishCalls[3][0]).toMatchObject({
+        type: 'user.activity',
+        tenantId: 'tenant-1',
+        userId: 'user-1',
+        activityType: 'mutation',
+      });
+
+      for (const [, meta] of publishCalls) {
+        expect(meta).toMatchObject({
+          schemaVersion: 1,
+          source: 'orders.inventory-ledger',
+        });
+      }
+    });
+
+    it('propagates correlation ID into emitted event metadata', async () => {
+      mockInventoryAdjustmentTx();
+
+      await adjustQuantity({
+        tenantId: 'tenant-1',
+        facilityId: 'fac-1',
+        partId: 'part-1',
+        field: 'qtyOnHand',
+        adjustmentType: 'increment',
+        quantity: 5,
+        userId: 'user-1',
+        correlationId: 'corr-inventory-223',
+        route: '/inventory/facilities/:facilityId/inventory/:partId/adjust',
+      });
+
+      expect(publishMock).toHaveBeenCalledTimes(4);
+      const publishCalls = publishMock.mock.calls as unknown as Array<
+        [Record<string, unknown>, Record<string, unknown>]
+      >;
+      for (const [, meta] of publishCalls) {
+        expect(meta).toMatchObject({
+          correlationId: 'corr-inventory-223',
+          schemaVersion: 1,
+          source: 'orders.inventory-ledger',
+        });
+      }
+      expect(publishCalls[3][0]).toMatchObject({
+        type: 'user.activity',
+        correlationId: 'corr-inventory-223',
       });
     });
   });

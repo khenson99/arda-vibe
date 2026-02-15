@@ -1,6 +1,7 @@
 import { eq, and, sql, desc, asc } from 'drizzle-orm';
 import { db, schema, writeAuditEntry } from '@arda/db';
-import { getEventBus, type ScanConflictDetectedEvent } from '@arda/events';
+import { getEventBus, publishKpiRefreshed, type ScanConflictDetectedEvent } from '@arda/events';
+import { getCorrelationId } from '@arda/observability';
 import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 import { ScanDedupeManager, ScanDuplicateError } from './scan-dedupe-manager.js';
@@ -396,6 +397,15 @@ export async function transitionCard(input: {
       stageDurationSeconds: stageDurationSeconds ?? undefined,
       idempotencyKey,
       timestamp: now.toISOString(),
+    });
+
+    // Publish KPI refresh for card transitions
+    void publishKpiRefreshed({
+      tenantId,
+      mutationType: 'card.transition',
+      facilityId: card.loop.facilityId,
+      source: 'kanban',
+      correlationId: getCorrelationId(),
     });
 
     // Queue entry event (when card is triggered, it enters the order queue)

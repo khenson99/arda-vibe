@@ -106,6 +106,7 @@ export interface KpiRefreshedEvent {
   type: 'kpi.refreshed';
   tenantId: string;
   kpiKey: string;
+  affectedMetrics?: string[];
   window: '30d' | '60d' | '90d' | 'custom';
   facilityId?: string;
   value: number;
@@ -667,6 +668,22 @@ export class EventBus {
     this.handlers.clear();
   }
 }
+
+// Re-export realtime publishers
+export {
+  buildEventMeta,
+  publishKpiRefreshed,
+  publishAuditCreated,
+  publishUserActivity,
+  setupAuditEventPublishing,
+  KPI_AFFECTED_METRICS,
+  type PublishKpiRefreshedInput,
+  type PublishAuditCreatedInput,
+  type PublishUserActivityInput,
+} from './realtime-publishers.js';
+
+// Re-export activity middleware
+export { userActivityMiddleware } from './activity-middleware.js';
 
 // ─── Singleton factory ──────────────────────────────────────────────
 let eventBusInstance: EventBus | null = null;

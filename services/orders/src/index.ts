@@ -2,9 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config, createLogger } from '@arda/config';
+import { correlationMiddleware, getCorrelationId } from '@arda/observability';
 
 const log = createLogger('orders');
-import { db } from '@arda/db';
+import { db, onAuditWritten } from '@arda/db';
 import { sql } from 'drizzle-orm';
 import { authMiddleware } from '@arda/auth-utils';
 import { purchaseOrdersRouter } from './routes/purchase-orders.routes.js';
@@ -21,13 +22,17 @@ import { analyticsRouter } from './routes/analytics.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startQueueRiskScheduler } from './services/queue-risk-scheduler.service.js';
 import { startTransferAutomationListener, type TransferAutomationListener } from './services/transfer-automation-listener.js';
-import { getEventBus } from '@arda/events';
+import { getEventBus, setupAuditEventPublishing, userActivityMiddleware } from '@arda/events';
+
+// Wire up audit.created event publishing for all writeAuditEntry calls
+setupAuditEventPublishing('orders', onAuditWritten, getCorrelationId);
 
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: config.APP_URL, credentials: true }));
 app.use(express.json({ limit: '5mb' }));
+app.use(correlationMiddleware('orders'));
 
 // ─── Health Check ─────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
@@ -52,6 +57,7 @@ app.get('/health', async (_req, res) => {
 
 // Routes — all are behind auth via the API gateway
 app.use(authMiddleware);
+app.use(userActivityMiddleware('orders', getCorrelationId));
 app.use('/purchase-orders', purchaseOrdersRouter);
 app.use('/work-orders', workOrdersRouter);
 app.use('/work-centers', workCentersRouter);

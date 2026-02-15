@@ -2,9 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config, createLogger } from '@arda/config';
-import { db } from '@arda/db';
+import { correlationMiddleware, getCorrelationId } from '@arda/observability';
+import { db, onAuditWritten } from '@arda/db';
 import { sql } from 'drizzle-orm';
-import { getEventBus } from '@arda/events';
+import { getEventBus, setupAuditEventPublishing, userActivityMiddleware } from '@arda/events';
 import { authMiddleware } from '@arda/auth-utils';
 import { notificationsRouter } from './routes/notifications.routes.js';
 import { preferencesRouter } from './routes/preferences.routes.js';
@@ -14,11 +15,15 @@ import { startEventListener } from './services/event-listener.js';
 
 const log = createLogger('notifications');
 
+// Wire up audit.created event publishing for all writeAuditEntry calls
+setupAuditEventPublishing('notifications', onAuditWritten, getCorrelationId);
+
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: config.APP_URL, credentials: true }));
 app.use(express.json({ limit: '5mb' }));
+app.use(correlationMiddleware('notifications'));
 
 // ─── Health Check ─────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
@@ -56,6 +61,7 @@ app.use('/notifications', unsubscribeRouter);
 
 // Authenticated routes — behind auth via the API gateway
 app.use(authMiddleware);
+app.use(userActivityMiddleware('notifications', getCorrelationId));
 app.use('/notifications', notificationsRouter);
 app.use('/preferences', preferencesRouter);
 

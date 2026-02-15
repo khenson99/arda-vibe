@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { db, schema, writeAuditEntry } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
-import { getEventBus } from '@arda/events';
+import { getEventBus, publishKpiRefreshed } from '@arda/events';
+import { getCorrelationId } from '@arda/observability';
 import { config } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 import { getNextWONumber } from '../services/order-number.service.js';
@@ -444,6 +445,13 @@ workOrdersRouter.post('/', async (req: AuthRequest, res, next) => {
       console.error(`[work-orders] Failed to publish order.created event for ${woNumber}`);
     }
 
+    void publishKpiRefreshed({
+      tenantId,
+      mutationType: 'work_order.created',
+      source: 'orders',
+      correlationId: getCorrelationId(),
+    });
+
     res.status(201).json({
       ...createdWO,
       routingSteps: createdRoutings,
@@ -544,6 +552,13 @@ workOrdersRouter.patch('/:id/status', async (req: AuthRequest, res, next) => {
     } catch {
       console.error(`[work-orders] Failed to publish order.status_changed event for ${currentWO.woNumber}`);
     }
+
+    void publishKpiRefreshed({
+      tenantId,
+      mutationType: 'work_order.status_changed',
+      source: 'orders',
+      correlationId: getCorrelationId(),
+    });
 
     // Fetch complete work order with routings
     const result = await fetchWorkOrderWithRoutings(id, tenantId);

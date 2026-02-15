@@ -11,9 +11,17 @@
  *   qtyInTransit – stock shipped but not yet received
  */
 
+import { randomUUID } from 'node:crypto';
 import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and, sql } from 'drizzle-orm';
-import { getEventBus, type InventoryUpdatedEvent } from '@arda/events';
+import {
+  getEventBus,
+  type AuditCreatedEvent,
+  type EventMeta,
+  type InventoryUpdatedEvent,
+  type KpiRefreshedEvent,
+  type UserActivityEvent,
+} from '@arda/events';
 import { createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
 import type { InventoryAdjustmentType, InventoryField } from '@arda/shared-types';
@@ -58,6 +66,8 @@ export interface AdjustQuantityInput {
   /** Optional source for audit trail (e.g. 'cycle_count', 'transfer_receipt'). */
   source?: string;
   userId?: string;
+  correlationId?: string;
+  route?: string;
 }
 
 export interface AdjustQuantityResult {
@@ -69,6 +79,122 @@ export interface AdjustQuantityResult {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
+
+interface InventoryMutationEmission {
+  tenantId: string;
+  facilityId: string;
+  partId: string;
+  field: InventoryField;
+  adjustmentType: InventoryAdjustmentType;
+  quantity: number;
+  source?: string;
+  previousValue: number;
+  newValue: number;
+  userId?: string;
+  correlationId?: string;
+  route?: string;
+  auditId: string;
+  auditAction: string;
+  entityId: string;
+}
+
+function buildEventMeta(correlationId?: string): EventMeta {
+  return {
+    id: randomUUID(),
+    schemaVersion: 1,
+    source: 'orders.inventory-ledger',
+    correlationId,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function getAffectedMetrics(field: InventoryField): string[] {
+  switch (field) {
+    case 'qtyOnHand':
+      return ['stockout_count', 'fill_rate'];
+    case 'qtyReserved':
+      return ['fill_rate'];
+    case 'qtyInTransit':
+      return ['supplier_otd'];
+    default:
+      return ['stockout_count'];
+  }
+}
+
+function buildKpiEvent(input: InventoryMutationEmission, timestamp: string): KpiRefreshedEvent {
+  const affectedMetrics = getAffectedMetrics(input.field);
+  const deltaPercent = input.previousValue === 0
+    ? undefined
+    : ((input.newValue - input.previousValue) / Math.abs(input.previousValue)) * 100;
+
+  return {
+    type: 'kpi.refreshed',
+    tenantId: input.tenantId,
+    kpiKey: affectedMetrics[0] ?? 'stockout_count',
+    affectedMetrics,
+    window: '30d',
+    facilityId: input.facilityId,
+    value: input.newValue,
+    previousValue: input.previousValue,
+    deltaPercent,
+    refreshedAt: timestamp,
+    timestamp,
+  };
+}
+
+async function publishInventoryMutationEvents(input: InventoryMutationEmission): Promise<void> {
+  const eventBus = getEventBus();
+  const now = new Date().toISOString();
+
+  const inventoryEvent: InventoryUpdatedEvent = {
+    type: 'inventory:updated',
+    tenantId: input.tenantId,
+    facilityId: input.facilityId,
+    partId: input.partId,
+    field: input.field,
+    adjustmentType: input.adjustmentType,
+    quantity: input.quantity,
+    previousValue: input.previousValue,
+    newValue: input.newValue,
+    ...(input.adjustmentType === 'set' && {
+      variance: input.newValue - input.previousValue,
+    }),
+    source: input.source,
+    timestamp: now,
+  };
+
+  const auditEvent: AuditCreatedEvent = {
+    type: 'audit.created',
+    tenantId: input.tenantId,
+    auditId: input.auditId,
+    action: input.auditAction,
+    entityType: 'inventory_ledger',
+    entityId: input.entityId,
+    actorUserId: input.userId ?? null,
+    method: input.userId ? 'api' : 'system',
+    timestamp: now,
+  };
+
+  await eventBus.publish(inventoryEvent, buildEventMeta(input.correlationId));
+  await eventBus.publish(buildKpiEvent(input, now), buildEventMeta(input.correlationId));
+  await eventBus.publish(auditEvent, buildEventMeta(input.correlationId));
+
+  if (!input.userId) return;
+
+  const userActivityEvent: UserActivityEvent = {
+    type: 'user.activity',
+    tenantId: input.tenantId,
+    userId: input.userId,
+    activityType: 'mutation',
+    route: input.route,
+    resourceType: 'inventory_ledger',
+    resourceId: input.partId,
+    correlationId: input.correlationId,
+    timestamp: now,
+  };
+
+  await eventBus.publish(userActivityEvent, buildEventMeta(input.correlationId));
+}
 
 // ─── Read Operations ──────────────────────────────────────────────────
 
@@ -238,7 +364,7 @@ export async function adjustQuantity(input: AdjustQuantityInput): Promise<Adjust
       .where(eq(inventoryLedger.id, row.id));
 
     // Audit the adjustment in the same transaction
-    await writeAuditEntry(tx, {
+    const auditEntry = await writeAuditEntry(tx, {
       tenantId,
       userId: input.userId ?? null,
       action: 'inventory.adjusted',
@@ -256,32 +382,31 @@ export async function adjustQuantity(input: AdjustQuantityInput): Promise<Adjust
       },
     });
 
-    return { previousValue, newValue };
+    return { previousValue, newValue, auditId: auditEntry.id, entityId: row.id };
   });
 
   // Publish event outside the transaction so a publish failure
   // doesn't roll back the DB change.
   try {
-    const event: InventoryUpdatedEvent = {
-      type: 'inventory:updated',
+    await publishInventoryMutationEvents({
       tenantId,
       facilityId,
       partId,
       field,
       adjustmentType,
       quantity,
+      source,
       previousValue: result.previousValue,
       newValue: result.newValue,
-      ...(adjustmentType === 'set' && {
-        variance: result.newValue - result.previousValue,
-      }),
-      source,
-      timestamp: new Date().toISOString(),
-    };
-    const eventBus = getEventBus();
-    await eventBus.publish(event);
+      userId: input.userId,
+      correlationId: input.correlationId,
+      route: input.route,
+      auditId: result.auditId,
+      auditAction: 'inventory.adjusted',
+      entityId: result.entityId,
+    });
   } catch (err) {
-    log.warn({ err, facilityId, partId, field }, 'Failed to publish inventory update event');
+    log.warn({ err, facilityId, partId, field }, 'Failed to publish inventory mutation events');
   }
 
   return {
@@ -304,6 +429,7 @@ export async function batchAdjust(
 
   // Group by tenant + facility + part to run all adjustments in one TX
   const results: AdjustQuantityResult[] = [];
+  const emissions: InventoryMutationEmission[] = [];
 
   await db.transaction(async (tx) => {
     for (const adj of adjustments) {
@@ -357,7 +483,7 @@ export async function batchAdjust(
         .where(eq(inventoryLedger.id, row.id));
 
       // Audit each adjustment in the same transaction
-      await writeAuditEntry(tx, {
+      const auditEntry = await writeAuditEntry(tx, {
         tenantId,
         userId: adj.userId ?? null,
         action: 'inventory.ledger_updated',
@@ -377,33 +503,31 @@ export async function batchAdjust(
       });
 
       results.push({ previousValue, newValue, field, adjustmentType, quantity });
+      emissions.push({
+        tenantId,
+        facilityId,
+        partId,
+        field,
+        adjustmentType,
+        quantity,
+        source: adj.source,
+        previousValue,
+        newValue,
+        userId: adj.userId,
+        correlationId: adj.correlationId,
+        route: adj.route,
+        auditId: auditEntry.id,
+        auditAction: 'inventory.ledger_updated',
+        entityId: row.id,
+      });
     }
   });
 
   // Publish events outside the transaction
   try {
-    const eventBus = getEventBus();
-    await Promise.all(
-      adjustments.map((adj, i) => {
-        const r = results[i];
-        const event: InventoryUpdatedEvent = {
-          type: 'inventory:updated',
-          tenantId: adj.tenantId,
-          facilityId: adj.facilityId,
-          partId: adj.partId,
-          field: adj.field,
-          adjustmentType: adj.adjustmentType,
-          quantity: adj.quantity,
-          previousValue: r.previousValue,
-          newValue: r.newValue,
-          source: adj.source,
-          timestamp: new Date().toISOString(),
-        };
-        return eventBus.publish(event);
-      })
-    );
+    await Promise.all(emissions.map((emission) => publishInventoryMutationEvents(emission)));
   } catch (err) {
-    log.warn({ err }, 'Failed to publish batch inventory update events');
+    log.warn({ err }, 'Failed to publish batch inventory mutation events');
   }
 
   return results;

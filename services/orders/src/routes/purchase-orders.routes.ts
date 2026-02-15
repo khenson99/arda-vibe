@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { eq, and, sql, desc, asc, inArray } from 'drizzle-orm';
 import { db, schema, writeAuditEntry } from '@arda/db';
 import type { AuthRequest, AuditContext } from '@arda/auth-utils';
-import { getEventBus } from '@arda/events';
+import { getEventBus, publishKpiRefreshed } from '@arda/events';
 import { config } from '@arda/config';
+import { getCorrelationId } from '@arda/observability';
 import { AppError } from '../middleware/error-handler.js';
 import { getNextPONumber } from '../services/order-number.service.js';
 import {
@@ -390,6 +391,15 @@ purchaseOrdersRouter.post('/', async (req: AuthRequest, res, next) => {
     } catch {
       console.error(`[purchase-orders] Failed to publish order.created event for ${poNumber}`);
     }
+
+    // Publish kpi.refreshed for affected metrics
+    void publishKpiRefreshed({
+      tenantId,
+      mutationType: 'purchase_order.created',
+      facilityId: createdPO.facilityId,
+      source: 'orders',
+      correlationId: getCorrelationId(),
+    });
 
     res.status(201).json({
       data: {
@@ -817,6 +827,15 @@ purchaseOrdersRouter.patch('/:id/status', async (req: AuthRequest, res, next) =>
       console.error(`[purchase-orders] Failed to publish order.status_changed event for ${po.poNumber}`);
     }
 
+    // Publish kpi.refreshed for affected metrics
+    void publishKpiRefreshed({
+      tenantId: req.user!.tenantId,
+      mutationType: 'purchase_order.status_changed',
+      facilityId: po.facilityId,
+      source: 'orders',
+      correlationId: getCorrelationId(),
+    });
+
     res.json({
       data: updated,
     });
@@ -1035,6 +1054,15 @@ purchaseOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
         );
       }
     }
+
+    // Receiving always affects KPI metrics (fill_rate, supplier_otd, order_accuracy)
+    void publishKpiRefreshed({
+      tenantId,
+      mutationType: 'receiving.completed',
+      facilityId: po.facilityId,
+      source: 'orders',
+      correlationId: getCorrelationId(),
+    });
 
     res.json({
       data: {

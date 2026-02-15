@@ -32,6 +32,17 @@ import {
 
 export const inventoryRouter = Router();
 
+function getCorrelationId(req: AuthRequest): string | undefined {
+  const header = req.headers['x-correlation-id'];
+  if (Array.isArray(header)) {
+    return header[0]?.trim() || undefined;
+  }
+  if (typeof header === 'string') {
+    return header.trim() || undefined;
+  }
+  return undefined;
+}
+
 // ─── Schemas ──────────────────────────────────────────────────────────
 
 const paginationSchema = z.object({
@@ -175,6 +186,7 @@ inventoryRouter.patch('/facilities/:facilityId/inventory/:partId/adjust', async 
     const partId = req.params.partId as string;
     const body = adjustSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const correlationId = getCorrelationId(req);
 
     if (!tenantId) {
       throw new AppError(401, 'Unauthorized');
@@ -188,6 +200,9 @@ inventoryRouter.patch('/facilities/:facilityId/inventory/:partId/adjust', async 
       adjustmentType: body.adjustmentType as InventoryAdjustmentType,
       quantity: body.quantity,
       source: body.source,
+      userId: req.user?.sub,
+      correlationId,
+      route: '/inventory/facilities/:facilityId/inventory/:partId/adjust',
     });
 
     res.json({ data: result });
@@ -206,6 +221,7 @@ inventoryRouter.post('/facilities/:facilityId/inventory/batch-adjust', async (re
     const facilityId = req.params.facilityId as string;
     const { adjustments } = batchAdjustSchema.parse(req.body);
     const tenantId = req.user!.tenantId;
+    const correlationId = getCorrelationId(req);
 
     if (!tenantId) {
       throw new AppError(401, 'Unauthorized');
@@ -220,6 +236,9 @@ inventoryRouter.post('/facilities/:facilityId/inventory/batch-adjust', async (re
         adjustmentType: a.adjustmentType as InventoryAdjustmentType,
         quantity: a.quantity,
         source: a.source,
+        userId: req.user?.sub,
+        correlationId,
+        route: '/inventory/facilities/:facilityId/inventory/batch-adjust',
       }))
     );
 

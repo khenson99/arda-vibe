@@ -4,8 +4,9 @@ import { eq, and, sql, gte, lte } from 'drizzle-orm';
 import { db, schema, writeAuditEntry } from '@arda/db';
 import type { DbOrTransaction } from '@arda/db';
 import type { AuthRequest } from '@arda/auth-utils';
-import { getEventBus } from '@arda/events';
+import { getEventBus, publishKpiRefreshed } from '@arda/events';
 import { config } from '@arda/config';
+import { getCorrelationId } from '@arda/observability';
 import type { UserRole, TransferStatus } from '@arda/shared-types';
 import { AppError } from '../middleware/error-handler.js';
 import { getNextTONumber } from '../services/order-number.service.js';
@@ -648,6 +649,13 @@ transferOrdersRouter.post('/', async (req: AuthRequest, res, next) => {
       console.error(`[transfer-orders] Failed to publish order.created event for ${toNumber}`);
     }
 
+    void publishKpiRefreshed({
+      tenantId,
+      mutationType: 'transfer_order.created',
+      source: 'orders',
+      correlationId: getCorrelationId(),
+    });
+
     res.status(201).json({
       ...createdOrder,
       lines,
@@ -781,6 +789,13 @@ transferOrdersRouter.patch('/:id/status', async (req: AuthRequest, res, next) =>
       } catch {
         console.error(`[transfer-orders] Failed to publish order.status_changed event for ${order.toNumber}`);
       }
+
+      void publishKpiRefreshed({
+        tenantId,
+        mutationType: 'transfer_order.status_changed',
+        source: 'orders',
+        correlationId: getCorrelationId(),
+      });
 
       const orderLines = await tx
         .select()
@@ -950,6 +965,13 @@ transferOrdersRouter.patch('/:id/ship', async (req: AuthRequest, res, next) => {
           `[transfer-orders] Failed to publish order.status_changed event for ${order.toNumber}`
         );
       }
+
+      void publishKpiRefreshed({
+        tenantId,
+        mutationType: 'transfer_order.status_changed',
+        source: 'orders',
+        correlationId: getCorrelationId(),
+      });
     }
 
     res.json({
@@ -1138,6 +1160,13 @@ transferOrdersRouter.patch('/:id/receive', async (req: AuthRequest, res, next) =
           `[transfer-orders] Failed to publish order.status_changed event for ${order.toNumber}`
         );
       }
+
+      void publishKpiRefreshed({
+        tenantId,
+        mutationType: 'transfer_order.status_changed',
+        source: 'orders',
+        correlationId: getCorrelationId(),
+      });
     }
 
     res.json({

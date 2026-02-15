@@ -25,6 +25,25 @@ export interface AuditEntryResult {
   sequenceNumber: number;
 }
 
+/**
+ * Callback invoked after each successful audit entry write.
+ * Used to publish audit.created events without coupling @arda/db → @arda/events.
+ */
+export type AuditWrittenCallback = (
+  entry: AuditEntryInput,
+  result: AuditEntryResult,
+) => void;
+
+let _onAuditWritten: AuditWrittenCallback | null = null;
+
+/**
+ * Register a global callback that fires after every successful audit write.
+ * Intended to be called once at service startup to wire up event publishing.
+ */
+export function onAuditWritten(callback: AuditWrittenCallback): void {
+  _onAuditWritten = callback;
+}
+
 // ─── Constants ──────────────────────────────────────────────────────
 
 const GENESIS_SENTINEL = 'GENESIS';
@@ -169,7 +188,14 @@ export async function writeAuditEntry(
   entry: AuditEntryInput,
 ): Promise<AuditEntryResult> {
   const ts = entry.timestamp ?? new Date();
-  return dbOrTx.transaction(async (tx) => writeEntryInTx(tx, entry, ts));
+  const result = await dbOrTx.transaction(async (tx) => writeEntryInTx(tx, entry, ts));
+
+  // Fire-and-forget callback for event publishing (non-critical)
+  if (_onAuditWritten) {
+    try { _onAuditWritten(entry, result); } catch { /* swallow */ }
+  }
+
+  return result;
 }
 
 /**
@@ -253,6 +279,18 @@ export async function writeAuditEntries(
       results.push(inserted);
       previousHash = hashChain;
       nextSequence++;
+    }
+
+    // Fire-and-forget callbacks for event publishing (non-critical)
+    if (_onAuditWritten) {
+      for (let i = 0; i < results.length; i++) {
+        try {
+          _onAuditWritten(
+            { ...entries[i], tenantId } as AuditEntryInput,
+            results[i],
+          );
+        } catch { /* swallow */ }
+      }
     }
 
     return results;

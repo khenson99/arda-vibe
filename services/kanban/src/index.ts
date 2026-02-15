@@ -2,11 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config, createLogger } from '@arda/config';
+import { correlationMiddleware, getCorrelationId } from '@arda/observability';
 
 const log = createLogger('kanban');
-import { db } from '@arda/db';
+import { db, onAuditWritten } from '@arda/db';
 import { sql } from 'drizzle-orm';
 import { authMiddleware } from '@arda/auth-utils';
+import { setupAuditEventPublishing, userActivityMiddleware } from '@arda/events';
 import { loopsRouter } from './routes/loops.routes.js';
 import { cardsRouter } from './routes/cards.routes.js';
 import { scanRouter } from './routes/scan.routes.js';
@@ -17,11 +19,15 @@ import { cardTemplatesRouter } from './routes/card-templates.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { initScanDedupeManager, getScanDedupeManager } from './services/card-lifecycle.service.js';
 
+// Wire up audit.created event publishing for all writeAuditEntry calls
+setupAuditEventPublishing('kanban', onAuditWritten, getCorrelationId);
+
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: config.APP_URL, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+app.use(correlationMiddleware('kanban'));
 
 // ─── Health Check ─────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
@@ -49,6 +55,7 @@ app.use('/scan', scanRouter);
 
 // Authenticated routes
 app.use(authMiddleware);
+app.use(userActivityMiddleware('kanban', getCorrelationId));
 app.use('/loops', loopsRouter);
 app.use('/cards', cardsRouter);
 app.use('/velocity', velocityRouter);
