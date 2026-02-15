@@ -603,3 +603,76 @@ Learnings:
   - Pre-existing CI failures: always verify if the same failure exists on main before debugging PR-specific issues
   - `npm ci` behavior varies across npm minor versions — lock file validity is not guaranteed portable
 
+--- Architect Iteration 12 ---
+Timestamp: 2026-02-15T10:30:00Z
+Tickets completed (merged): #342 (PR #444), #346 (PR #443), #347 (PR #442), #349 (PR #442)
+Tickets with PR open: #428 (PR #458 — CI failing, pre-existing npm ci issue on main)
+Tickets assigned this iteration:
+  - #427 → backend-engineer: PO Orders preview/approve/email workflow. High priority, builds on #428 email infrastructure.
+  - #348 → frontend-engineer: Notifications page filters/pagination/mark-unread. Last Wave 1 frontend ticket.
+  - #350 → qa: MVP-17 integration/E2E/NFR smoke coverage. Wave 1 backend+frontend now merged.
+  - #351 → design-enforcer: MVP-17 design-system and accessibility compliance. All MVP-17 UI work merged/in-progress.
+Tickets blocked: none
+Decisions made: ADR-010 (parallel Wave 1 close-out + #427 backend priority)
+State:
+  - Wave 1 MVP-17: 4/7 merged, 3 remaining (#348 frontend, #350 QA, #351 design)
+  - #428: PR #458 open, 25/25 tests passing locally, CI failing (pre-existing npm ci lock file issue on main)
+  - #427: High-priority backend ticket, builds on #428 email workflow — assigned to backend-engineer
+  - All 4 agents now have work: backend (#427), frontend (#348), QA (#350), design (#351)
+  - After Wave 1 closes, backend moves to Wave 2 MVP-13 starting with #191 (schema)
+Learnings:
+  - #347 and #349 were shipped together in PR #442 — efficient bundling of related frontend work
+  - 10 PRs merged today (448-457) covering orders, kanban, navigation, shop floor — good velocity
+  - CI npm ci failure on main (socket.io-client lock mismatch) needs a dedicated fix commit on main
+  - QA and design-enforcer can start in parallel once frontend/backend implementation is merged — no need to wait for all code
+
+--- Architect Iteration 13 ---
+Timestamp: 2026-02-15T12:00:00Z
+Housekeeping:
+  - Discovered MVP-15 T1-T6 (#218-223) were merged outside sprint tracking (PRs 420-422, 440, 445)
+  - Updated team-state.json: 6 tickets from ready→merged. Completed count 4→10.
+  - Closed issue #223 (PR #445 merged but issue left open)
+Tickets currently assigned (no changes — all agents have active work):
+  - #427 → backend-engineer: PO Orders preview/approve/email. In progress.
+  - #348 → frontend-engineer: Notifications page. In progress.
+  - #350 → qa: MVP-17 integration/E2E. In progress.
+  - #351 → design-enforcer: MVP-17 design compliance. In progress.
+Tickets with PR open: #428 (PR #458 — CI still failing, pre-existing npm ci issue)
+Tickets blocked: none
+Decisions made: ADR-011 (state reconciliation, no re-assignments needed)
+State:
+  - Wave 0 (high-priority): #428 PR open, #427 in progress
+  - Wave 1 MVP-17: 4/7 merged, 3 remaining (#348, #350, #351) — all agents assigned
+  - Wave 4 MVP-15: 6/14 done (T1-T6 backend all merged). T7-T9 frontend, T10 backend, T11-T14 QA/design remain ready.
+  - Total: 10/66 completed (15%), 5 in-progress, 51 ready
+  - All 4 agents actively assigned — no idle compute
+  - After #427 completes, backend next: #191 (MVP-13 T1 schema) to start Wave 2
+  - After #348 completes, frontend could pick up #224 (MVP-15 T7 useRealtimeEvents) since backend deps are met
+Learnings:
+  - Sprint tracking drift: MVP-15 backend work was done by other agents/sessions without updating team-state.json
+  - Must reconcile GitHub issue state with team-state.json each architect iteration
+  - MVP-15 frontend tickets (#224, #225, #226) are now unblocked since all backend deps (#218-223) are merged
+
+--- Backend Agent Iteration 17 | Issue #427 ---
+Timestamp: 2026-02-15T13:20:00Z
+Status: completed
+Changes:
+  New files:
+  - services/orders/src/routes/po-workflow.routes.ts (3 endpoints: preview, approve, status)
+  - services/orders/src/routes/po-workflow.integration.test.ts (24 tests)
+  Modified files:
+  - services/orders/src/index.ts (import + mount poWorkflowRouter at /po-workflow)
+Tests: 24 new integration tests passing, 783 total orders tests passing, TypeScript clean.
+Acceptance Criteria:
+  1. PO preview: GET /po-workflow/:poId/preview returns formatted HTML + PDF content + canApprove flag
+  2. PO approve + auto email draft: POST /po-workflow/:poId/approve transitions PO to approved, auto-generates email draft with vendor email, subject, and PO body
+  3. Email composer pre-population: draft pre-filled with supplier contactEmail, subject "Purchase Order {PO#} — {Supplier}", and full PO HTML/text body
+  4. Email editing: leverages existing PUT /email-orders/:draftId from #428
+  5. Email sending: leverages existing POST /email-orders/:draftId/send from #428 (Gmail integration)
+  6. Workflow status tracking: GET /po-workflow/:poId/status returns composite step (draft→pending_approval→approved→email_editing→email_ready→sending→sent) with step completion array
+Learnings:
+  - PO workflow is an orchestration layer on top of email-orders infrastructure (#428)
+  - No new event types needed — order.status_changed and order.email_draft_created cover the cases
+  - The approve endpoint creates the email draft in the same transaction as the PO approval for atomicity
+  - Workflow status is derived from PO status + latest email draft status — no separate workflow state table needed
+  - The fetchPOPreviewData helper does 6 queries (PO, lines, supplier, parts, supplierParts, facility) — reused by both preview and approve endpoints
