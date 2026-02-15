@@ -196,3 +196,16 @@ patterns, gotchas, and conventions.
 - Issue filters use selectDistinct to find order IDs matching issue criteria, then join back to order tables
 - Events: order.issue_created, order.issue_status_changed — added to ArdaEvent union + gateway event mapper
 - All mutations write audit entries and publish events
+
+### Email Order Workflow Pattern
+- email_drafts table in orders schema: tracks draft lifecycle (draft → editing → ready → sending → sent → failed)
+- Cross-service call to notifications service: `fetch(NOTIFICATIONS_SERVICE_URL/gmail/send)` with auth header forwarding
+- Email template generation: generateEmailHtml() and generatePlainTextBody() for PO/WO/TO order types
+- PO data fetching: 5 sequential queries (PO → lines → supplier → parts → supplierParts) with Map-based lookups
+- On successful PO send: update purchaseOrders.status to 'sent', set sentAt and sentToEmail
+- Events: order.email_draft_created, order.email_sent — added to ArdaEvent union + gateway event mapper (null-return group)
+- Endpoints: POST /generate, GET /, GET /:draftId, PUT /:draftId, POST /:draftId/ready, POST /:draftId/send, POST /:draftId/reset
+- Reset endpoint restores htmlBody to generatedHtmlBody (original auto-generated version)
+- Test pattern: queue-based mocks (testState.selectQueue.shift()) for multi-query endpoint testing
+- Test fetch interception: check URL to only mock /gmail/send calls, pass through to originalFetch for test HTTP
+- Zod UUID validation: all test data must use valid UUIDs (e.g. '00000000-0000-0000-0000-000000000010')
