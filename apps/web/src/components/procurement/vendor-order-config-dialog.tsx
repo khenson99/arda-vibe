@@ -27,6 +27,7 @@ interface LocalLineState {
   quantityOrdered: number;
   unitPrice: number;
   description: string;
+  vendorSku: string;
   orderMethod: CreateProcurementDraftsInput["lines"][number]["orderMethod"] | null;
   sourceUrl: string;
   notes: string;
@@ -34,6 +35,16 @@ interface LocalLineState {
 
 function methodRequiresSourceUrl(method: string) {
   return method === "online" || method === "shopping";
+}
+
+/** URL field is only relevant for Online orders */
+function methodShowsUrl(method: string | null): boolean {
+  return method === "online" || method === "shopping";
+}
+
+/** Description and Vendor SKU are relevant for Email and PO orders */
+function methodShowsDescriptionAndSku(method: string | null): boolean {
+  return method === "email" || method === "purchase_order" || method === "rfq" || method === "third_party";
 }
 
 function formatCurrency(value: number): string {
@@ -76,6 +87,7 @@ export function VendorOrderConfigDialog({
         quantityOrdered: Math.max(1, line.card.orderQuantity),
         unitPrice: Math.max(0, Number(line.suggestedUnitPrice || 0)),
         description: line.partName,
+        vendorSku: "",
         orderMethod: line.orderMethod,
         sourceUrl: line.part?.primarySupplierLink ?? "",
         notes: "",
@@ -252,9 +264,8 @@ export function VendorOrderConfigDialog({
                   <th className="px-2 py-2 font-semibold">Qty</th>
                   <th className="px-2 py-2 font-semibold">Unit Price</th>
                   <th className="px-2 py-2 font-semibold">Line Total</th>
-                  <th className="px-2 py-2 font-semibold">Description</th>
                   <th className="px-2 py-2 font-semibold">Method</th>
-                  <th className="px-2 py-2 font-semibold">Source URL</th>
+                  <th className="px-2 py-2 font-semibold">Description / URL / SKU</th>
                   <th className="px-2 py-2 font-semibold">Notes</th>
                 </tr>
               </thead>
@@ -295,12 +306,6 @@ export function VendorOrderConfigDialog({
                       {formatCurrency(line.quantityOrdered * line.unitPrice)}
                     </td>
                     <td className="px-2 py-2">
-                      <Input
-                        value={line.description}
-                        onChange={(event) => handleLineChange(index, { description: event.target.value })}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
                       <select
                         className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                         value={line.orderMethod ?? ""}
@@ -322,18 +327,60 @@ export function VendorOrderConfigDialog({
                       )}
                     </td>
                     <td className="px-2 py-2">
-                      <Input
-                        value={line.sourceUrl}
-                        onChange={(event) => handleLineChange(index, { sourceUrl: event.target.value })}
-                        placeholder={
-                          line.orderMethod && methodRequiresSourceUrl(line.orderMethod)
-                            ? "https://vendor.example/item"
-                            : "Optional"
-                        }
-                      />
-                      {errors[`line-${index}-sourceUrl`] && (
-                        <div className="pt-1 text-[11px] text-red-600">{errors[`line-${index}-sourceUrl`]}</div>
-                      )}
+                      <div className="space-y-1.5">
+                        {/* URL — only for Online orders */}
+                        <div
+                          className={`transition-all duration-200 ${
+                            methodShowsUrl(line.orderMethod)
+                              ? 'max-h-20 opacity-100'
+                              : 'pointer-events-none max-h-0 overflow-hidden opacity-0'
+                          }`}
+                        >
+                          <Input
+                            value={line.sourceUrl}
+                            onChange={(event) => handleLineChange(index, { sourceUrl: event.target.value })}
+                            placeholder="https://vendor.example/item"
+                          />
+                          {errors[`line-${index}-sourceUrl`] && (
+                            <div className="pt-1 text-[11px] text-red-600">{errors[`line-${index}-sourceUrl`]}</div>
+                          )}
+                        </div>
+
+                        {/* Description — Email, PO, RFQ, Third-Party */}
+                        <div
+                          className={`transition-all duration-200 ${
+                            methodShowsDescriptionAndSku(line.orderMethod)
+                              ? 'max-h-20 opacity-100'
+                              : 'pointer-events-none max-h-0 overflow-hidden opacity-0'
+                          }`}
+                        >
+                          <Input
+                            value={line.description}
+                            onChange={(event) => handleLineChange(index, { description: event.target.value })}
+                            placeholder="Order description"
+                          />
+                        </div>
+
+                        {/* Vendor SKU — Email, PO, RFQ, Third-Party */}
+                        <div
+                          className={`transition-all duration-200 ${
+                            methodShowsDescriptionAndSku(line.orderMethod)
+                              ? 'max-h-20 opacity-100'
+                              : 'pointer-events-none max-h-0 overflow-hidden opacity-0'
+                          }`}
+                        >
+                          <Input
+                            value={line.vendorSku}
+                            onChange={(event) => handleLineChange(index, { vendorSku: event.target.value })}
+                            placeholder="Vendor SKU"
+                          />
+                        </div>
+
+                        {/* Hint when no method selected */}
+                        {!line.orderMethod && (
+                          <p className="text-[11px] italic text-muted-foreground">Select a method first</p>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-2">
                       <Input
