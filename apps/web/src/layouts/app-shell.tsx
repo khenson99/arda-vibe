@@ -19,7 +19,6 @@ import {
   PackageCheck,
   Palette,
   QrCode,
-  RefreshCw,
   Repeat2,
   Search,
   Settings,
@@ -27,6 +26,8 @@ import {
   ShoppingCart,
   SquareKanban,
   TrendingUp,
+  Wifi,
+  WifiOff,
   Wrench,
 } from 'lucide-react';
 import { Button, Input, Toaster } from '@/components/ui';
@@ -34,6 +35,7 @@ import { ImportContextProvider, AddItemsFab, ModuleDialog } from '@/components/o
 import { CommandPalette } from '@/components/command-palette';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useShopFloorMode } from '@/hooks/use-shop-floor-mode';
+import { useWebSocket, WebSocketProvider, type ConnectionStatus } from '@/hooks/use-websocket';
 import { cn } from '@/lib/utils';
 import { ShopFloorDashboard } from '@/components/shop-floor/shop-floor-dashboard';
 import type { AuthSession } from '@/types';
@@ -58,8 +60,38 @@ export interface QueueHeaderControls {
   sortKey: string;
   onSortKeyChange: (value: string) => void;
   sortOptions: HeaderOption[];
-  onRefresh: () => void;
-  isRefreshing: boolean;
+}
+
+/* ─── Connection Status Indicator ───────────────────────────────────  */
+
+const STATUS_CONFIG: Record<ConnectionStatus, { color: string; label: string }> = {
+  connected: { color: 'bg-emerald-500', label: 'Connected' },
+  connecting: { color: 'bg-amber-500 animate-pulse', label: 'Connecting…' },
+  reconnecting: { color: 'bg-amber-500 animate-pulse', label: 'Reconnecting…' },
+  disconnected: { color: 'bg-red-500', label: 'Offline' },
+};
+
+function ConnectionIndicator() {
+  const { status } = useWebSocket();
+  const cfg = STATUS_CONFIG[status];
+
+  return (
+    <button
+      type="button"
+      className="relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50"
+      title={cfg.label}
+      aria-label={`Connection status: ${cfg.label}`}
+    >
+      {status === 'connected' ? (
+        <Wifi className="h-4 w-4" />
+      ) : (
+        <WifiOff className="h-4 w-4" />
+      )}
+      <span
+        className={cn('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', cfg.color)}
+      />
+    </button>
+  );
 }
 
 export interface AppShellOutletContext {
@@ -275,7 +307,7 @@ function SidebarSection({
 
 /* ─── AppShell ──────────────────────────────────────────────────────  */
 
-export function AppShell({ session, onSignOut }: AppShellProps) {
+function AppShellInner({ session, onSignOut }: AppShellProps) {
   const location = useLocation();
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
   const [queueHeaderControls, setQueueHeaderControls] = React.useState<QueueHeaderControls | null>(
@@ -415,6 +447,7 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
                     Support
                   </a>
                 </Button>
+                <ConnectionIndicator />
                 <Button
                   variant="ghost"
                   size="icon"
@@ -431,12 +464,12 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
             </div>
 
             {queueHeaderControls && (
-              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/20 p-2">
-                <div className="flex min-w-[250px] flex-1 items-center overflow-hidden rounded-md border border-input bg-background">
-                  <label className="flex h-9 items-center gap-1.5 border-r border-border px-2 text-xs text-muted-foreground">
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="flex min-w-0 flex-1 items-center overflow-hidden rounded-md border border-input bg-background">
+                  <label className="flex h-8 items-center gap-1 border-r border-border px-2 text-xs text-muted-foreground">
                     <Filter className="h-3.5 w-3.5" />
                     <select
-                      className="h-8 bg-transparent text-sm text-foreground outline-none"
+                      className="h-7 bg-transparent text-sm text-foreground outline-none"
                       value={queueHeaderControls.scope}
                       onChange={(event) => queueHeaderControls.onScopeChange(event.target.value)}
                     >
@@ -447,21 +480,21 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
                       ))}
                     </select>
                   </label>
-                  <div className="relative min-w-[180px] flex-1">
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={queueHeaderControls.query}
                       onChange={(event) => queueHeaderControls.onQueryChange(event.target.value)}
                       placeholder={queueHeaderControls.queryPlaceholder ?? 'Search'}
-                      className="h-9 border-0 bg-transparent pl-8 shadow-none focus-visible:ring-0"
+                      className="h-8 border-0 bg-transparent pl-8 text-sm shadow-none focus-visible:ring-0"
                     />
                   </div>
                 </div>
 
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <label className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                   <ArrowUpDown className="h-3.5 w-3.5" />
                   <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={queueHeaderControls.sortKey}
                     onChange={(event) => queueHeaderControls.onSortKeyChange(event.target.value)}
                   >
@@ -472,15 +505,6 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
                     ))}
                   </select>
                 </label>
-
-                <Button variant="accent" size="sm" onClick={queueHeaderControls.onRefresh}>
-                  {queueHeaderControls.isRefreshing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  Refresh
-                </Button>
               </div>
             )}
 
@@ -538,5 +562,13 @@ export function AppShell({ session, onSignOut }: AppShellProps) {
       </div>
       )}
     </ImportContextProvider>
+  );
+}
+
+export function AppShell(props: AppShellProps) {
+  return (
+    <WebSocketProvider>
+      <AppShellInner {...props} />
+    </WebSocketProvider>
   );
 }
