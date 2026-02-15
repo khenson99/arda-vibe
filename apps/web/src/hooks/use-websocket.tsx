@@ -84,7 +84,6 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       setSocket(null);
       setStatus('disconnected');
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const value = React.useMemo(
