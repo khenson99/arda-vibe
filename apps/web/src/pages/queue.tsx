@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2, Play, RefreshCw } from "lucide-react";
+import { Loader2, Play, RefreshCw, Tag } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 import { ErrorBanner } from "@/components/error-banner";
@@ -41,6 +41,11 @@ function groupMatchesScope(group: VendorQueueGroup, scope: QueueScope) {
   if (scope === "draft") return group.draftPurchaseOrderIds.length > 0;
   if (scope === "ready") return group.draftPurchaseOrderIds.length === 0;
   return true;
+}
+
+function groupMatchesMethod(group: VendorQueueGroup, method: string | null) {
+  if (!method) return true;
+  return group.lines.some((line) => line.orderMethod === method);
 }
 
 function groupMatchesSearch(group: VendorQueueGroup, search: string) {
@@ -94,6 +99,7 @@ export function QueueRoute({
   const [scope, setScope] = React.useState<QueueScope>("all");
   const [searchTerm, setSearchTerm] = React.useState("");
   const [sortKey, setSortKey] = React.useState<QueueSort>("vendor");
+  const [methodFilter, setMethodFilter] = React.useState<string | null>(null);
   const [activeConfigGroup, setActiveConfigGroup] = React.useState<VendorQueueGroup | null>(null);
   const [executionSession, setExecutionSession] = React.useState<VendorExecutionSession | null>(null);
   const [isCreatingDrafts, setIsCreatingDrafts] = React.useState(false);
@@ -127,10 +133,23 @@ export function QueueRoute({
     [parts, queueByLoop.procurement],
   );
 
+  const uniqueMethods = React.useMemo(() => {
+    const methodCounts = new Map<string, number>();
+    for (const group of allGroups) {
+      for (const line of group.lines) {
+        if (line.orderMethod) {
+          methodCounts.set(line.orderMethod, (methodCounts.get(line.orderMethod) ?? 0) + 1);
+        }
+      }
+    }
+    return Array.from(methodCounts.entries()).sort((a, b) => b[1] - a[1]);
+  }, [allGroups]);
+
   const groups = React.useMemo(() => {
     const filtered = allGroups
       .filter((group) => groupMatchesScope(group, scope))
-      .filter((group) => groupMatchesSearch(group, searchTerm));
+      .filter((group) => groupMatchesSearch(group, searchTerm))
+      .filter((group) => groupMatchesMethod(group, methodFilter));
 
     filtered.sort((a, b) => {
       if (sortKey === "vendor") {
@@ -145,7 +164,7 @@ export function QueueRoute({
     });
 
     return filtered;
-  }, [allGroups, scope, searchTerm, sortKey]);
+  }, [allGroups, methodFilter, scope, searchTerm, sortKey]);
 
   const unknownMethodLineCount = React.useMemo(
     () =>
@@ -290,6 +309,41 @@ export function QueueRoute({
       {unknownMethodLineCount > 0 && (
         <div className="rounded-xl border border-[hsl(var(--arda-warning)/0.35)] bg-[hsl(var(--arda-warning-light))] px-4 py-3 text-sm text-[hsl(var(--arda-warning))]">
           {unknownMethodLineCount} queued line{unknownMethodLineCount === 1 ? "" : "s"} still has an unsupported legacy order method. Update the item order method to continue vendor automation.
+        </div>
+      )}
+
+      {uniqueMethods.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <Tag className="h-3 w-3" />
+            Method:
+          </span>
+          <button
+            type="button"
+            onClick={() => setMethodFilter(null)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              methodFilter === null
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card text-foreground hover:bg-muted"
+            }`}
+          >
+            All
+          </button>
+          {uniqueMethods.map(([method, count]) => (
+            <button
+              key={method}
+              type="button"
+              onClick={() => setMethodFilter(methodFilter === method ? null : method)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                methodFilter === method
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-foreground hover:bg-muted"
+              }`}
+            >
+              {procurementOrderMethodLabel(method)}
+              <span className="rounded-full bg-black/10 px-1.5 text-[10px]">{count}</span>
+            </button>
+          ))}
         </div>
       )}
 
