@@ -18,6 +18,7 @@ import { supplierPerformanceRouter } from './routes/supplier-performance.routes.
 import { departmentsRouter } from './routes/departments.routes.js';
 import { itemTypesRouter } from './routes/item-types.routes.js';
 import { useCasesRouter } from './routes/use-cases.routes.js';
+import { visibilityRouter } from './routes/visibility.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 // Wire up audit.created event publishing for all writeAuditEntry calls
@@ -63,6 +64,7 @@ app.use('/supplier-performance', supplierPerformanceRouter);
 app.use('/departments', departmentsRouter);
 app.use('/item-types', itemTypesRouter);
 app.use('/use-cases', useCasesRouter);
+app.use('/visibility', visibilityRouter);
 
 app.use(errorHandler);
 
