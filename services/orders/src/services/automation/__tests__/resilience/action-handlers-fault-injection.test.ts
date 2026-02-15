@@ -26,6 +26,7 @@ const {
   mockCreateWorkOrderFromTrigger,
   mockProcessExceptionAutomation,
   mockWriteAuditEntry,
+  mockAutoCreateTransferOrder,
 } = vi.hoisted(() => ({
   mockTransaction: vi.fn(),
   mockInsert: vi.fn(),
@@ -34,6 +35,7 @@ const {
   mockCreateWorkOrderFromTrigger: vi.fn(),
   mockProcessExceptionAutomation: vi.fn(),
   mockWriteAuditEntry: vi.fn(),
+  mockAutoCreateTransferOrder: vi.fn(),
 }));
 
 // ─── Module mocks ──────────────────────────────────────────────────
@@ -98,6 +100,10 @@ vi.mock('../../../work-order-orchestration.service.js', () => ({
 
 vi.mock('../../../exception-automation.service.js', () => ({
   processExceptionAutomation: mockProcessExceptionAutomation,
+}));
+
+vi.mock('../../../kanban-transfer-automation.service.js', () => ({
+  autoCreateTransferOrder: mockAutoCreateTransferOrder,
 }));
 
 // ─── SUT ────────────────────────────────────────────────────────────
@@ -219,6 +225,12 @@ beforeEach(() => {
     action: 'auto_resolve',
     detail: 'Resolved automatically',
   });
+  mockAutoCreateTransferOrder.mockResolvedValue({
+    transferOrderId: 'to-1',
+    toNumber: 'TO-AUTO-TEST',
+    cardId: 'card-1',
+    loopId: 'loop-1',
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -317,9 +329,9 @@ describe('Action Handlers — Fault Injection', () => {
 
   // ─── 2. Transfer Order Creation Failures ───────────────────────────
 
-  describe('Transfer order creation — DB insert failures', () => {
-    it('returns failure when db.insert throws ECONNREFUSED', async () => {
-      mockInsert.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+  describe('Transfer order creation — service delegation failures', () => {
+    it('returns failure when autoCreateTransferOrder throws ECONNREFUSED', async () => {
+      mockAutoCreateTransferOrder.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
 
       const result = await dispatchAction('create_transfer_order', toContext());
 
@@ -327,23 +339,22 @@ describe('Action Handlers — Fault Injection', () => {
       expect(result.error).toContain('ECONNREFUSED');
     });
 
-    it('returns failure when insert returns empty array', async () => {
-      mockInsert.mockResolvedValueOnce([]);
+    it('returns failure when autoCreateTransferOrder returns undefined', async () => {
+      mockAutoCreateTransferOrder.mockResolvedValueOnce(undefined);
 
       const result = await dispatchAction('create_transfer_order', toContext());
 
-      // Reading .id from undefined throws TypeError
+      // Accessing .transferOrderId on undefined throws TypeError
       expect(result.success).toBe(false);
     });
 
-    it('returns failure when event bus publish fails after TO insertion', async () => {
-      mockInsert.mockResolvedValueOnce([{ id: 'to-1', toNumber: 'TO-AUTO-TEST' }]);
-      mockPublish.mockRejectedValueOnce(new Error('event bus unavailable'));
+    it('returns failure when autoCreateTransferOrder throws card not found', async () => {
+      mockAutoCreateTransferOrder.mockRejectedValueOnce(new Error('Kanban card card-1 not found'));
 
       const result = await dispatchAction('create_transfer_order', toContext());
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('event bus unavailable');
+      expect(result.error).toContain('not found');
     });
   });
 
@@ -537,6 +548,7 @@ describe('Action Handlers — Fault Injection', () => {
       mockInsert.mockRejectedValue(dbError);
       mockUpdate.mockRejectedValue(dbError);
       mockWriteAuditEntry.mockRejectedValue(dbError);
+      mockAutoCreateTransferOrder.mockRejectedValue(dbError);
 
       const poResult = await dispatchAction('create_purchase_order', poContext());
       const toResult = await dispatchAction('create_transfer_order', toContext());
@@ -553,6 +565,7 @@ describe('Action Handlers — Fault Injection', () => {
       mockInsert.mockReset();
       mockUpdate.mockReset();
       mockWriteAuditEntry.mockReset();
+      mockAutoCreateTransferOrder.mockReset();
     });
 
     it('external service actions fail when services are unavailable', async () => {

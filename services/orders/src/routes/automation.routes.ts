@@ -19,6 +19,7 @@ import {
   createAutomationQueue,
   type AutomationWorkerPayload,
 } from '../workers/automation.worker.js';
+import { autoCreateTransferOrder } from '../services/kanban-transfer-automation.service.js';
 
 export const automationRouter = Router();
 
@@ -301,6 +302,46 @@ automationRouter.get('/decisions', async (req: AuthRequest, res, next) => {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return next(new AppError(400, 'Invalid query parameters'));
+    }
+    next(error);
+  }
+});
+
+// ─── Transfer Trigger ──────────────────────────────────────────────────
+
+const transferTriggerSchema = z.object({
+  cardId: z.string().uuid(),
+});
+
+/**
+ * POST /automation/transfer-trigger
+ *
+ * Trigger transfer-order creation from a triggered kanban card.
+ * Idempotent: if the card already has a linked TO, returns the existing link.
+ */
+automationRouter.post('/transfer-trigger', async (req: AuthRequest, res, next) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) throw new AppError(401, 'Unauthorized');
+
+    const { cardId } = transferTriggerSchema.parse(req.body);
+
+    const result = await autoCreateTransferOrder({
+      tenantId,
+      cardId,
+      userId: req.user!.sub,
+    });
+
+    res.status(201).json({
+      success: true,
+      transferOrderId: result.transferOrderId,
+      toNumber: result.toNumber,
+      cardId: result.cardId,
+      loopId: result.loopId,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(new AppError(400, 'Invalid request body'));
     }
     next(error);
   }
