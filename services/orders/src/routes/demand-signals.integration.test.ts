@@ -196,7 +196,25 @@ vi.mock('@arda/config', () => ({
 }));
 
 vi.mock('@arda/auth-utils', () => ({
-  requireRole: (..._roles: string[]) => (_req: unknown, _res: unknown, next: () => void) => next(),
+  requireRole: (...roles: string[]) => (req: unknown, res: unknown, next: () => void) => {
+    const user = (req as { user?: { role?: string } }).user;
+    if (!user) {
+      (res as { status: (code: number) => { json: (body: unknown) => void } })
+        .status(401)
+        .json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const role = user.role;
+    if (role === 'tenant_admin' || (role && roles.includes(role))) {
+      next();
+      return;
+    }
+
+    (res as { status: (code: number) => { json: (body: unknown) => void } })
+      .status(403)
+      .json({ error: 'Forbidden' });
+  },
   authMiddleware: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
@@ -204,15 +222,17 @@ vi.mock('@arda/auth-utils', () => ({
 import { demandSignalsRouter } from './demand-signals.routes.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────
-function createApp(user?: Record<string, unknown>) {
+function createApp(user?: Record<string, unknown> | null) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as any).user = user ?? {
-      tenantId: 'tenant-1',
-      sub: 'user-1',
-      role: 'inventory_manager',
-    };
+    if (user !== null) {
+      (req as any).user = user ?? {
+        tenantId: 'tenant-1',
+        sub: 'user-1',
+        role: 'inventory_manager',
+      };
+    }
     next();
   });
   app.use('/demand-signals', demandSignalsRouter);
@@ -335,6 +355,32 @@ describe('Demand Signals API', () => {
       expect(res.status).toBe(200);
       expect(dbSetup.dbMock.select).toHaveBeenCalled();
     });
+
+    it('returns 400 for invalid query params instead of 500', async () => {
+      const app = createApp();
+      const res = await getJson(app, '/demand-signals?partId=not-a-uuid');
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation error');
+    });
+
+    it('returns 401 when no auth user is present', async () => {
+      const app = createApp(null);
+      const res = await getJson(app, '/demand-signals');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 403 for role without read permission', async () => {
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'user-2',
+        role: 'viewer',
+      });
+      const res = await getJson(app, '/demand-signals');
+
+      expect(res.status).toBe(403);
+    });
   });
 
   // ─── Detail ────────────────────────────────────────────────────────
@@ -431,6 +477,23 @@ describe('Demand Signals API', () => {
       });
 
       expect(res.status).toBe(201);
+    });
+
+    it('returns 403 for role without write permission', async () => {
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'user-3',
+        role: 'ecommerce_director',
+      });
+      const res = await postJson(app, '/demand-signals', {
+        partId: '00000000-0000-0000-0000-000000000001',
+        facilityId: '00000000-0000-0000-0000-000000000002',
+        signalType: 'manual',
+        quantityDemanded: 100,
+        demandDate: '2026-03-01T00:00:00.000Z',
+      });
+
+      expect(res.status).toBe(403);
     });
   });
 
@@ -530,6 +593,14 @@ describe('Demand Signals API', () => {
       const item = (res.body.data as any[])[0];
       expect(item.totalDemanded).toBe(500);
       expect(item.unfulfilledCount).toBe(3);
+    });
+
+    it('returns 400 for invalid summary query params instead of 500', async () => {
+      const app = createApp();
+      const res = await getJson(app, '/demand-signals/summary?facilityId=not-a-uuid');
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation error');
     });
   });
 });

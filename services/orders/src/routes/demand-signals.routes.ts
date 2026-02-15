@@ -141,6 +141,10 @@ demandSignalsRouter.get('/', canRead, async (req: AuthRequest, res, next) => {
       totalPages: Math.ceil(totalCount / pageSize),
     });
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
     next(err);
   }
 });
@@ -187,6 +191,10 @@ demandSignalsRouter.get('/summary', canRead, async (req: AuthRequest, res, next)
 
     res.json({ data: summary });
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: err.errors });
+      return;
+    }
     next(err);
   }
 });
