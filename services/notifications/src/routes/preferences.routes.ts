@@ -121,6 +121,7 @@ preferencesRouter.put('/', async (req, res, next) => {
   try {
     const userId = req.user!.sub;
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     const body = preferencesBodySchema.parse(req.body);
 
@@ -163,6 +164,22 @@ preferencesRouter.put('/', async (req, res, next) => {
           }
         }
       }
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'notification_preference.updated',
+        entityType: 'notification_preference',
+        entityId: null,
+        previousState: null,
+        newState: body.preferences,
+        metadata: {
+          source: 'preferences.update',
+          targetUserId: userId,
+        },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
 
       return tx
         .select()

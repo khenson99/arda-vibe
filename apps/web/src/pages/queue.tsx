@@ -14,6 +14,7 @@ import {
 import { Badge, Button, Skeleton } from "@/components/ui";
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import type { AppShellOutletContext, HeaderOption } from "@/layouts/app-shell";
+import type { ProcurementOrderMethod } from "@/types";
 import {
   createProcurementDrafts,
   parseApiError,
@@ -338,7 +339,7 @@ export function QueueRoute({
                   : "border-border bg-card text-foreground hover:bg-muted"
               }`}
             >
-              {procurementOrderMethodLabel(method)}
+              {procurementOrderMethodLabel(method as ProcurementOrderMethod)}
               <span className="rounded-full bg-black/10 px-1.5 text-[10px]">{count}</span>
             </button>
           ))}

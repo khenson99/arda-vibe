@@ -8,9 +8,26 @@
  *   - Delivery record creation for digest sends
  *   - Skipping users with 0 unread digest notifications
  *   - Timezone awareness (tenant timezone fallback to UTC)
+ *
+ * Requires: DATABASE_URL + REDIS_URL (real integration test)
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+
+// Mock infrastructure dependencies when DATABASE_URL is unavailable to prevent module-load crash
+if (!process.env.DATABASE_URL) {
+  vi.mock('@arda/db', () => ({
+    db: {},
+    schema: {},
+    writeAuditEntry: vi.fn(),
+    writeAuditEntries: vi.fn(),
+  }));
+  vi.mock('@arda/config', () => ({
+    config: {},
+    createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  }));
+}
+
 import { Queue, Worker } from 'bullmq';
 import type { JobEnvelope } from '@arda/jobs';
 import { db, schema } from '@arda/db';
@@ -24,6 +41,7 @@ import {
 
 // ─── Test Setup ────────────────────────────────────────────────────────
 
+const HAS_INFRA = !!(process.env.DATABASE_URL && process.env.REDIS_URL);
 const TEST_REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 // Mock email provider
@@ -36,7 +54,7 @@ vi.mock('../services/email-provider.js', () => ({
   })),
 }));
 
-describe('Digest Queue Worker', () => {
+describe.skipIf(!HAS_INFRA)('Digest Queue Worker', () => {
   let queue: Queue<JobEnvelope<DigestJobPayload>>;
   let worker: Worker<JobEnvelope<DigestJobPayload>>;
 
