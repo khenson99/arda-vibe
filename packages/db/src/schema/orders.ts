@@ -863,3 +863,50 @@ export const emailDraftsRelations = relations(emailDrafts, ({ one }) => ({
     references: [purchaseOrders.id],
   }),
 }));
+
+// ─── Demand Signal Enums ────────────────────────────────────────────
+export const demandSignalTypeEnum = pgEnum('demand_signal_type', [
+  'sales_order',
+  'forecast',
+  'reorder_point',
+  'safety_stock',
+  'seasonal',
+  'manual',
+]);
+
+// ─── Demand Signals ─────────────────────────────────────────────────
+export const demandSignals = ordersSchema.table(
+  'demand_signals',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    partId: uuid('part_id').notNull(),
+    facilityId: uuid('facility_id').notNull(),
+    signalType: demandSignalTypeEnum('signal_type').notNull(),
+    quantityDemanded: integer('quantity_demanded').notNull(),
+    quantityFulfilled: integer('quantity_fulfilled').notNull().default(0),
+    salesOrderId: uuid('sales_order_id'),
+    salesOrderLineId: uuid('sales_order_line_id'),
+    demandDate: timestamp('demand_date', { withTimezone: true }).notNull(),
+    fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+    triggeredKanbanCardId: uuid('triggered_kanban_card_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('demand_signals_tenant_idx').on(table.tenantId),
+    index('demand_signals_tenant_date_idx').on(table.tenantId, table.demandDate),
+    index('demand_signals_tenant_signal_type_date_idx').on(
+      table.tenantId,
+      table.signalType,
+      table.demandDate,
+    ),
+    index('demand_signals_tenant_part_date_idx').on(table.tenantId, table.partId, table.demandDate),
+    index('demand_signals_tenant_facility_date_idx').on(
+      table.tenantId,
+      table.facilityId,
+      table.demandDate,
+    ),
+  ],
+);
