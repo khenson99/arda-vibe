@@ -9,6 +9,7 @@ import { authMiddleware } from '@arda/auth-utils';
 import { notificationsRouter } from './routes/notifications.routes.js';
 import { preferencesRouter } from './routes/preferences.routes.js';
 import { unsubscribeRouter } from './routes/unsubscribe.routes.js';
+import { gmailOauthRouter } from './routes/gmail-oauth.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startEventListener } from './services/event-listener.js';
 
@@ -58,6 +59,7 @@ app.use('/notifications', unsubscribeRouter);
 app.use(authMiddleware);
 app.use('/notifications', notificationsRouter);
 app.use('/preferences', preferencesRouter);
+app.use('/gmail', gmailOauthRouter);
 
 app.use(errorHandler);
 

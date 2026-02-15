@@ -69,6 +69,13 @@ const routes: RouteConfig[] = [
     pathRewrite: { '^/': '/v1/items/' },
     requiresAuth: true,
   },
+  // ── Gmail integration (proxied to notifications service) ──
+  {
+    prefix: '/api/gmail',
+    target: serviceUrls.notifications,
+    pathRewrite: { '^/': '/gmail/' },
+    requiresAuth: true,
+  },
   // ── Public unsubscribe endpoint (token-based auth, no JWT) ──
   {
     prefix: '/api/notifications/unsubscribe',
