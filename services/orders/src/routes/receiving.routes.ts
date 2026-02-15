@@ -9,6 +9,8 @@ import {
   getOpenExceptions,
   getAllExceptions,
   resolveException,
+  getExpectedOrders,
+  getReceivingHistory,
 } from '../services/receiving.service.js';
 import {
   processExceptionAutomation,
@@ -172,6 +174,58 @@ receivingRouter.post('/exceptions/automate-all', async (req, res, next) => {
 
     const results = await processAllOpenExceptions(tenantId);
     res.json({ results, total: results.length, succeeded: results.filter((r) => r.success).length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /expected — Expected Orders for Receiving ──────────────────
+
+const ExpectedOrdersQuerySchema = z.object({
+  facilityId: z.string().uuid().optional(),
+  orderType: z.enum(['purchase_order', 'transfer_order', 'work_order']).optional(),
+});
+
+receivingRouter.get('/expected', async (req, res, next) => {
+  try {
+    const authReq = req as AuthRequest;
+    const tenantId = authReq.user?.tenantId;
+    if (!tenantId) throw new AppError(401, 'Missing tenant context');
+
+    const parsed = ExpectedOrdersQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw new AppError(400, `Validation error: ${parsed.error.issues.map((i) => i.message).join(', ')}`);
+    }
+
+    const result = await getExpectedOrders({ tenantId, ...parsed.data });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /history — Receiving History with Pagination ────────────────
+
+const HistoryQuerySchema = z.object({
+  page: z.string().optional().transform((v) => (v ? parseInt(v, 10) : undefined)),
+  pageSize: z.string().optional().transform((v) => (v ? parseInt(v, 10) : undefined)),
+  orderType: z.string().optional(),
+  status: z.string().optional(),
+});
+
+receivingRouter.get('/history', async (req, res, next) => {
+  try {
+    const authReq = req as AuthRequest;
+    const tenantId = authReq.user?.tenantId;
+    if (!tenantId) throw new AppError(401, 'Missing tenant context');
+
+    const parsed = HistoryQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw new AppError(400, `Validation error: ${parsed.error.issues.map((i) => i.message).join(', ')}`);
+    }
+
+    const result = await getReceivingHistory({ tenantId, ...parsed.data });
+    res.json(result);
   } catch (err) {
     next(err);
   }

@@ -1,9 +1,10 @@
-import { eq, and, sql, desc } from 'drizzle-orm';
+import { eq, and, sql, desc, inArray } from 'drizzle-orm';
 import { db, schema, writeAuditEntry } from '@arda/db';
 import { getEventBus, publishKpiRefreshed } from '@arda/events';
 import { getCorrelationId } from '@arda/observability';
 import { config, createLogger } from '@arda/config';
 import { AppError } from '../middleware/error-handler.js';
+import { adjustQuantity, upsertInventory } from './inventory-ledger.service.js';
 
 const log = createLogger('receiving-service');
 
@@ -16,6 +17,9 @@ const {
   transferOrders,
   transferOrderLines,
   workOrders,
+  kanbanCards,
+  cardStageTransitions,
+  inventoryLedger,
 } = schema;
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -265,6 +269,417 @@ async function updateOrderAfterReceiving(
   }
 }
 
+// ─── Update Inventory After Receiving ─────────────────────────────────
+
+async function updateInventoryAfterReceiving(
+  input: ProcessReceiptInput,
+  receiptId: string
+): Promise<void> {
+  // Determine the facility for inventory adjustments
+  let facilityId: string | null = null;
+
+  if (input.orderType === 'purchase_order') {
+    const [po] = await db
+      .select({ facilityId: purchaseOrders.facilityId })
+      .from(purchaseOrders)
+      .where(and(eq(purchaseOrders.id, input.orderId), eq(purchaseOrders.tenantId, input.tenantId)));
+    facilityId = po?.facilityId ?? null;
+  } else if (input.orderType === 'transfer_order') {
+    const [to] = await db
+      .select({ facilityId: transferOrders.destinationFacilityId })
+      .from(transferOrders)
+      .where(and(eq(transferOrders.id, input.orderId), eq(transferOrders.tenantId, input.tenantId)));
+    facilityId = to?.facilityId ?? null;
+  } else if (input.orderType === 'work_order') {
+    const [wo] = await db
+      .select({ facilityId: workOrders.facilityId })
+      .from(workOrders)
+      .where(and(eq(workOrders.id, input.orderId), eq(workOrders.tenantId, input.tenantId)));
+    facilityId = wo?.facilityId ?? null;
+  }
+
+  if (!facilityId) {
+    log.warn({ orderId: input.orderId, orderType: input.orderType }, 'Could not determine facility for inventory update');
+    return;
+  }
+
+  const correlationId = getCorrelationId();
+
+  for (const line of input.lines) {
+    if (line.quantityAccepted <= 0) continue;
+
+    // Ensure inventory row exists (upsert with zero values if new)
+    await upsertInventory({
+      tenantId: input.tenantId,
+      facilityId,
+      partId: line.partId,
+    });
+
+    // Increment qtyOnHand for accepted items
+    await adjustQuantity({
+      tenantId: input.tenantId,
+      facilityId,
+      partId: line.partId,
+      field: 'qtyOnHand',
+      adjustmentType: 'increment',
+      quantity: line.quantityAccepted,
+      source: `receiving:${receiptId}`,
+      userId: input.receivedByUserId,
+      correlationId,
+    });
+
+    // For transfer orders, decrement qtyInTransit
+    if (input.orderType === 'transfer_order') {
+      await adjustQuantity({
+        tenantId: input.tenantId,
+        facilityId,
+        partId: line.partId,
+        field: 'qtyInTransit',
+        adjustmentType: 'decrement',
+        quantity: line.quantityAccepted,
+        source: `receiving:${receiptId}`,
+        userId: input.receivedByUserId,
+        correlationId,
+      });
+    }
+  }
+
+  log.info(
+    { receiptId, facilityId, lineCount: input.lines.length },
+    'Inventory updated after receiving'
+  );
+}
+
+// ─── Transition Kanban Cards After Receiving ──────────────────────────
+
+async function transitionKanbanCardsAfterReceiving(
+  tx: DbTransaction,
+  input: ProcessReceiptInput,
+  receiptId: string
+): Promise<string[]> {
+  const transitionedCardIds: string[] = [];
+
+  // Collect kanbanCardIds from order lines
+  let cardIds: string[] = [];
+
+  if (input.orderType === 'purchase_order') {
+    const poLines = await tx
+      .select({ kanbanCardId: purchaseOrderLines.kanbanCardId })
+      .from(purchaseOrderLines)
+      .where(
+        and(
+          eq(purchaseOrderLines.purchaseOrderId, input.orderId),
+          eq(purchaseOrderLines.tenantId, input.tenantId)
+        )
+      );
+    cardIds = poLines
+      .map((l) => l.kanbanCardId)
+      .filter((id): id is string => id != null);
+  } else if (input.orderType === 'work_order') {
+    const [wo] = await tx
+      .select({ kanbanCardId: workOrders.kanbanCardId })
+      .from(workOrders)
+      .where(
+        and(
+          eq(workOrders.id, input.orderId),
+          eq(workOrders.tenantId, input.tenantId)
+        )
+      );
+    if (wo?.kanbanCardId) {
+      cardIds = [wo.kanbanCardId];
+    }
+  } else if (input.orderType === 'transfer_order') {
+    const [to] = await tx
+      .select({ kanbanCardId: transferOrders.kanbanCardId })
+      .from(transferOrders)
+      .where(
+        and(
+          eq(transferOrders.id, input.orderId),
+          eq(transferOrders.tenantId, input.tenantId)
+        )
+      );
+    if (to?.kanbanCardId) {
+      cardIds = [to.kanbanCardId];
+    }
+  }
+
+  if (cardIds.length === 0) return transitionedCardIds;
+
+  // Transition each card from ordered/in_transit → received
+  for (const cardId of cardIds) {
+    const [card] = await tx
+      .select()
+      .from(kanbanCards)
+      .where(
+        and(
+          eq(kanbanCards.id, cardId),
+          eq(kanbanCards.tenantId, input.tenantId)
+        )
+      );
+
+    if (!card) continue;
+
+    // Only transition cards that are in ordered or in_transit stage
+    if (card.currentStage !== 'ordered' && card.currentStage !== 'in_transit') continue;
+
+    const fromStage = card.currentStage;
+
+    // Update card stage to 'received'
+    await tx
+      .update(kanbanCards)
+      .set({
+        currentStage: 'received',
+        currentStageEnteredAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(kanbanCards.id, cardId));
+
+    // Insert stage transition record
+    await tx
+      .insert(cardStageTransitions)
+      .values({
+        tenantId: input.tenantId,
+        cardId,
+        loopId: card.loopId,
+        cycleNumber: card.completedCycles + 1,
+        fromStage,
+        toStage: 'received',
+        transitionedByUserId: input.receivedByUserId,
+        method: 'system',
+        notes: `Receiving confirmation for ${input.orderType} ${input.orderId}`,
+        metadata: { receiptId, orderId: input.orderId, orderType: input.orderType },
+      });
+
+    // Audit the kanban transition
+    await writeAuditEntry(tx, {
+      tenantId: input.tenantId,
+      userId: input.receivedByUserId ?? null,
+      action: 'card.stage_changed',
+      entityType: 'kanban_card',
+      entityId: cardId,
+      previousState: { currentStage: fromStage },
+      newState: { currentStage: 'received' },
+      metadata: {
+        receiptId,
+        orderId: input.orderId,
+        orderType: input.orderType,
+        loopId: card.loopId,
+        method: 'system',
+        trigger: 'receiving_confirmation',
+      },
+    });
+
+    transitionedCardIds.push(cardId);
+  }
+
+  log.info(
+    { receiptId, transitionedCards: transitionedCardIds.length },
+    'Kanban cards transitioned after receiving'
+  );
+
+  return transitionedCardIds;
+}
+
+// ─── Get Expected Orders for Receiving ───────────────────────────────
+
+export interface ExpectedOrdersInput {
+  tenantId: string;
+  facilityId?: string;
+  orderType?: 'purchase_order' | 'transfer_order' | 'work_order';
+}
+
+export async function getExpectedOrders(input: ExpectedOrdersInput) {
+  const { tenantId, facilityId, orderType } = input;
+
+  const results: {
+    purchaseOrders: Array<Record<string, unknown>>;
+    transferOrders: Array<Record<string, unknown>>;
+    workOrders: Array<Record<string, unknown>>;
+  } = {
+    purchaseOrders: [],
+    transferOrders: [],
+    workOrders: [],
+  };
+
+  // Purchase orders in receivable states
+  if (!orderType || orderType === 'purchase_order') {
+    let poQuery = db
+      .select()
+      .from(purchaseOrders)
+      .where(
+        and(
+          eq(purchaseOrders.tenantId, tenantId),
+          sql`${purchaseOrders.status} IN ('sent', 'acknowledged', 'partially_received')`
+        )
+      );
+
+    if (facilityId) {
+      poQuery = db
+        .select()
+        .from(purchaseOrders)
+        .where(
+          and(
+            eq(purchaseOrders.tenantId, tenantId),
+            eq(purchaseOrders.facilityId, facilityId),
+            sql`${purchaseOrders.status} IN ('sent', 'acknowledged', 'partially_received')`
+          )
+        );
+    }
+
+    const pos = await poQuery.orderBy(desc(purchaseOrders.expectedDeliveryDate));
+
+    // Enrich with lines showing remaining quantities
+    for (const po of pos) {
+      const lines = await db
+        .select()
+        .from(purchaseOrderLines)
+        .where(eq(purchaseOrderLines.purchaseOrderId, po.id));
+
+      const enrichedLines = lines.map((l) => ({
+        ...l,
+        quantityRemaining: l.quantityOrdered - l.quantityReceived,
+      }));
+
+      results.purchaseOrders.push({
+        ...po,
+        lines: enrichedLines,
+        totalRemaining: enrichedLines.reduce((s, l) => s + l.quantityRemaining, 0),
+      });
+    }
+  }
+
+  // Transfer orders in transit
+  if (!orderType || orderType === 'transfer_order') {
+    let toQuery = db
+      .select()
+      .from(transferOrders)
+      .where(
+        and(
+          eq(transferOrders.tenantId, tenantId),
+          sql`${transferOrders.status} IN ('shipped', 'in_transit')`
+        )
+      );
+
+    if (facilityId) {
+      toQuery = db
+        .select()
+        .from(transferOrders)
+        .where(
+          and(
+            eq(transferOrders.tenantId, tenantId),
+            eq(transferOrders.destinationFacilityId, facilityId),
+            sql`${transferOrders.status} IN ('shipped', 'in_transit')`
+          )
+        );
+    }
+
+    const tos = await toQuery.orderBy(desc(transferOrders.shippedDate));
+
+    for (const to of tos) {
+      const lines = await db
+        .select()
+        .from(transferOrderLines)
+        .where(eq(transferOrderLines.transferOrderId, to.id));
+
+      const enrichedLines = lines.map((l) => ({
+        ...l,
+        quantityRemaining: l.quantityRequested - l.quantityReceived,
+      }));
+
+      results.transferOrders.push({
+        ...to,
+        lines: enrichedLines,
+        totalRemaining: enrichedLines.reduce((s, l) => s + l.quantityRemaining, 0),
+      });
+    }
+  }
+
+  // Work orders in progress (for production receiving)
+  if (!orderType || orderType === 'work_order') {
+    let woQuery = db
+      .select()
+      .from(workOrders)
+      .where(
+        and(
+          eq(workOrders.tenantId, tenantId),
+          sql`${workOrders.status} IN ('in_progress', 'scheduled')`
+        )
+      );
+
+    if (facilityId) {
+      woQuery = db
+        .select()
+        .from(workOrders)
+        .where(
+          and(
+            eq(workOrders.tenantId, tenantId),
+            eq(workOrders.facilityId, facilityId),
+            sql`${workOrders.status} IN ('in_progress', 'scheduled')`
+          )
+        );
+    }
+
+    const wos = await woQuery.orderBy(desc(workOrders.scheduledEndDate));
+
+    results.workOrders = wos.map((wo) => ({
+      ...wo,
+      quantityRemaining: wo.quantityToProduce - wo.quantityProduced,
+    }));
+  }
+
+  return results;
+}
+
+// ─── Get Receiving History ───────────────────────────────────────────
+
+export interface ReceivingHistoryInput {
+  tenantId: string;
+  page?: number;
+  pageSize?: number;
+  orderType?: string;
+  status?: string;
+}
+
+export async function getReceivingHistory(input: ReceivingHistoryInput) {
+  const { tenantId, page = 1, pageSize = 25 } = input;
+  const offset = (page - 1) * pageSize;
+
+  const conditions = [eq(receipts.tenantId, tenantId)];
+
+  if (input.orderType) {
+    conditions.push(eq(receipts.orderType, input.orderType));
+  }
+  if (input.status) {
+    conditions.push(sql`${receipts.status} = ${input.status}`);
+  }
+
+  const [rows, countResult] = await Promise.all([
+    db
+      .select()
+      .from(receipts)
+      .where(and(...conditions))
+      .orderBy(desc(receipts.createdAt))
+      .limit(pageSize)
+      .offset(offset),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(receipts)
+      .where(and(...conditions)),
+  ]);
+
+  const total = countResult[0]?.count ?? 0;
+
+  return {
+    data: rows,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+  };
+}
+
 // ─── Main: Process Receipt ──────────────────────────────────────────
 
 export async function processReceipt(input: ProcessReceiptInput) {
@@ -339,6 +754,9 @@ export async function processReceipt(input: ProcessReceiptInput) {
     // Update the source order
     await updateOrderAfterReceiving(tx, input, status);
 
+    // Transition kanban cards from ordered/in_transit → received
+    const transitionedCardIds = await transitionKanbanCardsAfterReceiving(tx, input, receipt.id);
+
     // Audit log — system-initiated receiving uses userId from input
     await writeAuditEntry(tx, {
       tenantId: input.tenantId,
@@ -368,6 +786,7 @@ export async function processReceipt(input: ProcessReceiptInput) {
       receipt,
       lines: insertedLines,
       exceptions: insertedExceptions,
+      transitionedCardIds,
       eventPayload: {
         receiptId: receipt.id,
         receiptNumber,
@@ -384,6 +803,16 @@ export async function processReceipt(input: ProcessReceiptInput) {
       },
     };
   });
+
+  // Update inventory outside the main TX (adjustQuantity has its own TX)
+  try {
+    await updateInventoryAfterReceiving(input, result.receipt.id);
+  } catch (err) {
+    log.error(
+      { err, receiptId: result.receipt.id, tenantId: input.tenantId },
+      'Failed to update inventory after receiving — receipt committed, inventory may need manual adjustment'
+    );
+  }
 
   try {
     const eventBus = getEventBus(config.REDIS_URL);
@@ -426,6 +855,21 @@ export async function processReceipt(input: ProcessReceiptInput) {
         timestamp,
       });
     }
+
+    // Publish card transition events for kanban
+    for (const cardId of result.transitionedCardIds) {
+      await eventBus.publish({
+        type: 'card.transition',
+        tenantId: input.tenantId,
+        cardId,
+        loopId: '', // filled by consumer from card data
+        fromStage: 'ordered',
+        toStage: 'received',
+        method: 'system',
+        userId: input.receivedByUserId,
+        timestamp,
+      });
+    }
   } catch (err) {
     log.error(
       { err, orderId: input.orderId, orderType: input.orderType, tenantId: input.tenantId },
@@ -447,6 +891,7 @@ export async function processReceipt(input: ProcessReceiptInput) {
     receipt: result.receipt,
     lines: result.lines,
     exceptions: result.exceptions,
+    transitionedCardIds: result.transitionedCardIds,
   };
 }
 
