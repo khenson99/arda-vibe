@@ -813,3 +813,53 @@ export const orderIssueResolutionStepsRelations = relations(orderIssueResolution
     references: [orderIssues.id],
   }),
 }));
+
+// ─── Email Draft Status Enum ────────────────────────────────────────
+export const emailDraftStatusEnum = pgEnum('email_draft_status', [
+  'draft',
+  'editing',
+  'ready',
+  'sending',
+  'sent',
+  'failed',
+]);
+
+// ─── Email Drafts ───────────────────────────────────────────────────
+export const emailDrafts = ordersSchema.table(
+  'email_drafts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    orderId: uuid('order_id').notNull(),
+    orderType: varchar('order_type', { length: 30 }).notNull(),
+    status: emailDraftStatusEnum('status').notNull().default('draft'),
+    toRecipients: jsonb('to_recipients').$type<string[]>().notNull().default([]),
+    ccRecipients: jsonb('cc_recipients').$type<string[]>().default([]),
+    bccRecipients: jsonb('bcc_recipients').$type<string[]>().default([]),
+    subject: varchar('subject', { length: 500 }).notNull(),
+    htmlBody: text('html_body').notNull(),
+    textBody: text('text_body'),
+    generatedHtmlBody: text('generated_html_body'),
+    gmailMessageId: varchar('gmail_message_id', { length: 255 }),
+    gmailThreadId: varchar('gmail_thread_id', { length: 255 }),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    sentByUserId: uuid('sent_by_user_id'),
+    errorMessage: text('error_message'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('email_drafts_tenant_idx').on(table.tenantId),
+    index('email_drafts_order_idx').on(table.tenantId, table.orderId, table.orderType),
+    index('email_drafts_status_idx').on(table.tenantId, table.status),
+  ]
+);
+
+export const emailDraftsRelations = relations(emailDrafts, ({ one }) => ({
+  purchaseOrder: one(purchaseOrders, {
+    fields: [emailDrafts.orderId],
+    references: [purchaseOrders.id],
+  }),
+}));

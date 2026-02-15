@@ -78,6 +78,8 @@ export function mapBackendEventToWSEventType(event: ArdaEvent): WSEventType | nu
     case 'production.split':
     case 'production.rework':
     case 'scan.conflict_detected':
+    case 'order.email_draft_created':
+    case 'order.email_sent':
     case 'security.auth.login':
     case 'security.auth.login_failed':
     case 'security.auth.logout':

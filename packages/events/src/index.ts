@@ -439,6 +439,26 @@ export interface ScanConflictDetectedEvent {
   };
 }
 
+// ─── Email Order Events ──────────────────────────────────────────────
+export interface OrderEmailDraftCreatedEvent {
+  type: 'order.email_draft_created';
+  tenantId: string;
+  draftId: string;
+  orderId: string;
+  orderType: 'purchase_order' | 'work_order' | 'transfer_order';
+  timestamp: string;
+}
+
+export interface OrderEmailSentEvent {
+  type: 'order.email_sent';
+  tenantId: string;
+  draftId: string;
+  orderId: string;
+  orderType: 'purchase_order' | 'work_order' | 'transfer_order';
+  gmailMessageId: string;
+  timestamp: string;
+}
+
 // Re-export security events
 export {
   type SecurityEvent,
@@ -492,7 +512,9 @@ export type ArdaEvent =
   | InventoryUpdatedEvent
   | ScanConflictDetectedEvent
   | OrderIssueCreatedEvent
-  | OrderIssueStatusChangedEvent;
+  | OrderIssueStatusChangedEvent
+  | OrderEmailDraftCreatedEvent
+  | OrderEmailSentEvent;
 
 // ─── Event Channel Names ────────────────────────────────────────────
 const CHANNEL_PREFIX = 'arda:events';

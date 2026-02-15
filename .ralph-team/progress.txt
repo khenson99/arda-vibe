@@ -556,3 +556,50 @@ Previous sprint: MVP-18 Audit Trail (10 tickets, all code-complete)
 New sprint: MVP-13 through MVP-17 (66 tickets)
 Timestamp: 2026-02-15T05:41:54Z
 
+--- Backend Agent Iteration 15 | Issue #428 ---
+Timestamp: 2026-02-15T01:00:00Z
+Status: completed
+Changes:
+  New files:
+  - services/orders/src/routes/email-orders.routes.ts (971 lines — 7 endpoints: generate, list, get, update, ready, send, reset)
+  - services/orders/src/routes/email-orders.integration.test.ts (495 lines — 25 tests)
+  - packages/db/drizzle/0016_email_drafts.sql (migration — email_draft_status enum + email_drafts table + 3 indexes)
+  Modified files:
+  - packages/db/src/schema/orders.ts (emailDraftStatusEnum, emailDrafts table, emailDraftsRelations)
+  - packages/db/drizzle/meta/_journal.json (added idx 19 for 0016_email_drafts)
+  - packages/events/src/index.ts (OrderEmailDraftCreatedEvent, OrderEmailSentEvent interfaces + ArdaEvent union)
+  - services/api-gateway/src/ws/event-mapper.ts (added order.email_draft_created and order.email_sent cases)
+  - services/orders/src/index.ts (import + mount emailOrdersRouter at /email-orders)
+Tests: 25 new integration tests passing, 720+ orders service tests passing, TypeScript builds clean.
+PR: https://github.com/khenson99/arda-vibe/pull/458
+Learnings:
+  - Cross-service fetch: use `fetch(notificationsUrl/gmail/send)` with Authorization header forwarding
+  - Email template generation: HTML + plain text for 3 order types (PO/WO/TO)
+  - Queue-based test mocking: `testState.selectQueue.shift()` for predictable multi-query mocks
+  - Test fetch interception: check URL to distinguish Gmail calls from test HTTP server calls
+  - Zod UUID validation: test data must use valid UUIDs, not shorthand IDs like 'po-1'
+  - Merge conflicts on stacked branches: resolve by keeping both upstream and stashed additions
+  - Duplicate jsonb import and enum definition: check for duplicates after conflict resolution
+
+--- Backend Agent Iteration 16 | Issue #428 ---
+Timestamp: 2026-02-15T09:10:00Z
+Status: completed (verification pass)
+Changes: None — iteration 15 implementation is complete and verified.
+Verification:
+  - 25/25 email-orders integration tests passing
+  - 759/759 orders service tests passing (47 test files, 1 pre-existing skip)
+  - TypeScript typecheck clean across all packages
+  - All 5 acceptance criteria confirmed met:
+    1. Auto-generated email draft with structured order info (PO/WO/TO templates)
+    2. Rich text email editor for customization (PUT update endpoint)
+    3. Review/preview step before sending (ready + get endpoints)
+    4. Send via Gmail integration (cross-service fetch to notifications/gmail/send)
+    5. Order status tracking through email workflow (draft→editing→ready→sending→sent/failed)
+CI Note:
+  - PR #458 CI failing on "Lint & Typecheck" due to `npm ci` lock file sync error (socket.io-client)
+  - Same failure exists on main branch (commit 0575000) — pre-existing, not PR-specific
+  - Local `npm ci` succeeds — likely CI runner npm version difference
+Learnings:
+  - Pre-existing CI failures: always verify if the same failure exists on main before debugging PR-specific issues
+  - `npm ci` behavior varies across npm minor versions — lock file validity is not guaranteed portable
+
