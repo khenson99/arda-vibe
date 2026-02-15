@@ -117,12 +117,10 @@ export function QueueRoute({
       sortKey,
       onSortKeyChange: (next) => setSortKey(next as QueueSort),
       sortOptions: QUEUE_SORT_OPTIONS,
-      onRefresh: () => void refreshQueueOnly(),
-      isRefreshing,
     });
 
     return () => setQueueHeaderControls(null);
-  }, [isRefreshing, refreshQueueOnly, scope, searchTerm, setQueueHeaderControls, sortKey]);
+  }, [scope, searchTerm, setQueueHeaderControls, sortKey]);
 
   const allGroups = React.useMemo(
     () =>
