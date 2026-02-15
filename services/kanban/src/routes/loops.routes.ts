@@ -19,6 +19,7 @@ const createLoopSchema = z.object({
   minQuantity: z.number().int().positive(),
   orderQuantity: z.number().int().positive(),
   numberOfCards: z.number().int().positive().default(1),
+  wipLimit: z.number().int().positive().nullable().optional(),
   safetyStockDays: z.string().optional(),
   primarySupplierId: z.string().uuid().optional(),
   sourceFacilityId: z.string().uuid().optional(),
@@ -178,9 +179,37 @@ loopsRouter.get('/:id', async (req: AuthRequest, res, next) => {
       numberOfCards: loop.numberOfCards,
     }));
 
+    // Compute ReLoWiSa metrics and threshold indicators
+    const countingStages = ['triggered', 'ordered', 'in_transit'] as const;
+    const inFlightCards = cardsRows.filter((c) =>
+      countingStages.includes(c.currentStage as typeof countingStages[number]),
+    ).length;
+    const inFlightQuantity = inFlightCards * loop.orderQuantity;
+    const safetyStockDays = Number(loop.safetyStockDays) || 0;
+    const wipUtilization =
+      loop.wipLimit != null && loop.wipLimit > 0
+        ? Math.round((inFlightCards / loop.wipLimit) * 100)
+        : null;
+
+    const reloWiSa = {
+      reorderPoint: loop.minQuantity,
+      lotSize: loop.orderQuantity,
+      wipLimit: loop.wipLimit,
+      safetyStockDays,
+      leadTimeDays: loop.statedLeadTimeDays,
+      numberOfCards: loop.numberOfCards,
+      inFlightCards,
+      inFlightQuantity,
+      wipUtilization,
+      nearReorderPoint: inFlightQuantity <= loop.minQuantity * 1.2,
+      atWipLimit: loop.wipLimit != null && inFlightCards >= loop.wipLimit,
+      belowSafetyStock: safetyStockDays > 0 && inFlightQuantity < loop.minQuantity,
+    };
+
     res.json({
       ...enrichedLoop,
       cards,
+      reloWiSa,
       parameterHistory: parameterHistoryRows,
       recommendations: recommendationsRows,
     });
@@ -249,6 +278,7 @@ loopsRouter.post('/', async (req: AuthRequest, res, next) => {
           minQuantity: input.minQuantity,
           orderQuantity: input.orderQuantity,
           numberOfCards: input.numberOfCards,
+          wipLimit: input.wipLimit ?? null,
           partId: input.partId,
           facilityId: input.facilityId,
         },
@@ -306,6 +336,7 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
       minQuantity: z.number().int().positive().optional(),
       orderQuantity: z.number().int().positive().optional(),
       numberOfCards: z.number().int().positive().optional(),
+      wipLimit: z.number().int().positive().nullable().optional(),
       leadTimeDays: z.number().int().nonnegative().optional(),
       statedLeadTimeDays: z.number().int().nonnegative().optional(),
       safetyStockDays: z.number().nonnegative().optional(),
@@ -322,6 +353,7 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
 
     await db.transaction(async (tx) => {
       // Record parameter change history
+      const leadTimeDaysVal = input.statedLeadTimeDays ?? input.leadTimeDays;
       await tx.insert(schema.kanbanParameterHistory).values({
         tenantId,
         loopId: req.params.id as string,
@@ -332,6 +364,18 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
         newOrderQuantity: input.orderQuantity ?? existingLoop.orderQuantity,
         previousNumberOfCards: existingLoop.numberOfCards,
         newNumberOfCards: input.numberOfCards ?? existingLoop.numberOfCards,
+        ...(input.wipLimit !== undefined ? {
+          previousWipLimit: existingLoop.wipLimit,
+          newWipLimit: input.wipLimit,
+        } : {}),
+        ...(input.safetyStockDays !== undefined ? {
+          previousSafetyStockDays: existingLoop.safetyStockDays,
+          newSafetyStockDays: String(input.safetyStockDays),
+        } : {}),
+        ...(leadTimeDaysVal !== undefined ? {
+          previousLeadTimeDays: existingLoop.statedLeadTimeDays,
+          newLeadTimeDays: leadTimeDaysVal,
+        } : {}),
         reason: input.reason,
         changedByUserId: req.user!.sub,
       });
@@ -341,6 +385,7 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
       if (input.minQuantity) updateFields.minQuantity = input.minQuantity;
       if (input.orderQuantity) updateFields.orderQuantity = input.orderQuantity;
       if (input.numberOfCards) updateFields.numberOfCards = input.numberOfCards;
+      if (input.wipLimit !== undefined) updateFields.wipLimit = input.wipLimit;
       const leadTimeDays = input.statedLeadTimeDays ?? input.leadTimeDays;
       if (leadTimeDays !== undefined) updateFields.statedLeadTimeDays = leadTimeDays;
       if (input.safetyStockDays !== undefined) {
@@ -363,11 +408,17 @@ loopsRouter.patch('/:id/parameters', async (req: AuthRequest, res, next) => {
           minQuantity: existingLoop.minQuantity,
           orderQuantity: existingLoop.orderQuantity,
           numberOfCards: existingLoop.numberOfCards,
+          wipLimit: existingLoop.wipLimit,
+          safetyStockDays: Number(existingLoop.safetyStockDays) || 0,
+          leadTimeDays: existingLoop.statedLeadTimeDays,
         },
         newState: {
           minQuantity: input.minQuantity ?? existingLoop.minQuantity,
           orderQuantity: input.orderQuantity ?? existingLoop.orderQuantity,
           numberOfCards: input.numberOfCards ?? existingLoop.numberOfCards,
+          wipLimit: input.wipLimit !== undefined ? input.wipLimit : existingLoop.wipLimit,
+          safetyStockDays: input.safetyStockDays ?? (Number(existingLoop.safetyStockDays) || 0),
+          leadTimeDays: leadTimeDaysVal ?? existingLoop.statedLeadTimeDays,
         },
         metadata: { reason: input.reason },
       });
