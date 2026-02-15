@@ -21,6 +21,7 @@ import { inventoryRouter } from './routes/inventory.routes.js';
 import { analyticsRouter } from './routes/analytics.routes.js';
 import { orderHistoryRouter } from './routes/order-history.routes.js';
 import { emailOrdersRouter } from './routes/email-orders.routes.js';
+import { poWorkflowRouter } from './routes/po-workflow.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startQueueRiskScheduler } from './services/queue-risk-scheduler.service.js';
 import { startTransferAutomationListener, type TransferAutomationListener } from './services/transfer-automation-listener.js';
@@ -73,6 +74,7 @@ app.use('/inventory', inventoryRouter);
 app.use('/analytics', analyticsRouter);
 app.use('/order-history', orderHistoryRouter);
 app.use('/email-orders', emailOrdersRouter);
+app.use('/po-workflow', poWorkflowRouter);
 
 app.use(errorHandler);
 

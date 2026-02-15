@@ -209,3 +209,15 @@ patterns, gotchas, and conventions.
 - Test pattern: queue-based mocks (testState.selectQueue.shift()) for multi-query endpoint testing
 - Test fetch interception: check URL to only mock /gmail/send calls, pass through to originalFetch for test HTTP
 - Zod UUID validation: all test data must use valid UUIDs (e.g. '00000000-0000-0000-0000-000000000010')
+
+### PO Workflow Pattern
+- Orchestration layer on top of email-orders infrastructure — 3 endpoints under /po-workflow/:poId
+- GET /preview: returns formatted HTML preview + PDF content + canApprove flag + metadata
+- POST /approve: transitions PO to approved + auto-generates email draft (atomic transaction)
+- GET /status: derives composite workflow step from PO status + latest email draft status
+- Workflow steps: draft → pending_approval → approved → email_editing → email_ready → sending → sent
+- No separate workflow state table — state derived from purchaseOrders.status + emailDrafts.status
+- fetchPOPreviewData: 6 sequential queries (PO, lines, supplier, parts, supplierParts, facility) — reused by preview and approve
+- Approve endpoint creates email draft pre-populated with vendor contactEmail, subject, and full PO HTML/text
+- Events reuse existing types: order.status_changed (approval) + order.email_draft_created (draft auto-gen)
+- generateEmailDraft flag defaults to true — pass false to approve without email draft creation
