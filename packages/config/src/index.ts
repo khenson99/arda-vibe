@@ -29,10 +29,16 @@ const envSchema = z.object({
   JWT_EXPIRY: z.string().default('15m'),
   JWT_REFRESH_EXPIRY: z.string().default('7d'),
 
-  // Google OAuth
+  // Google OAuth (login)
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().url().optional(),
+
+  // Gmail OAuth (sending email from user accounts)
+  GMAIL_REDIRECT_URI: z.string().url().optional(),
+
+  // Token encryption (for securing OAuth tokens at rest)
+  TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
 
   // AI / LLM
   OPENAI_API_KEY: z.string().optional(),

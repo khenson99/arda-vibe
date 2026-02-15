@@ -10,6 +10,7 @@ import { authMiddleware } from '@arda/auth-utils';
 import { notificationsRouter } from './routes/notifications.routes.js';
 import { preferencesRouter } from './routes/preferences.routes.js';
 import { unsubscribeRouter } from './routes/unsubscribe.routes.js';
+import { gmailOauthRouter } from './routes/gmail-oauth.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startEventListener } from './services/event-listener.js';
 import { createEmailQueue, createEmailWorker } from './workers/email-queue.worker.js';
@@ -65,6 +66,7 @@ app.use(authMiddleware);
 app.use(userActivityMiddleware('notifications', getCorrelationId));
 app.use('/notifications', notificationsRouter);
 app.use('/preferences', preferencesRouter);
+app.use('/gmail', gmailOauthRouter);
 
 app.use(errorHandler);
 

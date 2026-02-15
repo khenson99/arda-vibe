@@ -144,7 +144,47 @@ export const apiKeys = authSchema.table(
   ]
 );
 
+// ─── User OAuth Tokens (for service integrations like Gmail) ─────────
+// Separate from oauthAccounts (used for login). These tokens allow the app
+// to act on behalf of the user with third-party APIs (e.g., send Gmail).
+export const oauthTokenProviderEnum = pgEnum('oauth_token_provider', [
+  'google',
+]);
+
+export const userOauthTokens = authSchema.table(
+  'user_oauth_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    provider: oauthTokenProviderEnum('provider').notNull(),
+    accessToken: text('access_token').notNull(), // encrypted at rest
+    refreshToken: text('refresh_token').notNull(), // encrypted at rest
+    tokenExpiry: timestamp('token_expiry', { withTimezone: true }),
+    scopes: text('scopes').array().notNull().default([]),
+    email: varchar('email', { length: 255 }), // provider email for display
+    isValid: boolean('is_valid').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('user_oauth_tokens_user_provider_idx').on(table.userId, table.provider),
+    index('user_oauth_tokens_tenant_idx').on(table.tenantId),
+  ]
+);
+
 // ─── Relations ────────────────────────────────────────────────────────
+export const userOauthTokensRelations = relations(userOauthTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [userOauthTokens.userId],
+    references: [users.id],
+  }),
+}));
+
 export const usersRelations = relations(users, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [users.tenantId],
@@ -154,6 +194,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   refreshTokens: many(refreshTokens),
   passwordResetTokens: many(passwordResetTokens),
   apiKeys: many(apiKeys),
+  userOauthTokens: many(userOauthTokens),
 }));
 
 export const oauthAccountsRelations = relations(oauthAccounts, ({ one }) => ({
