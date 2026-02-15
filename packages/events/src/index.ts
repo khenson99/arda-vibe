@@ -50,7 +50,7 @@ export interface OrderCreatedEvent {
 export interface OrderStatusChangedEvent {
   type: 'order.status_changed';
   tenantId: string;
-  orderType: 'purchase_order' | 'work_order' | 'transfer_order';
+  orderType: 'purchase_order' | 'work_order' | 'transfer_order' | 'sales_order';
   orderId: string;
   orderNumber: string;
   fromStatus: string;
@@ -459,6 +459,50 @@ export interface OrderEmailSentEvent {
   timestamp: string;
 }
 
+// ─── Sales Order Events ──────────────────────────────────────────
+
+export interface SalesOrderApprovedEvent {
+  type: 'sales_order.approved';
+  tenantId: string;
+  orderId: string;
+  orderNumber: string;
+  customerId: string;
+  facilityId: string;
+  lineCount: number;
+  totalAmount: string;
+  reservationSummary: {
+    totalRequested: number;
+    totalReserved: number;
+    shortfallLines: number;
+  };
+  timestamp: string;
+}
+
+export interface SalesOrderCancelledEvent {
+  type: 'sales_order.cancelled';
+  tenantId: string;
+  orderId: string;
+  orderNumber: string;
+  previousStatus: string;
+  cancelReason?: string;
+  inventoryReleased: number;
+  demandSignalsCancelled: number;
+  timestamp: string;
+}
+
+export interface DemandSignalCreatedEvent {
+  type: 'demand_signal.created';
+  tenantId: string;
+  signalId: string;
+  partId: string;
+  facilityId: string;
+  signalType: string;
+  quantityDemanded: number;
+  salesOrderId?: string;
+  salesOrderLineId?: string;
+  timestamp: string;
+}
+
 // Re-export security events
 export {
   type SecurityEvent,
@@ -514,7 +558,10 @@ export type ArdaEvent =
   | OrderIssueCreatedEvent
   | OrderIssueStatusChangedEvent
   | OrderEmailDraftCreatedEvent
-  | OrderEmailSentEvent;
+  | OrderEmailSentEvent
+  | SalesOrderApprovedEvent
+  | SalesOrderCancelledEvent
+  | DemandSignalCreatedEvent;
 
 // ─── Event Channel Names ────────────────────────────────────────────
 const CHANNEL_PREFIX = 'arda:events';
