@@ -43,3 +43,6 @@ postgres_data/
 redis_data/
 es_data/
 .vercel
+
+# Load test reports (CI artifacts, not committed)
+tests/load/reports/*.json
