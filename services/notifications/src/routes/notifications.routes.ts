@@ -1,8 +1,23 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
-import { db, schema } from '@arda/db';
+import { db, schema, writeAuditEntry } from '@arda/db';
 import { eq, and, desc, sql, inArray, gte, lte } from 'drizzle-orm';
 import { AppError } from '../middleware/error-handler.js';
+
+function getRequestAuditContext(req: Request) {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = Array.isArray(forwarded)
+    ? forwarded[0]
+    : (forwarded as string | undefined)?.split(',')[0]?.trim();
+  const rawIp = forwardedIp || req.socket.remoteAddress || undefined;
+  const userAgentHeader = req.headers['user-agent'];
+  const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+  return {
+    userId: req.user?.sub,
+    ipAddress: rawIp?.slice(0, 45),
+    userAgent,
+  };
+}
 
 export const notificationsRouter = Router();
 
@@ -217,12 +232,13 @@ notificationsRouter.post('/mark-all-read', async (req, res, next) => {
   }
 });
 
-// DELETE /:id — Soft delete a notification
+// DELETE /:id — Dismiss (delete) a notification
 notificationsRouter.delete('/:id', async (req, res, next) => {
   try {
     const id = req.params.id as string;
     const userId = req.user!.sub;
     const tenantId = req.user!.tenantId;
+    const auditContext = getRequestAuditContext(req);
 
     // Verify ownership before deleting
     const notification = await db
@@ -240,15 +256,35 @@ notificationsRouter.delete('/:id', async (req, res, next) => {
       throw new AppError(404, 'Notification not found', 'NOT_FOUND');
     }
 
-    await db
-      .delete(schema.notifications)
-      .where(
-        and(
-          eq(schema.notifications.id, id),
-          eq(schema.notifications.tenantId, tenantId),
-          eq(schema.notifications.userId, userId)
-        )
-      );
+    const notif = notification[0];
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.id, id),
+            eq(schema.notifications.tenantId, tenantId),
+            eq(schema.notifications.userId, userId)
+          )
+        );
+
+      await writeAuditEntry(tx, {
+        tenantId,
+        userId: auditContext.userId,
+        action: 'notification.dismissed',
+        entityType: 'notification',
+        entityId: id,
+        previousState: { type: notif.type, isRead: notif.isRead },
+        newState: null,
+        metadata: {
+          source: 'notifications.dismiss',
+          notificationType: notif.type,
+        },
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+      });
+    });
 
     res.json({ message: 'Notification deleted' });
   } catch (err) {

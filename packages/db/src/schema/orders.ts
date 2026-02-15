@@ -863,3 +863,282 @@ export const emailDraftsRelations = relations(emailDrafts, ({ one }) => ({
     references: [purchaseOrders.id],
   }),
 }));
+
+// ─── Sales / Customer Enums ─────────────────────────────────────────
+export const customerStatusEnum = pgEnum('customer_status', [
+  'active',
+  'inactive',
+  'prospect',
+  'suspended',
+]);
+
+export const soStatusEnum = pgEnum('so_status', [
+  'draft',
+  'confirmed',
+  'processing',
+  'partially_shipped',
+  'shipped',
+  'delivered',
+  'invoiced',
+  'closed',
+  'cancelled',
+]);
+
+export const demandSignalTypeEnum = pgEnum('demand_signal_type', [
+  'sales_order',
+  'forecast',
+  'reorder_point',
+  'safety_stock',
+  'seasonal',
+  'manual',
+]);
+
+// ─── Customers ──────────────────────────────────────────────────────
+export const customers = ordersSchema.table(
+  'customers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    code: varchar('code', { length: 50 }),
+    status: customerStatusEnum('status').notNull().default('active'),
+    email: varchar('email', { length: 255 }),
+    phone: varchar('phone', { length: 50 }),
+    website: text('website'),
+    paymentTerms: varchar('payment_terms', { length: 100 }),
+    creditLimit: numeric('credit_limit', { precision: 12, scale: 2 }),
+    taxId: varchar('tax_id', { length: 50 }),
+    notes: text('notes'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('customers_tenant_code_idx').on(table.tenantId, table.code),
+    index('customers_tenant_idx').on(table.tenantId),
+    index('customers_tenant_status_idx').on(table.tenantId, table.status),
+    index('customers_tenant_name_idx').on(table.tenantId, table.name),
+  ]
+);
+
+// ─── Customer Contacts ──────────────────────────────────────────────
+export const customerContacts = ordersSchema.table(
+  'customer_contacts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    firstName: varchar('first_name', { length: 100 }).notNull(),
+    lastName: varchar('last_name', { length: 100 }).notNull(),
+    email: varchar('email', { length: 255 }),
+    phone: varchar('phone', { length: 50 }),
+    title: varchar('title', { length: 100 }),
+    isPrimary: boolean('is_primary').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('customer_contacts_tenant_idx').on(table.tenantId),
+    index('customer_contacts_customer_idx').on(table.customerId),
+    index('customer_contacts_email_idx').on(table.tenantId, table.email),
+  ]
+);
+
+// ─── Customer Addresses ─────────────────────────────────────────────
+export const customerAddresses = ordersSchema.table(
+  'customer_addresses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    label: varchar('label', { length: 100 }).notNull().default('main'),
+    addressLine1: varchar('address_line_1', { length: 255 }).notNull(),
+    addressLine2: varchar('address_line_2', { length: 255 }),
+    city: varchar('city', { length: 100 }).notNull(),
+    state: varchar('state', { length: 100 }),
+    postalCode: varchar('postal_code', { length: 20 }),
+    country: varchar('country', { length: 100 }).notNull().default('US'),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('customer_addresses_tenant_idx').on(table.tenantId),
+    index('customer_addresses_customer_idx').on(table.customerId),
+  ]
+);
+
+// ─── Sales Orders ───────────────────────────────────────────────────
+export const salesOrders = ordersSchema.table(
+  'sales_orders',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    soNumber: varchar('so_number', { length: 50 }).notNull(),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => customers.id),
+    facilityId: uuid('facility_id').notNull(),
+    status: soStatusEnum('status').notNull().default('draft'),
+    orderDate: timestamp('order_date', { withTimezone: true }),
+    requestedShipDate: timestamp('requested_ship_date', { withTimezone: true }),
+    promisedShipDate: timestamp('promised_ship_date', { withTimezone: true }),
+    actualShipDate: timestamp('actual_ship_date', { withTimezone: true }),
+    shippingAddressId: uuid('shipping_address_id')
+      .references(() => customerAddresses.id),
+    billingAddressId: uuid('billing_address_id')
+      .references(() => customerAddresses.id),
+    subtotal: numeric('subtotal', { precision: 12, scale: 2 }).default('0'),
+    taxAmount: numeric('tax_amount', { precision: 12, scale: 2 }).default('0'),
+    shippingAmount: numeric('shipping_amount', { precision: 12, scale: 2 }).default('0'),
+    discountAmount: numeric('discount_amount', { precision: 12, scale: 2 }).default('0'),
+    totalAmount: numeric('total_amount', { precision: 12, scale: 2 }).default('0'),
+    currency: varchar('currency', { length: 3 }).default('USD'),
+    paymentTerms: text('payment_terms'),
+    shippingMethod: varchar('shipping_method', { length: 100 }),
+    trackingNumber: varchar('tracking_number', { length: 255 }),
+    notes: text('notes'),
+    internalNotes: text('internal_notes'),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancelReason: text('cancel_reason'),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('so_tenant_number_idx').on(table.tenantId, table.soNumber),
+    index('so_tenant_idx').on(table.tenantId),
+    index('so_customer_idx').on(table.customerId),
+    index('so_status_idx').on(table.tenantId, table.status),
+    index('so_facility_idx').on(table.facilityId),
+    index('so_order_date_idx').on(table.tenantId, table.orderDate),
+  ]
+);
+
+// ─── Sales Order Lines ──────────────────────────────────────────────
+export const salesOrderLines = ordersSchema.table(
+  'sales_order_lines',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    salesOrderId: uuid('sales_order_id')
+      .notNull()
+      .references(() => salesOrders.id, { onDelete: 'cascade' }),
+    partId: uuid('part_id').notNull(),
+    lineNumber: integer('line_number').notNull(),
+    quantityOrdered: integer('quantity_ordered').notNull(),
+    quantityAllocated: integer('quantity_allocated').notNull().default(0),
+    quantityShipped: integer('quantity_shipped').notNull().default(0),
+    unitPrice: numeric('unit_price', { precision: 12, scale: 4 }).notNull(),
+    discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0'),
+    lineTotal: numeric('line_total', { precision: 12, scale: 2 }).notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('so_lines_tenant_idx').on(table.tenantId),
+    index('so_lines_so_idx').on(table.salesOrderId),
+    index('so_lines_part_idx').on(table.partId),
+    uniqueIndex('so_lines_order_line_idx').on(table.salesOrderId, table.lineNumber),
+  ]
+);
+
+// ─── Demand Signals ─────────────────────────────────────────────────
+export const demandSignals = ordersSchema.table(
+  'demand_signals',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    partId: uuid('part_id').notNull(),
+    facilityId: uuid('facility_id').notNull(),
+    signalType: demandSignalTypeEnum('signal_type').notNull(),
+    quantityDemanded: integer('quantity_demanded').notNull(),
+    quantityFulfilled: integer('quantity_fulfilled').notNull().default(0),
+    salesOrderId: uuid('sales_order_id')
+      .references(() => salesOrders.id, { onDelete: 'set null' }),
+    salesOrderLineId: uuid('sales_order_line_id')
+      .references(() => salesOrderLines.id, { onDelete: 'set null' }),
+    demandDate: timestamp('demand_date', { withTimezone: true }).notNull(),
+    fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+    triggeredKanbanCardId: uuid('triggered_kanban_card_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('demand_signals_tenant_idx').on(table.tenantId),
+    index('demand_signals_part_idx').on(table.tenantId, table.partId),
+    index('demand_signals_facility_idx').on(table.tenantId, table.facilityId),
+    index('demand_signals_type_idx').on(table.tenantId, table.signalType),
+    index('demand_signals_so_idx').on(table.salesOrderId),
+    index('demand_signals_date_idx').on(table.tenantId, table.demandDate),
+  ]
+);
+
+// ─── Customer Relations ─────────────────────────────────────────────
+export const customersRelations = relations(customers, ({ many }) => ({
+  contacts: many(customerContacts),
+  addresses: many(customerAddresses),
+  salesOrders: many(salesOrders),
+}));
+
+export const customerContactsRelations = relations(customerContacts, ({ one }) => ({
+  customer: one(customers, {
+    fields: [customerContacts.customerId],
+    references: [customers.id],
+  }),
+}));
+
+export const customerAddressesRelations = relations(customerAddresses, ({ one }) => ({
+  customer: one(customers, {
+    fields: [customerAddresses.customerId],
+    references: [customers.id],
+  }),
+}));
+
+// ─── Sales Order Relations ──────────────────────────────────────────
+export const salesOrdersRelations = relations(salesOrders, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [salesOrders.customerId],
+    references: [customers.id],
+  }),
+  shippingAddress: one(customerAddresses, {
+    fields: [salesOrders.shippingAddressId],
+    references: [customerAddresses.id],
+    relationName: 'shippingAddress',
+  }),
+  billingAddress: one(customerAddresses, {
+    fields: [salesOrders.billingAddressId],
+    references: [customerAddresses.id],
+    relationName: 'billingAddress',
+  }),
+  lines: many(salesOrderLines),
+  demandSignals: many(demandSignals),
+}));
+
+export const salesOrderLinesRelations = relations(salesOrderLines, ({ one }) => ({
+  salesOrder: one(salesOrders, {
+    fields: [salesOrderLines.salesOrderId],
+    references: [salesOrders.id],
+  }),
+}));
+
+// ─── Demand Signal Relations ────────────────────────────────────────
+export const demandSignalsRelations = relations(demandSignals, ({ one }) => ({
+  salesOrder: one(salesOrders, {
+    fields: [demandSignals.salesOrderId],
+    references: [salesOrders.id],
+  }),
+  salesOrderLine: one(salesOrderLines, {
+    fields: [demandSignals.salesOrderLineId],
+    references: [salesOrderLines.id],
+  }),
+}));

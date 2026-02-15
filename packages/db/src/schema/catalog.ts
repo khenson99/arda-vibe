@@ -595,3 +595,49 @@ export const itemSubtypesRelations = relations(itemSubtypes, ({ one }) => ({
 }));
 
 export const useCasesRelations = relations(useCases, () => ({}));
+
+// ─── Product Visibility (MVP-13) ────────────────────────────────────
+
+export const visibilityStateEnum = pgEnum('visibility_state', [
+  'visible',
+  'hidden',
+  'coming_soon',
+  'discontinued',
+]);
+
+export const productVisibility = catalogSchema.table(
+  'product_visibility',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    partId: uuid('part_id')
+      .notNull()
+      .references(() => parts.id, { onDelete: 'cascade' }),
+    visibilityState: visibilityStateEnum('visibility_state').notNull().default('hidden'),
+    displayName: varchar('display_name', { length: 255 }),
+    shortDescription: text('short_description'),
+    longDescription: text('long_description'),
+    displayPrice: numeric('display_price', { precision: 12, scale: 4 }),
+    displayOrder: integer('display_order').default(0),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    unpublishedAt: timestamp('unpublished_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    updatedByUserId: uuid('updated_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('product_visibility_tenant_part_idx').on(table.tenantId, table.partId),
+    index('product_visibility_tenant_idx').on(table.tenantId),
+    index('product_visibility_state_idx').on(table.tenantId, table.visibilityState),
+    index('product_visibility_display_order_idx').on(table.tenantId, table.displayOrder),
+  ]
+);
+
+// ─── Product Visibility Relations ───────────────────────────────────
+export const productVisibilityRelations = relations(productVisibility, ({ one }) => ({
+  part: one(parts, {
+    fields: [productVisibility.partId],
+    references: [parts.id],
+  }),
+}));

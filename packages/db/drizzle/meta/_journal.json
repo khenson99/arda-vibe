@@ -141,6 +141,13 @@
       "when": 1772136000000,
       "tag": "0016_email_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1772222400000,
+      "tag": "0017_sales_customers_visibility",
+      "breakpoints": true
     }
   ]
 }

@@ -1063,3 +1063,304 @@ export interface ImportMatchResult {
   matchMethod: string;
   disposition: ImportItemDisposition;
 }
+
+// ─── Customer Types (MVP-13) ────────────────────────────────────────
+
+export type CustomerStatus = 'active' | 'inactive' | 'prospect' | 'suspended';
+
+export interface Customer {
+  id: string;
+  tenantId: string;
+  name: string;
+  code: string | null;
+  status: CustomerStatus;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  paymentTerms: string | null;
+  creditLimit: number | null;
+  taxId: string | null;
+  notes: string | null;
+  metadata: Record<string, unknown> | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerContact {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  title: string | null;
+  isPrimary: boolean;
+  isActive: boolean;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerAddress {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  label: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  state: string | null;
+  postalCode: string | null;
+  country: string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCustomerInput {
+  name: string;
+  code?: string;
+  status?: CustomerStatus;
+  email?: string;
+  phone?: string;
+  website?: string;
+  paymentTerms?: string;
+  creditLimit?: number;
+  taxId?: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateCustomerInput {
+  name?: string;
+  code?: string;
+  status?: CustomerStatus;
+  email?: string;
+  phone?: string;
+  website?: string;
+  paymentTerms?: string;
+  creditLimit?: number;
+  taxId?: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateCustomerContactInput {
+  customerId: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+  title?: string;
+  isPrimary?: boolean;
+}
+
+export interface CreateCustomerAddressInput {
+  customerId: string;
+  label?: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+  isDefault?: boolean;
+}
+
+// ─── Sales Order Types (MVP-13) ─────────────────────────────────────
+
+export type SOStatus =
+  | 'draft'
+  | 'confirmed'
+  | 'processing'
+  | 'partially_shipped'
+  | 'shipped'
+  | 'delivered'
+  | 'invoiced'
+  | 'closed'
+  | 'cancelled';
+
+export const SO_VALID_TRANSITIONS: Record<SOStatus, SOStatus[]> = {
+  draft: ['confirmed', 'cancelled'],
+  confirmed: ['processing', 'cancelled'],
+  processing: ['partially_shipped', 'shipped', 'cancelled'],
+  partially_shipped: ['shipped', 'cancelled'],
+  shipped: ['delivered'],
+  delivered: ['invoiced', 'closed'],
+  invoiced: ['closed'],
+  closed: [],
+  cancelled: [],
+};
+
+export interface SalesOrder {
+  id: string;
+  tenantId: string;
+  soNumber: string;
+  customerId: string;
+  facilityId: string;
+  status: SOStatus;
+  orderDate: string | null;
+  requestedShipDate: string | null;
+  promisedShipDate: string | null;
+  actualShipDate: string | null;
+  shippingAddressId: string | null;
+  billingAddressId: string | null;
+  subtotal: number;
+  taxAmount: number;
+  shippingAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  currency: string;
+  paymentTerms: string | null;
+  shippingMethod: string | null;
+  trackingNumber: string | null;
+  notes: string | null;
+  internalNotes: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SalesOrderLine {
+  id: string;
+  tenantId: string;
+  salesOrderId: string;
+  partId: string;
+  lineNumber: number;
+  quantityOrdered: number;
+  quantityAllocated: number;
+  quantityShipped: number;
+  unitPrice: number;
+  discountPercent: number;
+  lineTotal: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSalesOrderInput {
+  customerId: string;
+  facilityId: string;
+  orderDate?: string;
+  requestedShipDate?: string;
+  shippingAddressId?: string;
+  billingAddressId?: string;
+  paymentTerms?: string;
+  shippingMethod?: string;
+  notes?: string;
+  internalNotes?: string;
+  lines: CreateSalesOrderLineInput[];
+}
+
+export interface CreateSalesOrderLineInput {
+  partId: string;
+  quantityOrdered: number;
+  unitPrice: number;
+  discountPercent?: number;
+  notes?: string;
+}
+
+export interface UpdateSalesOrderInput {
+  status?: SOStatus;
+  requestedShipDate?: string;
+  promisedShipDate?: string;
+  shippingAddressId?: string;
+  billingAddressId?: string;
+  paymentTerms?: string;
+  shippingMethod?: string;
+  trackingNumber?: string;
+  notes?: string;
+  internalNotes?: string;
+  cancelReason?: string;
+}
+
+// ─── Product Visibility Types (MVP-13) ──────────────────────────────
+
+export type VisibilityState = 'visible' | 'hidden' | 'coming_soon' | 'discontinued';
+
+export interface ProductVisibility {
+  id: string;
+  tenantId: string;
+  partId: string;
+  visibilityState: VisibilityState;
+  displayName: string | null;
+  shortDescription: string | null;
+  longDescription: string | null;
+  displayPrice: number | null;
+  displayOrder: number;
+  publishedAt: string | null;
+  unpublishedAt: string | null;
+  metadata: Record<string, unknown> | null;
+  updatedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateProductVisibilityInput {
+  visibilityState?: VisibilityState;
+  displayName?: string;
+  shortDescription?: string;
+  longDescription?: string;
+  displayPrice?: number;
+  displayOrder?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProductVisibilityFilters {
+  visibilityState?: VisibilityState;
+  partId?: string;
+  sortBy?: 'displayOrder' | 'displayName' | 'updatedAt';
+  sortOrder?: 'asc' | 'desc';
+}
+
+// ─── Demand Signal Types (MVP-13) ───────────────────────────────────
+
+export type DemandSignalType =
+  | 'sales_order'
+  | 'forecast'
+  | 'reorder_point'
+  | 'safety_stock'
+  | 'seasonal'
+  | 'manual';
+
+export interface DemandSignal {
+  id: string;
+  tenantId: string;
+  partId: string;
+  facilityId: string;
+  signalType: DemandSignalType;
+  quantityDemanded: number;
+  quantityFulfilled: number;
+  salesOrderId: string | null;
+  salesOrderLineId: string | null;
+  demandDate: string;
+  fulfilledAt: string | null;
+  triggeredKanbanCardId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDemandSignalInput {
+  partId: string;
+  facilityId: string;
+  signalType: DemandSignalType;
+  quantityDemanded: number;
+  demandDate: string;
+  salesOrderId?: string;
+  salesOrderLineId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DemandSignalFilters {
+  partId?: string;
+  facilityId?: string;
+  signalType?: DemandSignalType;
+  dateFrom?: string;
+  dateTo?: string;
+  unfulfilled?: boolean;
+}
