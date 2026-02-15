@@ -472,20 +472,46 @@ export const ROUTING_STEP_VALID_TRANSITIONS: Record<RoutingStepStatus, RoutingSt
 };
 
 // ─── WebSocket Events ────────────────────────────────────────────────
-export type WSEventType =
-  | 'card:stage_changed'
-  | 'card:triggered'
-  | 'po:status_changed'
-  | 'wo:status_changed'
-  | 'transfer:status_changed'
-  | 'inventory:updated'
-  | 'notification:new'
-  | 'relowisa:recommendation'
-  | 'wo:step_completed'
-  | 'wo:quantity_reported'
-  | 'wo:expedited'
-  | 'wo:held'
-  | 'wo:resumed';
+export type RealtimeProtocolVersion = '1' | '2';
+
+export const WS_EVENT_TYPES = [
+  // Control events
+  'connected',
+  'pong',
+  'error',
+  // Core lifecycle + order events
+  'card:stage_changed',
+  'card:triggered',
+  'po:status_changed',
+  'wo:status_changed',
+  'transfer:status_changed',
+  // Production events
+  'wo:step_completed',
+  'wo:quantity_reported',
+  'wo:expedited',
+  'wo:held',
+  'wo:resumed',
+  // Receiving events
+  'receiving:completed',
+  'receiving:exception_created',
+  'receiving:exception_resolved',
+  // Automation events
+  'automation:po_created',
+  'automation:to_created',
+  'automation:email_dispatched',
+  'automation:shopping_list_item_added',
+  'automation:card_stage_changed',
+  'automation:escalated',
+  // Realtime surfaces
+  'notification:new',
+  'relowisa:recommendation',
+  'kpi:refreshed',
+  'audit:created',
+  'user:activity',
+  'inventory:updated',
+] as const;
+
+export type WSEventType = (typeof WS_EVENT_TYPES)[number];
 
 export interface WSEvent<T = unknown> {
   type: WSEventType;
@@ -493,6 +519,83 @@ export interface WSEvent<T = unknown> {
   payload: T;
   timestamp: string;
 }
+
+export interface RealtimeHandshakeAuth {
+  token: string;
+  protocolVersion?: RealtimeProtocolVersion;
+  lastEventId?: string;
+}
+
+export interface RealtimeConnectedPayload {
+  tenantId: string;
+  userId: string;
+  timestamp: string;
+  protocolVersion?: RealtimeProtocolVersion;
+  lastEventId?: string;
+}
+
+export interface RealtimePingPayload {
+  timestamp?: string;
+}
+
+export interface RealtimePongPayload {
+  timestamp: string;
+}
+
+export interface RealtimeErrorPayload {
+  message: string;
+  code?: string;
+  retryable?: boolean;
+}
+
+export interface RealtimeSubscribeLoopPayload {
+  loopId: string;
+  protocolVersion?: RealtimeProtocolVersion;
+  lastEventId?: string;
+}
+
+export interface RealtimeUnsubscribeLoopPayload {
+  loopId: string;
+}
+
+export type RealtimeControlEventType = 'connected' | 'pong' | 'error';
+
+export interface RealtimeControlEvent {
+  type: RealtimeControlEventType;
+  payload: RealtimeConnectedPayload | RealtimePongPayload | RealtimeErrorPayload;
+}
+
+// Compile-time coverage: ensures every WSEventType has a mapped key.
+export const WS_EVENT_TYPE_COVERAGE: Record<WSEventType, true> = {
+  connected: true,
+  pong: true,
+  error: true,
+  'card:stage_changed': true,
+  'card:triggered': true,
+  'po:status_changed': true,
+  'wo:status_changed': true,
+  'transfer:status_changed': true,
+  'wo:step_completed': true,
+  'wo:quantity_reported': true,
+  'wo:expedited': true,
+  'wo:held': true,
+  'wo:resumed': true,
+  'receiving:completed': true,
+  'receiving:exception_created': true,
+  'receiving:exception_resolved': true,
+  'automation:po_created': true,
+  'automation:to_created': true,
+  'automation:email_dispatched': true,
+  'automation:shopping_list_item_added': true,
+  'automation:card_stage_changed': true,
+  'automation:escalated': true,
+  'notification:new': true,
+  'relowisa:recommendation': true,
+  'kpi:refreshed': true,
+  'audit:created': true,
+  'user:activity': true,
+  'inventory:updated': true,
+};
 
 // ─── Transfer Lifecycle ──────────────────────────────────────────────
 export const TRANSFER_VALID_TRANSITIONS: Record<TransferStatus, TransferStatus[]> = {

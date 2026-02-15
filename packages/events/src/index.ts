@@ -3,6 +3,26 @@ import { createLogger } from '@arda/config';
 
 const log = createLogger('event-bus');
 
+// ─── Event Envelope (Protocol v2) ───────────────────────────────────
+export interface EventMeta {
+  id: string;
+  schemaVersion: number;
+  source: string;
+  correlationId?: string;
+  timestamp: string;
+  replayed?: boolean;
+}
+
+export interface EventEnvelope<T extends ArdaEvent = ArdaEvent> {
+  id: string;
+  schemaVersion: number;
+  source: string;
+  correlationId?: string;
+  timestamp: string;
+  replayed?: boolean;
+  event: T;
+}
+
 // ─── Event Types ────────────────────────────────────────────────────
 export interface CardTransitionEvent {
   type: 'card.transition';
@@ -77,6 +97,45 @@ export interface NotificationEvent {
   notificationId: string;
   notificationType: string;
   title: string;
+  timestamp: string;
+}
+
+// ─── Realtime Analytics / Audit / Activity Events ───────────────────
+export interface KpiRefreshedEvent {
+  type: 'kpi.refreshed';
+  tenantId: string;
+  kpiKey: string;
+  window: '30d' | '60d' | '90d' | 'custom';
+  facilityId?: string;
+  value: number;
+  previousValue?: number;
+  deltaPercent?: number;
+  refreshedAt: string;
+  timestamp: string;
+}
+
+export interface AuditCreatedEvent {
+  type: 'audit.created';
+  tenantId: string;
+  auditId: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  actorUserId?: string | null;
+  method?: 'manual' | 'system' | 'scan' | 'api';
+  timestamp: string;
+}
+
+export interface UserActivityEvent {
+  type: 'user.activity';
+  tenantId: string;
+  userId: string;
+  activityType: 'login' | 'logout' | 'page_view' | 'command' | 'mutation' | 'websocket_subscribe';
+  route?: string;
+  resourceType?: string;
+  resourceId?: string;
+  sessionId?: string;
+  correlationId?: string;
   timestamp: string;
 }
 
@@ -380,6 +439,9 @@ export type ArdaEvent =
   | ReloWisaRecommendationEvent
   | QueueRiskDetectedEvent
   | NotificationEvent
+  | KpiRefreshedEvent
+  | AuditCreatedEvent
+  | UserActivityEvent
   | SecurityEvent
   | LifecycleTransitionEvent
   | LifecycleTransitionRejectedEvent
