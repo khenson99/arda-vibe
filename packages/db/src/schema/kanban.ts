@@ -51,11 +51,12 @@ export const kanbanLoops = kanbanSchema.table(
     loopType: loopTypeEnum('loop_type').notNull(),
     cardMode: cardModeEnum('card_mode').notNull().default('single'),
 
-    // ── Kanban Parameters ──
-    minQuantity: integer('min_quantity').notNull(), // reorder point
-    orderQuantity: integer('order_quantity').notNull(), // qty per replenishment
+    // ── Kanban Parameters (ReLoWiSa) ──
+    minQuantity: integer('min_quantity').notNull(), // reorder point (Re)
+    orderQuantity: integer('order_quantity').notNull(), // lot size / qty per replenishment (Lo)
     numberOfCards: integer('number_of_cards').notNull().default(1), // cards in this loop
-    safetyStockDays: numeric('safety_stock_days', { precision: 5, scale: 1 }).default('0'),
+    wipLimit: integer('wip_limit'), // max cards in-flight simultaneously (Wi)
+    safetyStockDays: numeric('safety_stock_days', { precision: 5, scale: 1 }).default('0'), // (Sa)
 
     // ── Supplier/Source Assignment ──
     primarySupplierId: uuid('primary_supplier_id'), // for procurement loops
@@ -174,6 +175,12 @@ export const kanbanParameterHistory = kanbanSchema.table(
     newOrderQuantity: integer('new_order_quantity'),
     previousNumberOfCards: integer('previous_number_of_cards'),
     newNumberOfCards: integer('new_number_of_cards'),
+    previousWipLimit: integer('previous_wip_limit'),
+    newWipLimit: integer('new_wip_limit'),
+    previousSafetyStockDays: numeric('previous_safety_stock_days', { precision: 5, scale: 1 }),
+    newSafetyStockDays: numeric('new_safety_stock_days', { precision: 5, scale: 1 }),
+    previousLeadTimeDays: integer('previous_lead_time_days'),
+    newLeadTimeDays: integer('new_lead_time_days'),
     reason: text('reason'),
     changedByUserId: uuid('changed_by_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -198,6 +205,7 @@ export const reloWisaRecommendations = kanbanSchema.table(
     recommendedMinQuantity: integer('recommended_min_quantity'),
     recommendedOrderQuantity: integer('recommended_order_quantity'),
     recommendedNumberOfCards: integer('recommended_number_of_cards'),
+    recommendedWipLimit: integer('recommended_wip_limit'),
     confidenceScore: numeric('confidence_score', { precision: 5, scale: 2 }), // 0.00 - 100.00
     reasoning: text('reasoning'), // AI/algorithm explanation
     dataPointsUsed: integer('data_points_used'), // number of cycles analyzed

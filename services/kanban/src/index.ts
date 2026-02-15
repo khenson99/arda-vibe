@@ -16,6 +16,7 @@ import { velocityRouter } from './routes/velocity.routes.js';
 import { printJobsRouter } from './routes/print-jobs.routes.js';
 import { lifecycleRouter } from './routes/lifecycle.routes.js';
 import { cardTemplatesRouter } from './routes/card-templates.routes.js';
+import { reloWisaRouter } from './routes/relowisa.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { initScanDedupeManager, getScanDedupeManager } from './services/card-lifecycle.service.js';
 
@@ -57,6 +58,7 @@ app.use('/scan', scanRouter);
 app.use(authMiddleware);
 app.use(userActivityMiddleware('kanban', getCorrelationId));
 app.use('/loops', loopsRouter);
+app.use('/loops', reloWisaRouter);
 app.use('/cards', cardsRouter);
 app.use('/velocity', velocityRouter);
 app.use('/print-jobs', printJobsRouter);

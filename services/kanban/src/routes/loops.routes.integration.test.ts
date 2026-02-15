@@ -387,16 +387,16 @@ describe('loop audit writes', () => {
     expect(entry.entityId).toBe('loop-1');
     expect(entry.tenantId).toBe('tenant-1');
     expect(entry.userId).toBe('user-1');
-    expect(entry.previousState).toEqual({
+    expect(entry.previousState).toEqual(expect.objectContaining({
       minQuantity: 10,
       orderQuantity: 20,
       numberOfCards: 3,
-    });
-    expect(entry.newState).toEqual({
+    }));
+    expect(entry.newState).toEqual(expect.objectContaining({
       minQuantity: 15,
       orderQuantity: 20,
       numberOfCards: 3,
-    });
+    }));
     expect(entry.metadata).toEqual({ reason: 'Demand spike adjustment' });
   });
 });
