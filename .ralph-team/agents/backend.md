@@ -160,22 +160,39 @@ patterns, gotchas, and conventions.
 
 ### Express Routes
 - Register routers in service index.ts with `app.use(prefix, router)`
-- Middleware order: helmet → cors → express.json → correlationMiddleware → health → authMiddleware → userActivityMiddleware → routes → errorHandler
+- Middleware order: helmet → cors → express.json → routes → errorHandler
 - Use route-level middleware for RBAC: `router.post('/path', requireRole('admin'), handler)`
 
-### My Business / Process Shop Elements Pattern
-- Business configuration tables (departments, item_types, item_subtypes, use_cases) live in catalog schema
-- All tables include: id, tenantId, name, code, description, colorHex, sortOrder, isActive, timestamps
-- colorHex (varchar 7, nullable) supports tenant color-coding system (#439)
-- Hierarchical relationships: itemSubtypes → itemTypes (FK with CASCADE), storageLocations → facilities (FK with CASCADE)
-- Cascading soft-delete: deactivating parent also deactivates children (same transaction)
-- includeInactive=true query param on list endpoints allows admin to view deactivated elements
-- includeSubtypes=true on GET /item-types uses Drizzle relational query `with: { subtypes: true }`
-- Facilities upgraded from read-only to full CRUD (create, update, deactivate)
-- Storage locations nested under facilities: /facilities/:id/storage-locations
+### ReLoWiSa Pattern
+- ReLoWiSa = Reorder (Re), Lot size (Lo), WIP limit (Wi), Safety stock (Sa)
+- Maps to schema: minQuantity=reorderPoint, orderQuantity=lotSize, wipLimit=wipLimit, safetyStockDays=safetyStock, statedLeadTimeDays=leadTime
+- Dedicated endpoints at /loops/:loopId/relowisa (GET summary, PUT update, POST apply recommendation)
+- Threshold indicators: nearReorderPoint (inFlight <= min*1.2), atWipLimit (inFlight >= wipLimit), belowSafetyStock (inFlight < min)
+- Recommendation lifecycle: pending → approved/rejected. Only pending can be acted on.
+- changeType 'relowisa_approved' in parameter history distinguishes system recommendations from manual changes
+- Drizzle insert type safety: use inline objects with conditional spreads, NOT Record<string, unknown>
 
-### Migration Safety CI
-- Check regex: `DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM` — even in SQL comments triggers failure
-- Fix: add `migration-approved` label to PR, then re-run failed CI job
-- Re-run specific failed job: `gh run rerun <run-id> --failed`
-- Pure ADD COLUMN / CREATE TABLE migrations don't trigger the check
+### Receiving Integration Pattern
+- Receipt processing: TX creates receipt + lines + exceptions → updates order status → transitions kanban cards
+- Inventory update runs OUTSIDE main TX: adjustQuantity has its own TX with row-level FOR UPDATE locking
+- Must upsertInventory before adjustQuantity (ensures ledger row exists for first-time receipts)
+- Transfer orders: 2 inventory adjustments (increment qtyOnHand + decrement qtyInTransit at destination)
+- Kanban card transitions: only cards in 'ordered' or 'in_transit' stages transition to 'received'
+- PO card IDs from purchaseOrderLines.kanbanCardId; WO/TO have direct kanbanCardId field
+- Card transition metadata includes receiptId, orderId, orderType for full traceability
+- Expected orders: POs in sent/acknowledged/partially_received; TOs in shipped/in_transit; WOs in in_progress/scheduled
+- Receiving history: paginated via getReceivingHistory with orderType/status filters
+- Test pattern: vi.hoisted() for inventory-ledger.service mocks, mockReset + mockImplementation in beforeEach
+
+### Order History & Resolution Workflows
+- 3 new tables: order_issues, order_issue_resolution_steps, order_notes (all in orders schema)
+- 4 new enums: order_issue_category, order_issue_priority, order_issue_status, resolution_action_type
+- Polymorphic pattern (orderId + orderType) matches receipts/receivingExceptions
+- Rich detail endpoint aggregates: order+lines, audit timeline, receipts+exceptions, issues+steps, notes
+- Issue lifecycle: open → in_progress → waiting_vendor/escalated → resolved → closed
+- Auto-transition: adding a resolution step to an open issue sets status to in_progress
+- Issue creation auto-adds an initial "note_added" resolution step for audit completeness
+- Unified order history: queries all 3 order types, merges, sorts by updatedAt DESC, enriches with issue counts
+- Issue filters use selectDistinct to find order IDs matching issue criteria, then join back to order tables
+- Events: order.issue_created, order.issue_status_changed — added to ArdaEvent union + gateway event mapper
+- All mutations write audit entries and publish events

@@ -86,6 +86,8 @@ export function mapBackendEventToWSEventType(event: ArdaEvent): WSEventType | nu
     case 'security.token.revoked':
     case 'security.authorization.denied':
     case 'security.tenant.context_violation':
+    case 'order.issue_created':
+    case 'order.issue_status_changed':
       return null;
   }
 }
