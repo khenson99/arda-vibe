@@ -282,10 +282,10 @@ describe('Gmail OAuth Routes', () => {
       expect(res.body.sent).toBe(true);
 
       // Verify attachment was decoded from base64
-      const callArgs = gmailServiceMock.sendEmail.mock.calls[0][1];
-      expect(callArgs.attachments[0].filename).toBe('PO-12345.pdf');
-      expect(callArgs.attachments[0].content).toBeInstanceOf(Buffer);
-      expect(callArgs.attachments[0].content.toString()).toBe('fake-pdf-content');
+      const callArgs = gmailServiceMock.sendEmail.mock.calls[0] as unknown as [string, Record<string, any>];
+      expect(callArgs[1].attachments[0].filename).toBe('PO-12345.pdf');
+      expect(callArgs[1].attachments[0].content).toBeInstanceOf(Buffer);
+      expect(callArgs[1].attachments[0].content.toString()).toBe('fake-pdf-content');
     });
 
     it('validates required fields', async () => {
@@ -331,9 +331,9 @@ describe('Gmail OAuth Routes', () => {
       });
 
       expect(res.status).toBe(200);
-      const callArgs = gmailServiceMock.sendEmail.mock.calls[0][1];
-      expect(callArgs.cc).toEqual(['cc@example.com']);
-      expect(callArgs.bcc).toEqual(['bcc@example.com']);
+      const callArgs = gmailServiceMock.sendEmail.mock.calls[0] as unknown as [string, Record<string, any>];
+      expect(callArgs[1].cc).toEqual(['cc@example.com']);
+      expect(callArgs[1].bcc).toEqual(['bcc@example.com']);
     });
   });
 });
