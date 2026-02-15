@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq, and, gte, lte, sql, desc } from 'drizzle-orm';
+import { eq, and, gte, lte, lt, sql, desc } from 'drizzle-orm';
 import { db, schema, writeAuditEntry } from '@arda/db';
 import { requireRole, type AuthRequest, type AuditContext } from '@arda/auth-utils';
 import { AppError } from '../middleware/error-handler.js';
@@ -295,12 +295,16 @@ demandSignalsRouter.get('/analytics/top-products', canDirectorRead, async (req: 
     const previousConditions = [
       eq(demandSignals.tenantId, tenantId),
       gte(demandSignals.demandDate, previousStartDate),
-      lte(demandSignals.demandDate, startDate),
+      lt(demandSignals.demandDate, startDate),
     ];
 
     if (query.signalType) {
       currentConditions.push(eq(demandSignals.signalType, query.signalType));
       previousConditions.push(eq(demandSignals.signalType, query.signalType));
+    }
+    if (query.partId) {
+      currentConditions.push(eq(demandSignals.partId, query.partId));
+      previousConditions.push(eq(demandSignals.partId, query.partId));
     }
     if (query.facilityId) {
       currentConditions.push(eq(demandSignals.facilityId, query.facilityId));

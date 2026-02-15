@@ -178,6 +178,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn(() => ({})),
   and: vi.fn(() => ({})),
   gte: vi.fn(() => ({})),
+  lt: vi.fn(() => ({})),
   lte: vi.fn(() => ({})),
   desc: vi.fn(() => ({})),
   sql: Object.assign(vi.fn(() => ({})), { raw: vi.fn(() => ({})) }),
@@ -219,6 +220,7 @@ vi.mock('@arda/auth-utils', () => ({
 }));
 
 // ─── Imports (after mocks) ──────────────────────────────────────────
+import { eq, lt } from 'drizzle-orm';
 import { demandSignalsRouter } from './demand-signals.routes.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -309,6 +311,8 @@ describe('Demand Signals API', () => {
     dbSetup.resetMocks();
     testState.auditEntries = [];
     mockWriteAuditEntry.mockClear();
+    (eq as unknown as { mockClear: () => void }).mockClear();
+    (lt as unknown as { mockClear: () => void }).mockClear();
   });
 
   // ─── List ──────────────────────────────────────────────────────────
@@ -725,6 +729,57 @@ describe('Demand Signals API', () => {
       const second = (res.body.data as Array<Record<string, unknown>>)[1];
       expect(top.trendDirection).toBe('up');
       expect(second.trendDirection).toBe('down');
+    });
+
+    it('applies partId filter and uses strict previous-window boundary', async () => {
+      const partId = '00000000-0000-0000-0000-000000000001';
+
+      dbSetup.dbMock.select
+        .mockImplementationOnce(() =>
+          createSelectBuilder([
+            {
+              partId,
+              totalDemanded: 10,
+              signalCount: 1,
+            },
+          ]) as any,
+        )
+        .mockImplementationOnce(() =>
+          createSelectBuilder([
+            {
+              partId,
+              totalDemanded: 5,
+            },
+          ]) as any,
+        );
+
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'director-1',
+        role: 'ecommerce_director',
+      });
+      const res = await getJson(app, `/demand-signals/analytics/top-products?rangeDays=30&partId=${partId}`);
+
+      expect(res.status).toBe(200);
+      expect((eq as unknown as { mock: { calls: unknown[][] } }).mock.calls).toEqual(
+        expect.arrayContaining([[schemaMock.demandSignals.partId, partId]]),
+      );
+      expect((lt as unknown as { mock: { calls: unknown[][] } }).mock.calls.length).toBeGreaterThan(0);
+    });
+
+    it('allows tenant_admin for top-products', async () => {
+      dbSetup.dbMock.select
+        .mockImplementationOnce(() => createSelectBuilder([]) as any)
+        .mockImplementationOnce(() => createSelectBuilder([]) as any);
+
+      const app = createApp({
+        tenantId: 'tenant-1',
+        sub: 'admin-1',
+        role: 'tenant_admin',
+      });
+      const res = await getJson(app, '/demand-signals/analytics/top-products');
+
+      expect(res.status).toBe(200);
     });
 
     it('returns 403 for non-director role', async () => {
