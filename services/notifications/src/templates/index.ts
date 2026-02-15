@@ -38,6 +38,30 @@ export const templateRegistry: Record<TemplateType, (data: any) => { subject: st
 };
 
 /**
+ * Map a notification type to the email template type used for rendering.
+ * Returns undefined if no template mapping exists (the notification type
+ * does not have a dedicated email template).
+ */
+export function resolveTemplateType(notificationType: string): TemplateType | undefined {
+  const map: Record<string, TemplateType> = {
+    exception_alert: 'exception',
+    stockout_warning: 'stockout',
+    po_created: 'po_lifecycle',
+    po_sent: 'po_lifecycle',
+    po_received: 'po_lifecycle',
+    wo_status_change: 'order_status',
+    transfer_status_change: 'order_status',
+    system_alert: 'system_alert',
+    production_hold: 'system_alert',
+    automation_escalated: 'system_alert',
+    card_triggered: 'system_alert',
+    receiving_completed: 'system_alert',
+    relowisa_recommendation: 'system_alert',
+  };
+  return map[notificationType];
+}
+
+/**
  * Render a notification email by template type.
  * Throws if the template type is not found in the registry.
  */

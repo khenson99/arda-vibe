@@ -139,3 +139,22 @@ export const notificationDeliveries = notificationsSchema.table(
     index('notif_deliveries_status_created_idx').on(table.status, table.createdAt),
   ]
 );
+
+// ─── Digest Run Markers ──────────────────────────────────────────────
+export const digestRunMarkers = notificationsSchema.table(
+  'digest_run_markers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }).notNull(),
+    notificationCount: integer('notification_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('digest_markers_user_idx').on(table.userId),
+    index('digest_markers_tenant_idx').on(table.tenantId),
+    index('digest_markers_last_run_idx').on(table.lastRunAt),
+  ]
+);

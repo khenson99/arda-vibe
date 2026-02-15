@@ -1,6 +1,7 @@
 import { getEventBus, type ArdaEvent } from '@arda/events';
 import { db, schema } from '@arda/db';
 import { and, eq } from 'drizzle-orm';
+import { dispatchNotificationChannels, type DispatchContext } from './channel-dispatch.js';
 
 type OrderStatusChangedEvent = Extract<ArdaEvent, { type: 'order.status_changed' }>;
 type CardTransitionNotificationEvent =
@@ -110,7 +111,10 @@ function buildOrderStatusNotification(event: OrderStatusChangedEvent): {
   };
 }
 
-export async function startEventListener(redisUrl: string): Promise<void> {
+export async function startEventListener(
+  redisUrl: string,
+  dispatchCtx?: DispatchContext,
+): Promise<void> {
   const eventBus = getEventBus(redisUrl);
 
   await eventBus.subscribeGlobal(async (event: ArdaEvent) => {
@@ -121,7 +125,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           // Create notification for relevant users when cards move to key stages
           if (shouldNotifyCardStage(event.toStage)) {
             const transitionEvent = event as CardTransitionNotificationEvent;
-            await createNotification(eventBus, {
+            await createNotification(eventBus, dispatchCtx, {
               tenantId: transitionEvent.tenantId,
               type: 'card_triggered',
               title: `Kanban card moved to ${transitionEvent.toStage}`,
@@ -138,7 +142,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           break;
 
         case 'order.created':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'po_created',
             title: `New ${event.orderType.replace('_', ' ')} created`,
@@ -154,7 +158,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
 
         case 'order.status_changed': {
           const notification = buildOrderStatusNotification(event);
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: notification.type,
             title: notification.title,
@@ -172,7 +176,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
         }
 
         case 'queue.risk_detected':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'stockout_warning',
             title:
@@ -195,7 +199,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           break;
 
         case 'relowisa.recommendation':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'relowisa_recommendation',
             title: 'New ReLoWiSa recommendation',
@@ -206,7 +210,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           break;
 
         case 'loop.parameters_changed':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'system_alert',
             title: 'Kanban parameters updated',
@@ -222,7 +226,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
 
         case 'receiving.completed': {
           const hasExceptions = event.exceptionsCreated > 0;
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'receiving_completed',
             title: hasExceptions
@@ -246,7 +250,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
         }
 
         case 'receiving.exception_created':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'exception_alert',
             title: `${formatExceptionType(event.exceptionType)} — ${event.severity} severity`,
@@ -265,7 +269,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           break;
 
         case 'receiving.exception_resolved':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'system_alert',
             title: `Exception resolved — ${formatResolutionType(event.resolutionType)}`,
@@ -282,7 +286,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           break;
 
         case 'production.hold':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'production_hold',
             title: 'Work order placed on hold',
@@ -299,7 +303,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
           break;
 
         case 'automation.escalated':
-          await createNotification(eventBus, {
+          await createNotification(eventBus, dispatchCtx, {
             tenantId: event.tenantId,
             type: 'automation_escalated',
             title: 'Automation escalation',
@@ -326,6 +330,7 @@ export async function startEventListener(redisUrl: string): Promise<void> {
 
 async function createNotification(
   eventBus: ReturnType<typeof getEventBus>,
+  dispatchCtx: DispatchContext | undefined,
   params: {
     tenantId: string;
     userId?: string;
@@ -387,6 +392,30 @@ async function createNotification(
         console.error(
           `[notifications] Failed to publish notification.created event for ${notification.id}`
         );
+      }
+
+      // Dispatch to email/webhook channels (non-blocking on errors)
+      if (dispatchCtx) {
+        try {
+          await dispatchNotificationChannels(
+            {
+              notificationId: notification.id,
+              tenantId: params.tenantId,
+              userId: notification.userId,
+              type: notification.type,
+              title: notification.title,
+              body: params.body,
+              actionUrl: params.actionUrl,
+              metadata: params.metadata,
+            },
+            dispatchCtx,
+          );
+        } catch (dispatchErr) {
+          console.error(
+            `[notifications] Channel dispatch failed for ${notification.id}:`,
+            dispatchErr,
+          );
+        }
       }
     })
   );

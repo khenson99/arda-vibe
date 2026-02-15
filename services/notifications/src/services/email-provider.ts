@@ -61,22 +61,6 @@ export class SendGridProvider implements EmailProvider {
   }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────
-
-/**
- * RFC 2047 encode a Subject header when it contains non-ASCII characters.
- * Uses Base64 ("B") encoding with UTF-8 charset.
- * ASCII-only subjects are returned unchanged.
- */
-function encodeSubjectRfc2047(subject: string): string {
-  // eslint-disable-next-line no-control-regex
-  if (/[^\x00-\x7F]/.test(subject)) {
-    const encoded = Buffer.from(subject, 'utf-8').toString('base64');
-    return `=?UTF-8?B?${encoded}?=`;
-  }
-  return subject;
-}
-
 // ─── SES Provider ───────────────────────────────────────────────────────
 export class SESProvider implements EmailProvider {
   readonly name = 'ses';
@@ -98,7 +82,7 @@ export class SESProvider implements EmailProvider {
     const headerLines = [
       `From: ${from}`,
       `To: ${message.to}`,
-      `Subject: ${encodeSubjectRfc2047(message.subject)}`,
+      `Subject: ${message.subject}`,
       'MIME-Version: 1.0',
       'Content-Type: text/html; charset=UTF-8',
     ];
