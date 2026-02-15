@@ -37,6 +37,17 @@ export {
   TooltipContent,
   TooltipProvider,
 } from "./tooltip"
+export {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "./select"
 export { Skeleton } from "./skeleton"
+export { Switch } from "./switch"
 export { Toaster } from "./sonner"
 export { SidePanel } from "./side-panel"

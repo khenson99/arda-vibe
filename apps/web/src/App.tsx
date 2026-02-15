@@ -21,6 +21,7 @@ import { WODetailRoute } from "@/pages/orders/wo-detail";
 import { AnalyticsRoute } from "@/pages/analytics";
 import { AuditRoute } from "@/pages/admin/audit";
 import { CrossLocationInventoryRoute } from "@/pages/cross-location-inventory";
+import { NotificationPreferencesRoute } from "@/pages/settings/notification-preferences";
 import type { AuthResponse, AuthSession } from "@/types";
 
 function detectGuestMobileImportLink(): boolean {
@@ -144,6 +145,7 @@ function App() {
           <Route path="admin/audit" element={<ErrorBoundary><AuditRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="scan" element={<ErrorBoundary><ScanRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="scan/:cardId" element={<ErrorBoundary><ScanRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
+          <Route path="settings/notifications" element={<ErrorBoundary><NotificationPreferencesRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           {/* Legacy redirects */}
           <Route path="notifications" element={<Navigate to="/orders" replace />} />
           <Route path="order-pulse" element={<Navigate to="/" replace />} />
