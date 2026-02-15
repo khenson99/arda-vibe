@@ -66,6 +66,16 @@ export const Permission = {
   CATALOG_BOM_CREATE: 'catalog:bom:create',
   CATALOG_BOM_DELETE: 'catalog:bom:delete',
 
+  // ─── Catalog Imports (MVP-21) ──────────────────────────────────────
+  CATALOG_IMPORTS_READ: 'catalog:imports:read',
+  CATALOG_IMPORTS_CREATE: 'catalog:imports:create',
+  CATALOG_IMPORTS_REVIEW: 'catalog:imports:review',
+  CATALOG_IMPORTS_APPLY: 'catalog:imports:apply',
+
+  // ─── Catalog AI Config (MVP-21) ────────────────────────────────────
+  CATALOG_AI_CONFIG_READ: 'catalog:ai_config:read',
+  CATALOG_AI_CONFIG_UPDATE: 'catalog:ai_config:update',
+
   // ─── Notifications ─────────────────────────────────────────────────
   NOTIFICATIONS_READ: 'notifications:notifications:read',
   NOTIFICATIONS_UPDATE: 'notifications:notifications:update',
@@ -123,6 +133,13 @@ export const ROLE_PERMISSIONS: Record<Exclude<UserRole, 'tenant_admin'>, Readonl
     Permission.CATALOG_CATEGORIES_UPDATE,
     Permission.CATALOG_BOM_READ,
     Permission.CATALOG_BOM_CREATE,
+    // Catalog Imports — create and review
+    Permission.CATALOG_IMPORTS_READ,
+    Permission.CATALOG_IMPORTS_CREATE,
+    Permission.CATALOG_IMPORTS_REVIEW,
+    // Catalog AI Config — manage AI provider settings
+    Permission.CATALOG_AI_CONFIG_READ,
+    Permission.CATALOG_AI_CONFIG_UPDATE,
     // Notifications — own
     Permission.NOTIFICATIONS_READ,
     Permission.NOTIFICATIONS_UPDATE,
@@ -163,6 +180,14 @@ export const ROLE_PERMISSIONS: Record<Exclude<UserRole, 'tenant_admin'>, Readonl
     Permission.CATALOG_SUPPLIERS_LINK_PARTS,
     Permission.CATALOG_CATEGORIES_READ,
     Permission.CATALOG_BOM_READ,
+    // Catalog Imports — full access including apply
+    Permission.CATALOG_IMPORTS_READ,
+    Permission.CATALOG_IMPORTS_CREATE,
+    Permission.CATALOG_IMPORTS_REVIEW,
+    Permission.CATALOG_IMPORTS_APPLY,
+    // Catalog AI Config — manage AI provider settings
+    Permission.CATALOG_AI_CONFIG_READ,
+    Permission.CATALOG_AI_CONFIG_UPDATE,
     // Notifications — own
     Permission.NOTIFICATIONS_READ,
     Permission.NOTIFICATIONS_UPDATE,
@@ -193,6 +218,8 @@ export const ROLE_PERMISSIONS: Record<Exclude<UserRole, 'tenant_admin'>, Readonl
     Permission.CATALOG_SUPPLIERS_READ,
     Permission.CATALOG_CATEGORIES_READ,
     Permission.CATALOG_BOM_READ,
+    // Catalog Imports — read only
+    Permission.CATALOG_IMPORTS_READ,
     // Notifications — own
     Permission.NOTIFICATIONS_READ,
     Permission.NOTIFICATIONS_UPDATE,
@@ -220,6 +247,8 @@ export const ROLE_PERMISSIONS: Record<Exclude<UserRole, 'tenant_admin'>, Readonl
     Permission.CATALOG_SUPPLIERS_READ,
     Permission.CATALOG_CATEGORIES_READ,
     Permission.CATALOG_BOM_READ,
+    // Catalog Imports — read only
+    Permission.CATALOG_IMPORTS_READ,
     // Notifications — own
     Permission.NOTIFICATIONS_READ,
     Permission.NOTIFICATIONS_UPDATE,
@@ -269,6 +298,10 @@ export const ROLE_PERMISSIONS: Record<Exclude<UserRole, 'tenant_admin'>, Readonl
     Permission.CATALOG_SUPPLIERS_READ,
     Permission.CATALOG_CATEGORIES_READ,
     Permission.CATALOG_BOM_READ,
+    // Catalog Imports — read only
+    Permission.CATALOG_IMPORTS_READ,
+    // Catalog AI Config — read only (for dashboards)
+    Permission.CATALOG_AI_CONFIG_READ,
     // Notifications — own
     Permission.NOTIFICATIONS_READ,
     Permission.NOTIFICATIONS_UPDATE,
