@@ -48,6 +48,7 @@ const schemaMock = vi.hoisted(() => {
     suppliers: makeTable('suppliers'),
     parts: makeTable('parts'),
     supplierParts: makeTable('supplier_parts'),
+    facilities: makeTable('facilities'),
     auditLog: makeTable('audit_log'),
     purchaseOrders: makeTable('purchase_orders'),
     purchaseOrderLines: makeTable('purchase_order_lines'),
@@ -125,6 +126,7 @@ const { dbMock, resetDbMockCalls } = vi.hoisted(() => {
       const result = testState.selectResults.shift() ?? [];
       return makeSelectBuilder(result);
     }),
+    execute: vi.fn(async () => testState.selectResults.shift() ?? []),
     transaction: vi.fn(async (callback: (tx: ReturnType<typeof makeTx>) => Promise<unknown>) =>
       callback(makeTx())
     ),
@@ -132,6 +134,7 @@ const { dbMock, resetDbMockCalls } = vi.hoisted(() => {
 
   const resetDbMockCalls = () => {
     dbMock.select.mockClear();
+    dbMock.execute.mockClear();
     dbMock.transaction.mockClear();
   };
 
@@ -221,6 +224,31 @@ async function postJson(
         ...headers,
       },
       body: JSON.stringify(body),
+    });
+
+    const json = (await response.json()) as Record<string, any>;
+    return { status: response.status, body: json };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+async function getJson(
+  app: express.Express,
+  path: string
+): Promise<{ status: number; body: Record<string, any> }> {
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to start test server');
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      headers: {
+        'user-agent': 'vitest-agent',
+        'x-forwarded-for': '203.0.113.10',
+      },
     });
 
     const json = (await response.json()) as Record<string, any>;
@@ -630,5 +658,240 @@ describe('order queue endpoint integration', () => {
     expect(
       testState.insertedAuditRows.filter((row) => row.action === 'order_queue.procurement_verified')
     ).toHaveLength(2);
+  });
+
+  it('GET /queue lists triggered cards with vendor details (supplier name, code, contact, website)', async () => {
+    // First select: base cards query
+    testState.selectResults = [
+      [
+        {
+          id: 'card-v-1',
+          cardNumber: 1,
+          currentStage: 'triggered',
+          currentStageEnteredAt: '2026-02-14T00:00:00Z',
+          linkedPurchaseOrderId: null,
+          linkedWorkOrderId: null,
+          linkedTransferOrderId: null,
+          loopId: 'loop-v-1',
+          loopType: 'procurement',
+          partId: 'part-v-1',
+          partName: 'Widget Alpha',
+          partNumber: 'WA-001',
+          facilityId: 'fac-v-1',
+          facilityName: 'Main Warehouse',
+          primarySupplierId: 'sup-v-1',
+          supplierName: 'Acme Supplies',
+          supplierCode: 'ACME',
+          supplierContactName: 'John Doe',
+          supplierRecipient: 'John',
+          supplierRecipientEmail: 'john@acme.com',
+          supplierContactEmail: 'orders@acme.com',
+          supplierContactPhone: '555-0100',
+          supplierWebsite: 'https://acme.example.com',
+          supplierPaymentTerms: 'Net 30',
+          supplierShippingTerms: 'FOB Destination',
+          supplierLeadTimeDays: 14,
+          supplierUnitCost: '12.50',
+          partUnitPrice: '25.00',
+          sourceFacilityId: null,
+          orderQuantity: 100,
+          minQuantity: 25,
+          numberOfCards: 2,
+        },
+      ],
+    ];
+    // Second result: draft PO lookup (db.execute)
+    dbMock.execute.mockResolvedValueOnce([]);
+
+    const app = createTestApp();
+    const response = await getJson(app, '/queue');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+
+    const procurementCards = response.body.data.procurement;
+    expect(procurementCards).toHaveLength(1);
+
+    const card = procurementCards[0];
+    expect(card.supplierName).toBe('Acme Supplies');
+    expect(card.supplierCode).toBe('ACME');
+    expect(card.supplierContactName).toBe('John Doe');
+    expect(card.supplierWebsite).toBe('https://acme.example.com');
+    expect(card.supplierLeadTimeDays).toBe(14);
+    expect(card.partName).toBe('Widget Alpha');
+    expect(card.partNumber).toBe('WA-001');
+    expect(card.facilityName).toBe('Main Warehouse');
+  });
+
+  it('GET /queue/:cardId returns structured detail view with nested supplier, part, and facility', async () => {
+    testState.selectResults = [
+      [
+        {
+          id: 'card-detail-1',
+          cardNumber: 1,
+          currentStage: 'triggered',
+          currentStageEnteredAt: '2026-02-14T08:00:00Z',
+          completedCycles: 3,
+          linkedPurchaseOrderId: null,
+          linkedWorkOrderId: null,
+          linkedTransferOrderId: null,
+          loopId: 'loop-detail-1',
+          loopType: 'procurement',
+          partId: 'part-detail-1',
+          partName: 'Bolt M8x30',
+          partNumber: 'BLT-M8-30',
+          partType: 'component',
+          partUom: 'each',
+          partUnitCost: '0.35',
+          partUnitPrice: '0.75',
+          facilityId: 'fac-detail-1',
+          facilityName: 'Plant A',
+          facilityCode: 'PLT-A',
+          primarySupplierId: 'sup-detail-1',
+          supplierName: 'FastBolts Inc',
+          supplierCode: 'FBLT',
+          supplierContactName: 'Jane Smith',
+          supplierContactEmail: 'sales@fastbolts.com',
+          supplierContactPhone: '555-0200',
+          supplierRecipient: 'Receiving Dept',
+          supplierRecipientEmail: 'receiving@fastbolts.com',
+          supplierWebsite: 'https://fastbolts.example.com',
+          supplierPaymentTerms: '2/10 Net 30',
+          supplierShippingTerms: 'FOB Origin',
+          supplierLeadTimeDays: 7,
+          supplierUnitCost: '0.30',
+          supplierPartLeadTimeDays: 5,
+          sourceFacilityId: null,
+          orderQuantity: 500,
+          minQuantity: 100,
+          numberOfCards: 3,
+          statedLeadTimeDays: 7,
+        },
+      ],
+    ];
+
+    const app = createTestApp();
+    const response = await getJson(app, '/queue/card-detail-1');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+
+    const data = response.body.data;
+    expect(data.id).toBe('card-detail-1');
+    expect(data.loopType).toBe('procurement');
+    expect(data.orderQuantity).toBe(500);
+
+    // Nested part object
+    expect(data.part).toEqual({
+      id: 'part-detail-1',
+      name: 'Bolt M8x30',
+      partNumber: 'BLT-M8-30',
+      type: 'component',
+      uom: 'each',
+      unitCost: '0.35',
+      unitPrice: '0.75',
+    });
+
+    // Nested facility object
+    expect(data.facility).toEqual({
+      id: 'fac-detail-1',
+      name: 'Plant A',
+      code: 'PLT-A',
+    });
+
+    // Nested supplier object with all vendor details
+    expect(data.supplier).toEqual({
+      id: 'sup-detail-1',
+      name: 'FastBolts Inc',
+      code: 'FBLT',
+      contactName: 'Jane Smith',
+      contactEmail: 'sales@fastbolts.com',
+      contactPhone: '555-0200',
+      recipient: 'Receiving Dept',
+      recipientEmail: 'receiving@fastbolts.com',
+      website: 'https://fastbolts.example.com',
+      paymentTerms: '2/10 Net 30',
+      shippingTerms: 'FOB Origin',
+      statedLeadTimeDays: 7,
+      unitCost: '0.30',
+      partLeadTimeDays: 5,
+    });
+  });
+
+  it('GET /queue/:cardId returns 404 for non-existent card', async () => {
+    testState.selectResults = [[]];
+
+    const app = createTestApp();
+    const response = await getJson(app, '/queue/non-existent-id');
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toContain('Card not found');
+  });
+
+  it('GET /queue/:cardId returns null supplier when card has no primary supplier', async () => {
+    testState.selectResults = [
+      [
+        {
+          id: 'card-no-sup-1',
+          cardNumber: 1,
+          currentStage: 'triggered',
+          currentStageEnteredAt: '2026-02-14T10:00:00Z',
+          completedCycles: 0,
+          linkedPurchaseOrderId: null,
+          linkedWorkOrderId: null,
+          linkedTransferOrderId: null,
+          loopId: 'loop-no-sup-1',
+          loopType: 'production',
+          partId: 'part-no-sup-1',
+          partName: 'Assembly X',
+          partNumber: 'ASM-X',
+          partType: 'subassembly',
+          partUom: 'each',
+          partUnitCost: '50.00',
+          partUnitPrice: '100.00',
+          facilityId: 'fac-no-sup-1',
+          facilityName: 'Plant B',
+          facilityCode: 'PLT-B',
+          primarySupplierId: null,
+          supplierName: null,
+          supplierCode: null,
+          supplierContactName: null,
+          supplierContactEmail: null,
+          supplierContactPhone: null,
+          supplierRecipient: null,
+          supplierRecipientEmail: null,
+          supplierWebsite: null,
+          supplierPaymentTerms: null,
+          supplierShippingTerms: null,
+          supplierLeadTimeDays: null,
+          supplierUnitCost: null,
+          supplierPartLeadTimeDays: null,
+          sourceFacilityId: null,
+          orderQuantity: 10,
+          minQuantity: 5,
+          numberOfCards: 1,
+          statedLeadTimeDays: 3,
+        },
+      ],
+    ];
+
+    const app = createTestApp();
+    const response = await getJson(app, '/queue/card-no-sup-1');
+
+    expect(response.status).toBe(200);
+    const data = response.body.data;
+    expect(data.supplier).toBeNull();
+    expect(data.part).toEqual(
+      expect.objectContaining({
+        id: 'part-no-sup-1',
+        name: 'Assembly X',
+      })
+    );
+    expect(data.facility).toEqual(
+      expect.objectContaining({
+        id: 'fac-no-sup-1',
+        name: 'Plant B',
+      })
+    );
   });
 });
