@@ -55,4 +55,6 @@ export interface TenantSettings {
   auditRetentionDays?: number;
   /** Whether automatic audit log archiving is enabled. Default: false. */
   auditArchiveEnabled?: boolean;
+  /** Whether outbound email is paused due to high bounce rate. Default: false. */
+  emailPaused?: boolean;
 }

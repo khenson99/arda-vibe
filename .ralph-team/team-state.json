@@ -1,147 +1,92 @@
 {
   "tickets": {
-    "250": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 382,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. Stacked into PR #382. All new tests pass. CI failures are pre-existing on main (kanban/orders/web) + Migration Safety (needs migration-approved label). Ready for merge."
-    },
-    "251": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 382,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. Same PR #382 as #250. Ready for merge."
-    },
-    "252": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 382,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. writeAuditEntry + auditContextMiddleware. 33 new tests. Same PR #382. All review feedback resolved. Ready for merge."
-    },
-    "253": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 385,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. PR #385. Refactored 6 source files to use writeAuditEntry. 462 tests passing. Ready for merge."
-    },
-    "254": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 386,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. PR #386. Auth audit writes for login/register/OAuth/API keys. 64 tests passing. Ready for merge."
-    },
-    "255": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 387,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. PR #387. Kanban loop/card audit writes and stage-transition mirroring. 262 tests passing. Ready for merge."
-    },
-    "256": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 388,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. PR #388. Catalog audit writes for part/supplier/BOM. 47 tests passing. Ready for merge."
-    },
-    "257": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 389,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. PR #389. Category/notifications audit writes (facilities/storage read-only, no audit needed). 7 new tests. Ready for merge."
-    },
-    "258": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 390,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. PR #390. Enhanced audit query APIs: actorName/entityName/search/includeArchived filters, entity history, distinct actions/entity-types endpoints, UNION ALL archive support. 17 new tests, 479 total passing."
-    },
-    "259": {
-      "status": "pr-open",
-      "agent": "backend-engineer",
-      "pr_number": 393,
-      "reviewed": false,
-      "review_decision": null,
-      "reviewed_at": "",
-      "ci_status": "passing-except-preexisting",
-      "notes": "Code complete. PR #393. Hash-chain integrity check endpoint (tenant_admin only). Recompute hashes, detect violations. 14 new tests, 493 total passing."
-    }
+    "342": { "status": "ready", "wave": 1, "agent_type": "backend-engineer", "milestone": "MVP-17", "title": "T7 digest scheduler" },
+    "346": { "status": "ready", "wave": 1, "agent_type": "backend-engineer", "milestone": "MVP-17", "title": "T11 retention/bounce" },
+    "347": { "status": "ready", "wave": 1, "agent_type": "frontend-engineer", "milestone": "MVP-17", "title": "T12 bell/popover" },
+    "348": { "status": "ready", "wave": 1, "agent_type": "frontend-engineer", "milestone": "MVP-17", "title": "T13 notifications page" },
+    "349": { "status": "ready", "wave": 1, "agent_type": "frontend-engineer", "milestone": "MVP-17", "title": "T14 settings matrix" },
+    "350": { "status": "ready", "wave": 1, "agent_type": "qa", "milestone": "MVP-17", "title": "T15 integration/E2E" },
+    "351": { "status": "ready", "wave": 1, "agent_type": "design-enforcer", "milestone": "MVP-17", "title": "T16 design compliance" },
+    "191": { "status": "ready", "wave": 2, "agent_type": "backend-engineer", "milestone": "MVP-13", "title": "T1 schema" },
+    "192": { "status": "ready", "wave": 2, "agent_type": "backend-engineer", "milestone": "MVP-13", "title": "T2 customer APIs" },
+    "193": { "status": "ready", "wave": 2, "agent_type": "backend-engineer", "milestone": "MVP-13", "title": "T3 sales orders" },
+    "194": { "status": "ready", "wave": 2, "agent_type": "backend-engineer", "milestone": "MVP-13", "title": "T4 approval flow" },
+    "195": { "status": "ready", "wave": 2, "agent_type": "backend-engineer", "milestone": "MVP-13", "title": "T5 restock ETA" },
+    "196": { "status": "ready", "wave": 2, "agent_type": "backend-engineer", "milestone": "MVP-13", "title": "T6 visibility" },
+    "197": { "status": "ready", "wave": 2, "agent_type": "backend-engineer", "milestone": "MVP-13", "title": "T7 demand signals" },
+    "198": { "status": "ready", "wave": 2, "agent_type": "frontend-engineer", "milestone": "MVP-13", "title": "T8 customer list" },
+    "199": { "status": "ready", "wave": 2, "agent_type": "frontend-engineer", "milestone": "MVP-13", "title": "T9 sales order entry" },
+    "200": { "status": "ready", "wave": 2, "agent_type": "frontend-engineer", "milestone": "MVP-13", "title": "T10 salesperson dashboard" },
+    "201": { "status": "ready", "wave": 2, "agent_type": "frontend-engineer", "milestone": "MVP-13", "title": "T11 catalog dashboard" },
+    "202": { "status": "ready", "wave": 2, "agent_type": "design-enforcer", "milestone": "MVP-13", "title": "T12 design compliance" },
+    "203": { "status": "ready", "wave": 2, "agent_type": "qa", "milestone": "MVP-13", "title": "T13 E2E" },
+    "204": { "status": "ready", "wave": 3, "agent_type": "backend-engineer", "milestone": "MVP-14", "title": "T1 inference engine" },
+    "205": { "status": "ready", "wave": 3, "agent_type": "backend-engineer", "milestone": "MVP-14", "title": "T2 repositories" },
+    "206": { "status": "ready", "wave": 3, "agent_type": "backend-engineer", "milestone": "MVP-14", "title": "T3 loop metrics" },
+    "207": { "status": "ready", "wave": 3, "agent_type": "backend-engineer", "milestone": "MVP-14", "title": "T4 recommendations API" },
+    "208": { "status": "ready", "wave": 3, "agent_type": "backend-engineer", "milestone": "MVP-14", "title": "T5 event-driven generation" },
+    "209": { "status": "ready", "wave": 3, "agent_type": "backend-engineer", "milestone": "MVP-14", "title": "T6 batch scheduler" },
+    "210": { "status": "ready", "wave": 3, "agent_type": "backend-engineer", "milestone": "MVP-14", "title": "T7 approval workflow" },
+    "211": { "status": "ready", "wave": 3, "agent_type": "frontend-engineer", "milestone": "MVP-14", "title": "T8 recommendations list" },
+    "212": { "status": "ready", "wave": 3, "agent_type": "frontend-engineer", "milestone": "MVP-14", "title": "T9 detail panel" },
+    "213": { "status": "ready", "wave": 3, "agent_type": "frontend-engineer", "milestone": "MVP-14", "title": "T10 approve/reject" },
+    "214": { "status": "ready", "wave": 3, "agent_type": "frontend-engineer", "milestone": "MVP-14", "title": "T11 history/dashboard" },
+    "215": { "status": "ready", "wave": 3, "agent_type": "qa", "milestone": "MVP-14", "title": "T12 backend tests" },
+    "216": { "status": "ready", "wave": 3, "agent_type": "design-enforcer", "milestone": "MVP-14", "title": "T13 design compliance" },
+    "217": { "status": "ready", "wave": 3, "agent_type": "qa", "milestone": "MVP-14", "title": "T14 E2E" },
+    "218": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-15", "title": "T1 contracts" },
+    "219": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-15", "title": "T2 EventBus" },
+    "220": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-15", "title": "T3 gateway mapper" },
+    "221": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-15", "title": "T4 reconnection" },
+    "222": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-15", "title": "T5 backpressure" },
+    "223": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-15", "title": "T6 KPI events" },
+    "224": { "status": "ready", "wave": 4, "agent_type": "frontend-engineer", "milestone": "MVP-15", "title": "T7 useRealtimeEvents" },
+    "225": { "status": "ready", "wave": 4, "agent_type": "frontend-engineer", "milestone": "MVP-15", "title": "T8 connection status" },
+    "226": { "status": "ready", "wave": 4, "agent_type": "frontend-engineer", "milestone": "MVP-15", "title": "T9 wire to views" },
+    "227": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-15", "title": "T10 event catalog" },
+    "228": { "status": "ready", "wave": 4, "agent_type": "qa", "milestone": "MVP-15", "title": "T11 backend suite" },
+    "229": { "status": "ready", "wave": 4, "agent_type": "qa", "milestone": "MVP-15", "title": "T12 reconnection tests" },
+    "230": { "status": "ready", "wave": 4, "agent_type": "design-enforcer", "milestone": "MVP-15", "title": "T13 design compliance" },
+    "231": { "status": "ready", "wave": 4, "agent_type": "qa", "milestone": "MVP-15", "title": "T14 E2E" },
+    "232": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T1 API key schema" },
+    "233": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T2 external-order columns" },
+    "234": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T3 webhook/idempotency tables" },
+    "235": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T4 API key auth middleware" },
+    "236": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T5 rate limits" },
+    "237": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T6 idempotency middleware" },
+    "238": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T7 router scaffold" },
+    "239": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T8 inventory endpoints" },
+    "240": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T9 catalog endpoints" },
+    "241": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T10 order intake" },
+    "242": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T11 order status" },
+    "243": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T12 webhook registration" },
+    "244": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T13 webhook delivery" },
+    "245": { "status": "ready", "wave": 4, "agent_type": "backend-engineer", "milestone": "MVP-16", "title": "T14 OpenAPI docs" },
+    "246": { "status": "ready", "wave": 4, "agent_type": "frontend-engineer", "milestone": "MVP-16", "title": "T15 API key UX" },
+    "247": { "status": "ready", "wave": 4, "agent_type": "qa", "milestone": "MVP-16", "title": "T16 contract/load tests" },
+    "248": { "status": "ready", "wave": 4, "agent_type": "qa", "milestone": "MVP-16", "title": "T17 E2E" },
+    "249": { "status": "ready", "wave": 4, "agent_type": "design-enforcer", "milestone": "MVP-16", "title": "T18 design compliance" }
   },
   "agents": {
-    "architect": {
-      "status": "working",
-      "current_ticket": null,
-      "iterations": 8
-    },
-    "backend": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "frontend": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "qa": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "design-enforcer": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 0
-    },
-    "backend-engineer": {
-      "status": "idle",
-      "current_ticket": null,
-      "iterations": 6,
-      "last_completed": 259,
-      "queue": []
-    }
+    "architect": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "backend-engineer": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "frontend-engineer": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "qa": { "status": "idle", "current_ticket": null, "iterations": 0 },
+    "design-enforcer": { "status": "idle", "current_ticket": null, "iterations": 0 }
   },
   "sprint": {
     "status": "active",
-    "total_tickets": 10,
+    "total_tickets": 66,
     "completed_tickets": 0,
     "blocked_tickets": 0,
-    "iteration": 8,
-    "focus": "MVP-18 Audit Trail (T1-T10)",
-    "notes": "T1-T8 code-complete. 6 PRs open: #382→#385→#386→#387→#388→#389 (stacked). Assigning T9 (#258) and T10 (#259) to backend-engineer on stacked branches. T11-T13 deferred until PR chain merges to avoid 11-deep stacking. Reviewer must merge #382 first (foundation), then sequential. All CI failures pre-existing on main."
+    "iteration": 0,
+    "focus": "Wave 1: MVP-17 Notifications (7 tickets)",
+    "notes": "Sprint covering MVP-13 through MVP-17. Wave execution order: 1 (MVP-17, 7 tickets) → 2 (MVP-13, 13 tickets) → 3 (MVP-14, 14 tickets) → 4A+4B (MVP-15+16, 32 tickets parallel). Backend → Frontend → QA → Design within each wave.",
+    "waves": {
+      "1": { "milestone": "MVP-17", "ticket_count": 7, "status": "active" },
+      "2": { "milestone": "MVP-13", "ticket_count": 13, "status": "pending" },
+      "3": { "milestone": "MVP-14", "ticket_count": 14, "status": "pending" },
+      "4": { "milestone": "MVP-15 + MVP-16", "ticket_count": 32, "status": "pending" }
+    }
   }
 }
