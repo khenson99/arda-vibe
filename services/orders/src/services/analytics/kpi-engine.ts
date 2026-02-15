@@ -1,5 +1,5 @@
 import { db, schema } from '@arda/db';
-import { eq, and, sql, gte, lte, lt, isNotNull } from 'drizzle-orm';
+import { eq, and, sql, gte, lt, isNotNull } from 'drizzle-orm';
 import { createLogger } from '@arda/config';
 
 const log = createLogger('orders:kpi-engine');
@@ -134,6 +134,7 @@ async function computeFillRate(
 ): Promise<number> {
   // Fill Rate = (receipts where ALL lines have quantityAccepted >= quantityExpected) / total receipts * 100
   // A receipt is "fully filled" when every receipt line accepted the expected quantity.
+  // Only count receipts with a known order_type (purchase_order, transfer_order, work_order).
   const facilityJoin = facilityIds?.length
     ? sql` AND (
         (r.order_type = 'purchase_order' AND r.order_id IN (
@@ -162,6 +163,7 @@ async function computeFillRate(
     FROM orders.receipts r
     JOIN orders.receipt_lines rl ON rl.receipt_id = r.id
     WHERE r.tenant_id = ${tenantId}
+      AND r.order_type IN ('purchase_order', 'transfer_order', 'work_order')
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
       AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityJoin}
@@ -215,29 +217,34 @@ async function computeStockoutCount(
   endDate: Date,
   facilityIds?: string[],
 ): Promise<number> {
-  // Stockout count = number of distinct part+facility combos where qty_on_hand <= 0
-  // and the ledger was updated within the given date range.
-  const conditions = [
-    eq(schema.inventoryLedger.tenantId, tenantId),
-    lte(schema.inventoryLedger.qtyOnHand, 0),
-    gte(schema.inventoryLedger.updatedAt, startDate),
-    lt(schema.inventoryLedger.updatedAt, endDate),
-  ];
+  // Stockout count = number of distinct stockout *events* within the date range.
+  // A stockout event is an audit log entry where an inventory_ledger record
+  // transitioned from qty_on_hand > 0 to qty_on_hand <= 0.
+  // This uses the audit log instead of a point-in-time ledger snapshot so that
+  // the result is properly time-windowed.
+  const facilityFilter = facilityIds?.length
+    ? sql` AND a.entity_id IN (
+        SELECT il.id FROM locations.inventory_ledger il
+        WHERE il.tenant_id = ${tenantId}
+          AND il.facility_id = ANY(${facilityIds})
+      )`
+    : sql``;
 
-  if (facilityIds?.length) {
-    conditions.push(
-      sql`${schema.inventoryLedger.facilityId} = ANY(${facilityIds})` as ReturnType<typeof eq>,
-    );
-  }
+  const result = await db.execute(sql`
+    SELECT count(*)::int AS stockout_events
+    FROM audit.audit_log a
+    WHERE a.tenant_id = ${tenantId}
+      AND a.entity_type = 'inventory_ledger'
+      AND a.action IN ('inventory.adjusted', 'inventory.ledger_updated')
+      AND a.timestamp >= ${startDate.toISOString()}::timestamptz
+      AND a.timestamp < ${endDate.toISOString()}::timestamptz
+      AND (a.previous_state->>'qtyOnHand')::int > 0
+      AND (a.new_state->>'qtyOnHand')::int <= 0
+      ${facilityFilter}
+  `);
 
-  const result = await db
-    .select({
-      stockouts: sql<number>`count(*)::int`,
-    })
-    .from(schema.inventoryLedger)
-    .where(and(...conditions));
-
-  return result[0]?.stockouts ?? 0;
+  const rows = result as unknown as Array<{ stockout_events: number }>;
+  return rows[0]?.stockout_events ?? 0;
 }
 
 async function computeAvgCycleTime(
@@ -282,6 +289,7 @@ async function computeOrderAccuracy(
 ): Promise<number> {
   // Order Accuracy = (receipt lines with zero defects) / (total receipt lines) * 100
   // A line is accurate when quantityDamaged = 0 AND quantityRejected = 0
+  // Only count receipts with a known order_type (purchase_order, transfer_order, work_order).
   const facilityJoin = facilityIds?.length
     ? sql` AND (
         (r.order_type = 'purchase_order' AND r.order_id IN (
@@ -305,6 +313,7 @@ async function computeOrderAccuracy(
     FROM orders.receipt_lines rl
     JOIN orders.receipts r ON r.id = rl.receipt_id
     WHERE rl.tenant_id = ${tenantId}
+      AND r.order_type IN ('purchase_order', 'transfer_order', 'work_order')
       AND r.created_at >= ${startDate.toISOString()}::timestamptz
       AND r.created_at < ${endDate.toISOString()}::timestamptz
       ${facilityJoin}
