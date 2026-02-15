@@ -20,6 +20,7 @@ import { automationRouter } from './routes/automation.routes.js';
 import { inventoryRouter } from './routes/inventory.routes.js';
 import { analyticsRouter } from './routes/analytics.routes.js';
 import { orderHistoryRouter } from './routes/order-history.routes.js';
+import { customersRouter } from './routes/customers.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { startQueueRiskScheduler } from './services/queue-risk-scheduler.service.js';
 import { startTransferAutomationListener, type TransferAutomationListener } from './services/transfer-automation-listener.js';
@@ -71,6 +72,7 @@ app.use('/automation', automationRouter);
 app.use('/inventory', inventoryRouter);
 app.use('/analytics', analyticsRouter);
 app.use('/order-history', orderHistoryRouter);
+app.use('/customers', customersRouter);
 
 app.use(errorHandler);
 
