@@ -134,6 +134,13 @@
       "when": 1772049600000,
       "tag": "0014_order_issues_resolutions",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1772222400000,
+      "tag": "0017_sales_customers_visibility",
+      "breakpoints": true
     }
   ]
 }
