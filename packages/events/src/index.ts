@@ -206,6 +206,29 @@ export interface LifecycleOrderLinkedEvent {
   timestamp: string;
 }
 
+// ─── Order Issue Events ─────────────────────────────────────────────
+export interface OrderIssueCreatedEvent {
+  type: 'order.issue_created';
+  tenantId: string;
+  issueId: string;
+  orderId: string;
+  orderType: 'purchase_order' | 'work_order' | 'transfer_order';
+  category: string;
+  priority: string;
+  timestamp: string;
+}
+
+export interface OrderIssueStatusChangedEvent {
+  type: 'order.issue_status_changed';
+  tenantId: string;
+  issueId: string;
+  orderId: string;
+  orderType: string;
+  fromStatus: string;
+  toStatus: string;
+  timestamp: string;
+}
+
 // ─── Receiving Events ────────────────────────────────────────────────
 export interface ReceivingCompletedEvent {
   type: 'receiving.completed';
@@ -467,7 +490,9 @@ export type ArdaEvent =
   | AutomationCardStageChangedEvent
   | AutomationEscalatedEvent
   | InventoryUpdatedEvent
-  | ScanConflictDetectedEvent;
+  | ScanConflictDetectedEvent
+  | OrderIssueCreatedEvent
+  | OrderIssueStatusChangedEvent;
 
 // ─── Event Channel Names ────────────────────────────────────────────
 const CHANNEL_PREFIX = 'arda:events';

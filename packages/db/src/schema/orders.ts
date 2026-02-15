@@ -7,6 +7,7 @@ import {
   boolean,
   integer,
   numeric,
+  jsonb,
   index,
   uniqueIndex,
   pgEnum,
@@ -682,5 +683,133 @@ export const leadTimeHistoryRelations = relations(leadTimeHistory, ({ one }) => 
   transferOrder: one(transferOrders, {
     fields: [leadTimeHistory.transferOrderId],
     references: [transferOrders.id],
+  }),
+}));
+
+// ─── Order Issue Enums ─────────────────────────────────────────────
+export const orderIssueCategoryEnum = pgEnum('order_issue_category', [
+  'wrong_items',
+  'wrong_quantity',
+  'damaged',
+  'late_delivery',
+  'quality_defect',
+  'pricing_discrepancy',
+  'missing_documentation',
+  'other',
+]);
+
+export const orderIssuePriorityEnum = pgEnum('order_issue_priority', [
+  'low',
+  'medium',
+  'high',
+  'critical',
+]);
+
+export const orderIssueStatusEnum = pgEnum('order_issue_status', [
+  'open',
+  'in_progress',
+  'waiting_vendor',
+  'resolved',
+  'closed',
+  'escalated',
+]);
+
+export const resolutionActionTypeEnum = pgEnum('resolution_action_type', [
+  'contact_vendor',
+  'return_initiated',
+  'credit_requested',
+  'credit_received',
+  'replacement_ordered',
+  'reorder',
+  'accept_as_is',
+  'escalated',
+  'note_added',
+  'status_changed',
+]);
+
+// ─── Order Issues ──────────────────────────────────────────────────
+export const orderIssues = ordersSchema.table(
+  'order_issues',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    orderId: uuid('order_id').notNull(),
+    orderType: varchar('order_type', { length: 30 }).notNull(), // purchase_order | work_order | transfer_order
+    category: orderIssueCategoryEnum('category').notNull(),
+    priority: orderIssuePriorityEnum('priority').notNull().default('medium'),
+    status: orderIssueStatusEnum('status').notNull().default('open'),
+    title: varchar('title', { length: 255 }).notNull(),
+    description: text('description'),
+    reportedByUserId: uuid('reported_by_user_id'),
+    assignedToUserId: uuid('assigned_to_user_id'),
+    resolvedByUserId: uuid('resolved_by_user_id'),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    relatedReceiptId: uuid('related_receipt_id'),
+    relatedExceptionId: uuid('related_exception_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('order_issue_tenant_idx').on(table.tenantId),
+    index('order_issue_order_idx').on(table.orderId),
+    index('order_issue_status_idx').on(table.tenantId, table.status),
+    index('order_issue_category_idx').on(table.tenantId, table.category),
+    index('order_issue_priority_idx').on(table.tenantId, table.priority),
+    index('order_issue_assigned_idx').on(table.assignedToUserId),
+  ]
+);
+
+// ─── Order Issue Resolution Steps ──────────────────────────────────
+export const orderIssueResolutionSteps = ordersSchema.table(
+  'order_issue_resolution_steps',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    issueId: uuid('issue_id')
+      .notNull()
+      .references(() => orderIssues.id, { onDelete: 'cascade' }),
+    actionType: resolutionActionTypeEnum('action_type').notNull(),
+    description: text('description'),
+    performedByUserId: uuid('performed_by_user_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('issue_step_tenant_idx').on(table.tenantId),
+    index('issue_step_issue_idx').on(table.issueId),
+    index('issue_step_type_idx').on(table.actionType),
+  ]
+);
+
+// ─── Order Notes ───────────────────────────────────────────────────
+export const orderNotes = ordersSchema.table(
+  'order_notes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    orderId: uuid('order_id').notNull(),
+    orderType: varchar('order_type', { length: 30 }).notNull(),
+    content: text('content').notNull(),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('order_note_tenant_idx').on(table.tenantId),
+    index('order_note_order_idx').on(table.orderId),
+  ]
+);
+
+// ─── Order Issue Relations ─────────────────────────────────────────
+export const orderIssuesRelations = relations(orderIssues, ({ many }) => ({
+  resolutionSteps: many(orderIssueResolutionSteps),
+}));
+
+export const orderIssueResolutionStepsRelations = relations(orderIssueResolutionSteps, ({ one }) => ({
+  issue: one(orderIssues, {
+    fields: [orderIssueResolutionSteps.issueId],
+    references: [orderIssues.id],
   }),
 }));
