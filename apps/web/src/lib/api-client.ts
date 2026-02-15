@@ -1029,6 +1029,40 @@ export async function fetchNotifications(token: string): Promise<NotificationRec
   return response.data;
 }
 
+export interface NotificationListParams {
+  unreadOnly?: boolean;
+  types?: string[];
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface NotificationListResponse {
+  data: NotificationRecord[];
+  count: number;
+  totalCount: number;
+}
+
+export async function fetchNotificationsPaginated(
+  token: string,
+  params: NotificationListParams = {},
+): Promise<NotificationListResponse> {
+  const searchParams = new URLSearchParams();
+
+  if (params.unreadOnly) searchParams.set("unreadOnly", "true");
+  if (params.types && params.types.length > 0) searchParams.set("types", params.types.join(","));
+  if (params.startDate) searchParams.set("startDate", params.startDate);
+  if (params.endDate) searchParams.set("endDate", params.endDate);
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  if (params.offset !== undefined) searchParams.set("offset", String(params.offset));
+
+  const qs = searchParams.toString();
+  const path = `/api/notifications${qs ? `?${qs}` : ""}`;
+
+  return apiRequest<NotificationListResponse>(path, { token });
+}
+
 export async function fetchUnreadNotificationCount(token: string): Promise<number> {
   const response = await apiRequest<{ count: number }>("/api/notifications/unread-count", {
     token,
@@ -1043,11 +1077,76 @@ export async function markNotificationRead(token: string, id: string): Promise<v
   });
 }
 
+export async function markNotificationUnread(token: string, id: string): Promise<void> {
+  await apiRequest(`/api/notifications/${id}/unread`, {
+    method: "PATCH",
+    token,
+  });
+}
+
 export async function markAllNotificationsRead(token: string): Promise<void> {
   await apiRequest("/api/notifications/mark-all-read", {
     method: "POST",
     token,
   });
+}
+
+/* ── Notification Preferences ────────────────────────────────── */
+
+import type {
+  NotificationPreferencesMap,
+  NotificationPreferencesResponse,
+  DigestFrequency,
+} from "@/types/notification-preferences";
+
+export async function fetchNotificationPreferences(
+  token: string,
+): Promise<NotificationPreferencesMap> {
+  const response = await apiRequest<NotificationPreferencesResponse>(
+    "/api/notifications/preferences",
+    { token },
+  );
+  return response.data;
+}
+
+export async function updateNotificationPreferences(
+  token: string,
+  preferences: NotificationPreferencesMap,
+): Promise<NotificationPreferencesMap> {
+  const response = await apiRequest<NotificationPreferencesResponse>(
+    "/api/notifications/preferences",
+    {
+      method: "PUT",
+      token,
+      body: { preferences },
+    },
+  );
+  return response.data;
+}
+
+export async function fetchDigestFrequency(
+  token: string,
+): Promise<DigestFrequency> {
+  const response = await apiRequest<{ data: { frequency: DigestFrequency } }>(
+    "/api/notifications/digest-frequency",
+    { token },
+  );
+  return response.data.frequency;
+}
+
+export async function updateDigestFrequency(
+  token: string,
+  frequency: DigestFrequency,
+): Promise<DigestFrequency> {
+  const response = await apiRequest<{ data: { frequency: DigestFrequency } }>(
+    "/api/notifications/digest-frequency",
+    {
+      method: "PUT",
+      token,
+      body: { frequency },
+    },
+  );
+  return response.data.frequency;
 }
 
 /* ── Quick actions — Kanban ──────────────────────────────────── */
