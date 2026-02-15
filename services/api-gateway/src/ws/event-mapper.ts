@@ -28,7 +28,13 @@ export function mapBackendEventToWSEventType(event: ArdaEvent): WSEventType | nu
       if (event.orderType === 'purchase_order') return 'po:status_changed';
       if (event.orderType === 'work_order') return 'wo:status_changed';
       if (event.orderType === 'transfer_order') return 'transfer:status_changed';
+      if (event.orderType === 'sales_order') return 'so:status_changed';
       return null;
+    case 'sales_order.approved':
+    case 'sales_order.cancelled':
+      return 'so:status_changed';
+    case 'demand_signal.created':
+      return 'demand_signal:created';
     case 'production.step_completed':
       return 'wo:step_completed';
     case 'production.quantity_reported':

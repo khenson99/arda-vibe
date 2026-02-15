@@ -556,6 +556,8 @@ export const WS_EVENT_TYPES = [
   'po:status_changed',
   'wo:status_changed',
   'transfer:status_changed',
+  'so:status_changed',
+  'demand_signal:created',
   // Production events
   'wo:step_completed',
   'wo:quantity_reported',
@@ -689,6 +691,8 @@ export const WS_EVENT_TYPE_COVERAGE: Record<WSEventType, true> = {
   'po:status_changed': true,
   'wo:status_changed': true,
   'transfer:status_changed': true,
+  'so:status_changed': true,
+  'demand_signal:created': true,
   'wo:step_completed': true,
   'wo:quantity_reported': true,
   'wo:expedited': true,
