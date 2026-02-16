@@ -21,6 +21,8 @@ import { WODetailRoute } from "@/pages/orders/wo-detail";
 import { AnalyticsRoute } from "@/pages/analytics";
 import { AuditRoute } from "@/pages/admin/audit";
 import { CrossLocationInventoryRoute } from "@/pages/cross-location-inventory";
+import { FacilityInventoryDetailRoute } from "@/pages/inventory-facility-detail";
+import { TransferOrdersRoute } from "@/pages/transfer-orders";
 import { NotificationPreferencesRoute } from "@/pages/settings/notification-preferences";
 import type { AuthResponse, AuthSession } from "@/types";
 
@@ -142,6 +144,8 @@ function App() {
           <Route path="receiving" element={<ErrorBoundary><ReceivingRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="analytics" element={<ErrorBoundary><AnalyticsRoute session={session} /></ErrorBoundary>} />
           <Route path="inventory/cross-location" element={<ErrorBoundary><CrossLocationInventoryRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
+          <Route path="inventory/facilities/:facilityId" element={<ErrorBoundary><FacilityInventoryDetailRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
+          <Route path="transfer-orders" element={<ErrorBoundary><TransferOrdersRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="admin/audit" element={<ErrorBoundary><AuditRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="scan" element={<ErrorBoundary><ScanRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />
           <Route path="scan/:cardId" element={<ErrorBoundary><ScanRoute session={session} onUnauthorized={clearSession} /></ErrorBoundary>} />

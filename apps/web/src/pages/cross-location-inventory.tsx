@@ -1,18 +1,28 @@
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeftRight,
   Building2,
   Clock,
   DollarSign,
+  Factory,
   Loader2,
   Package,
+  PackageCheck,
+  SquareKanban,
   Triangle,
 } from "lucide-react";
 import { Badge, Button, Card, CardContent, Skeleton } from "@/components/ui";
 import { MetricCard } from "@/components/metric-card";
 import { ErrorBanner } from "@/components/error-banner";
 import { useCrossLocationMatrix, useCrossLocationSummary } from "@/hooks/use-cross-location-inventory";
+import {
+  fetchLoops,
+  fetchReceivingMetrics,
+  fetchWorkOrders,
+  isUnauthorized,
+  parseApiError,
+} from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { AuthSession, CrossLocationMatrixCell } from "@/types";
 
@@ -21,12 +31,31 @@ interface CrossLocationInventoryPageProps {
   onUnauthorized: () => void;
 }
 
-export function CrossLocationInventoryPage({ session }: CrossLocationInventoryPageProps) {
+interface IntegrationSnapshot {
+  activeWorkOrders: number;
+  totalReceipts: number;
+  openReceivingExceptions: number;
+  loopsTracked: number;
+  kanbanStatusCounts: Array<{ status: string; count: number }>;
+  refreshedAt: string;
+}
+
+export function CrossLocationInventoryPage({
+  session,
+  onUnauthorized,
+}: CrossLocationInventoryPageProps) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const token = session.tokens.accessToken;
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(50);
   const [selectedCell, setSelectedCell] = React.useState<CrossLocationMatrixCell | null>(null);
+  const [integrationSnapshot, setIntegrationSnapshot] = React.useState<IntegrationSnapshot | null>(null);
+  const [integrationLoading, setIntegrationLoading] = React.useState(true);
+  const [integrationError, setIntegrationError] = React.useState<Error | null>(null);
+
+  const facilityFilter = searchParams.get("facilityId") ?? undefined;
+  const partFilter = searchParams.get("partId") ?? undefined;
 
   const {
     data: summaryData,
@@ -40,13 +69,78 @@ export function CrossLocationInventoryPage({ session }: CrossLocationInventoryPa
     loading: matrixLoading,
     error: matrixError,
     refetch: refetchMatrix,
-  } = useCrossLocationMatrix(token, { page, pageSize });
+  } = useCrossLocationMatrix(token, {
+    page,
+    pageSize,
+    facilityId: facilityFilter,
+    partId: partFilter,
+  });
 
-  const error = summaryError || matrixError;
+  const refreshIntegration = React.useCallback(async () => {
+    if (!token) {
+      setIntegrationLoading(false);
+      return;
+    }
+
+    setIntegrationError(null);
+    setIntegrationLoading(true);
+
+    try {
+      const scopedFacilityIds = matrixData?.facilities.map((facility) => facility.id)
+        ?? (facilityFilter ? [facilityFilter] : []);
+
+      const [receivingMetrics, workOrdersResponse, loopsResponse] = await Promise.all([
+        fetchReceivingMetrics(token),
+        fetchWorkOrders(token, { page: 1, pageSize: 1, status: "in_progress" }),
+        (async () => {
+          const firstPage = await fetchLoops(token, { page: 1, pageSize: 200 });
+          let loops = [...firstPage.data];
+          const maxPages = Math.min(firstPage.pagination.totalPages, 5);
+          for (let loopPage = 2; loopPage <= maxPages; loopPage += 1) {
+            const nextPage = await fetchLoops(token, { page: loopPage, pageSize: 200 });
+            loops = loops.concat(nextPage.data);
+          }
+          return loops;
+        })(),
+      ]);
+
+      const scopedLoops = scopedFacilityIds.length > 0
+        ? loopsResponse.filter((loop) => scopedFacilityIds.includes(loop.facilityId))
+        : loopsResponse;
+
+      const byStatus = new Map<string, number>();
+      for (const loop of scopedLoops) {
+        const key = loop.status || "unknown";
+        byStatus.set(key, (byStatus.get(key) ?? 0) + 1);
+      }
+
+      setIntegrationSnapshot({
+        activeWorkOrders: workOrdersResponse.pagination.total,
+        totalReceipts: receivingMetrics.totalReceipts,
+        openReceivingExceptions: receivingMetrics.totalExceptions,
+        loopsTracked: scopedLoops.length,
+        kanbanStatusCounts: Array.from(byStatus.entries())
+          .map(([status, count]) => ({ status, count }))
+          .sort((a, b) => b.count - a.count),
+        refreshedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      if (isUnauthorized(err)) {
+        onUnauthorized();
+        return;
+      }
+      setIntegrationError(new Error(parseApiError(err)));
+    } finally {
+      setIntegrationLoading(false);
+    }
+  }, [facilityFilter, matrixData?.facilities, onUnauthorized, token]);
+
+  const error = summaryError || matrixError || integrationError;
   const handleRefresh = React.useCallback(() => {
     void refetchSummary();
     void refetchMatrix();
-  }, [refetchSummary, refetchMatrix]);
+    void refreshIntegration();
+  }, [refetchSummary, refetchMatrix, refreshIntegration]);
 
   const handleCellClick = React.useCallback((cell: CrossLocationMatrixCell) => {
     setSelectedCell(cell);
@@ -64,23 +158,66 @@ export function CrossLocationInventoryPage({ session }: CrossLocationInventoryPa
     setPage(newPage);
   }, []);
 
+  React.useEffect(() => {
+    void refreshIntegration();
+  }, [refreshIntegration]);
+
+  React.useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void refetchSummary();
+      void refetchMatrix();
+      void refreshIntegration();
+    }, 30_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [refetchMatrix, refetchSummary, refreshIntegration]);
+
+  React.useEffect(() => {
+    const handleFocus = () => {
+      void refetchSummary();
+      void refetchMatrix();
+      void refreshIntegration();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [refetchMatrix, refetchSummary, refreshIntegration]);
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Cross-Location Inventory</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Network-wide stock visibility with facility-part matrix
+          Network-wide stock visibility connected to orders, transfers, receiving, and production
         </p>
       </div>
 
       {error && <ErrorBanner message={error.message} onRetry={handleRefresh} />}
 
+      {(facilityFilter || partFilter) && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
+            <div className="text-xs text-muted-foreground">
+              Filtered view:
+              {facilityFilter && (
+                <span className="ml-2 rounded-full bg-muted px-2 py-1">facility: {facilityFilter}</span>
+              )}
+              {partFilter && (
+                <span className="ml-2 rounded-full bg-muted px-2 py-1">part: {partFilter}</span>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => navigate("/inventory/cross-location")}>
+              Clear filters
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* KPI Cards */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {summaryLoading ? (
           <>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i}>
+            {Array.from({ length: 4 }).map((_, idx) => (
+              <Card key={idx}>
                 <CardContent className="space-y-3 p-4">
                   <Skeleton className="h-3 w-24" />
                   <Skeleton className="h-8 w-16" />
@@ -121,6 +258,86 @@ export function CrossLocationInventoryPage({ session }: CrossLocationInventoryPa
           </>
         )}
       </section>
+
+      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <Button variant="outline" className="justify-start" onClick={() => navigate("/queue")}>
+          <ArrowLeftRight className="mr-2 h-4 w-4" />
+          Order Queue
+        </Button>
+        <Button variant="outline" className="justify-start" onClick={() => navigate("/transfer-orders")}>
+          <ArrowLeftRight className="mr-2 h-4 w-4" />
+          Transfer Workflows
+        </Button>
+        <Button variant="outline" className="justify-start" onClick={() => navigate("/receiving")}>
+          <PackageCheck className="mr-2 h-4 w-4" />
+          Receiving
+        </Button>
+        <Button variant="outline" className="justify-start" onClick={() => navigate("/loops")}>
+          <SquareKanban className="mr-2 h-4 w-4" />
+          Kanban Loops
+        </Button>
+        <Button variant="outline" className="justify-start" onClick={() => navigate("/cards")}>
+          <Factory className="mr-2 h-4 w-4" />
+          Production Cards
+        </Button>
+      </section>
+
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Module Integration Snapshot</h2>
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              Refresh
+            </Button>
+          </div>
+
+          {integrationLoading && !integrationSnapshot ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, idx) => (
+                <Skeleton key={idx} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : integrationSnapshot ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Active Production Work Orders</p>
+                  <p className="mt-1 text-lg font-semibold">{integrationSnapshot.activeWorkOrders}</p>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Receiving Receipts Processed</p>
+                  <p className="mt-1 text-lg font-semibold">{integrationSnapshot.totalReceipts}</p>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Open Receiving Exceptions</p>
+                  <p className="mt-1 text-lg font-semibold">{integrationSnapshot.openReceivingExceptions}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Kanban loop statuses across visible facilities ({integrationSnapshot.loopsTracked} tracked)
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {integrationSnapshot.kanbanStatusCounts.length > 0 ? (
+                    integrationSnapshot.kanbanStatusCounts.map((entry) => (
+                      <Badge key={entry.status} variant="outline">
+                        {entry.status}: {entry.count}
+                      </Badge>
+                    ))
+                  ) : (
+                    <Badge variant="secondary">No loops in current scope</Badge>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Last refreshed {new Date(integrationSnapshot.refreshedAt).toLocaleTimeString()}
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">No integration data available.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Facility-Part Matrix */}
       <Card>
@@ -212,7 +429,15 @@ export function CrossLocationInventoryPage({ session }: CrossLocationInventoryPa
 
       {/* Cell Detail Modal */}
       {selectedCell && (
-        <CellDetailModal cell={selectedCell} onClose={handleCloseCellDetail} />
+        <CellDetailModal
+          cell={selectedCell}
+          onClose={handleCloseCellDetail}
+          onOpenFacility={() => navigate(`/inventory/facilities/${selectedCell.facilityId}`)}
+          onOpenTransferOrders={() => navigate("/transfer-orders")}
+          onOpenQueue={() => navigate("/queue")}
+          onOpenKanban={() => navigate("/loops")}
+          onOpenReceiving={() => navigate("/receiving")}
+        />
       )}
     </div>
   );
@@ -342,12 +567,25 @@ function MatrixCell({ cell, onClick }: MatrixCellProps) {
 interface CellDetailModalProps {
   cell: CrossLocationMatrixCell;
   onClose: () => void;
+  onOpenFacility: () => void;
+  onOpenTransferOrders: () => void;
+  onOpenQueue: () => void;
+  onOpenKanban: () => void;
+  onOpenReceiving: () => void;
 }
 
-function CellDetailModal({ cell, onClose }: CellDetailModalProps) {
+function CellDetailModal({
+  cell,
+  onClose,
+  onOpenFacility,
+  onOpenTransferOrders,
+  onOpenQueue,
+  onOpenKanban,
+  onOpenReceiving,
+}: CellDetailModalProps) {
   React.useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
         onClose();
       }
     };
@@ -362,7 +600,7 @@ function CellDetailModal({ cell, onClose }: CellDetailModalProps) {
     >
       <Card
         className="w-full max-w-md"
-        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        onClick={(event: React.MouseEvent) => event.stopPropagation()}
       >
         <CardContent className="space-y-4 p-6">
           <div>
@@ -409,6 +647,16 @@ function CellDetailModal({ cell, onClose }: CellDetailModalProps) {
                 <Badge variant="warning">Near Reorder Point</Badge>
               </div>
             )}
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button variant="outline" onClick={onOpenFacility}>Facility Inventory</Button>
+            <Button variant="outline" onClick={onOpenTransferOrders}>Transfer Orders</Button>
+            <Button variant="outline" onClick={onOpenQueue}>Order Queue</Button>
+            <Button variant="outline" onClick={onOpenKanban}>Kanban Loops</Button>
+            <Button variant="outline" className="sm:col-span-2" onClick={onOpenReceiving}>
+              Receiving
+            </Button>
           </div>
 
           <Button onClick={onClose} className="w-full">
