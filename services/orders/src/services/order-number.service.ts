@@ -1,20 +1,20 @@
 import { db, schema } from '@arda/db';
 import { eq, and, sql, like } from 'drizzle-orm';
 
-const { purchaseOrders, workOrders, transferOrders } = schema;
+const { purchaseOrders, workOrders, transferOrders, salesOrders } = schema;
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Generate the next sequential order number for a given tenant and type.
- * Format: PO-YYYYMMDD-XXXX, WO-YYYYMMDD-XXXX, TO-YYYYMMDD-XXXX
+ * Format: PO-YYYYMMDD-XXXX, WO-YYYYMMDD-XXXX, TO-YYYYMMDD-XXXX, SO-YYYYMMDD-XXXX
  *
  * Uses pg_advisory_xact_lock to serialize concurrent access per tenant/type/date,
  * preventing duplicate order numbers under concurrent requests.
  */
 async function getNextNumber(
   tenantId: string,
-  prefix: 'PO' | 'WO' | 'TO',
+  prefix: 'PO' | 'WO' | 'TO' | 'SO',
   tx?: DbTransaction
 ): Promise<string> {
   const today = new Date();
@@ -59,6 +59,20 @@ async function getNextNumber(
         const last = result[0].woNumber.split('-').pop();
         maxNumber = parseInt(last || '0', 10);
       }
+    } else if (prefix === 'SO') {
+      const result = await executor
+        .select({ soNumber: salesOrders.soNumber })
+        .from(salesOrders)
+        .where(
+          and(eq(salesOrders.tenantId, tenantId), like(salesOrders.soNumber, pattern))
+        )
+        .orderBy(sql`${salesOrders.soNumber} DESC`)
+        .limit(1);
+
+      if (result.length > 0) {
+        const last = result[0].soNumber.split('-').pop();
+        maxNumber = parseInt(last || '0', 10);
+      }
     } else {
       const result = await executor
         .select({ toNumber: transferOrders.toNumber })
@@ -97,4 +111,8 @@ export async function getNextWONumber(tenantId: string, tx?: DbTransaction) {
 
 export async function getNextTONumber(tenantId: string, tx?: DbTransaction) {
   return getNextNumber(tenantId, 'TO', tx);
+}
+
+export async function getNextSONumber(tenantId: string, tx?: DbTransaction) {
+  return getNextNumber(tenantId, 'SO', tx);
 }
