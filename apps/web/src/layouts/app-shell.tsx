@@ -151,6 +151,7 @@ const NAV_SECTIONS: NavSection[] = [
     children: [
       { to: '/parts', label: 'Items', icon: Boxes },
       { to: '/inventory/cross-location', label: 'Network Inventory', icon: Network },
+      { to: '/transfer-orders', label: 'Transfers', icon: ArrowUpDown },
     ],
   },
   {
